@@ -60,7 +60,7 @@ jobs:
         with:
           context: ./realassessoria
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/realassessoria:latest
+          tags: ghcr.io/${{ github.repository_owner }}/real-assessoria:latest
           cache-from: type=gha,scope=realassessoria
           cache-to: type=gha,scope=realassessoria,mode=max
 
