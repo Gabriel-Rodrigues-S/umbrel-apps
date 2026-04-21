@@ -2,7 +2,9 @@
 Aplicação FastAPI principal.
 Rotas:
   GET  /                          → UI (index.html)
+  POST /api/playlist-info         → extrai metadados de playlist sem baixar
   POST /api/download              → inicia download, retorna download_id
+  POST /api/cancel/{id}           → cancela download em andamento
   GET  /api/progress/{id}         → SSE stream de progresso
   GET  /api/history               → histórico de downloads (SQLite)
   GET  /api/files                 → lista arquivos na pasta de downloads
@@ -15,6 +17,7 @@ import json
 import os
 import uuid
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
@@ -29,7 +32,9 @@ from app.database import (
 )
 from app.downloader import (
     DOWNLOAD_DIR,
+    cancel_download,
     get_format_label,
+    get_playlist_info,
     progress_store,
     start_download,
 )
@@ -55,11 +60,30 @@ async def index() -> str:
     return html_path.read_text(encoding="utf-8")
 
 
+# ─── API: info de playlist ─────────────────────────────────────────────────────
+
+class PlaylistInfoRequest(BaseModel):
+    url: str
+
+
+@app.post("/api/playlist-info")
+async def api_playlist_info(req: PlaylistInfoRequest) -> dict:
+    url = req.url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL não pode ser vazia.")
+    try:
+        result = await asyncio.to_thread(get_playlist_info, url)
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
 # ─── API: iniciar download ─────────────────────────────────────────────────────
 
 class DownloadRequest(BaseModel):
     url: str
     format: str = "video-720"
+    playlist_items: Optional[str] = None  # ex: "1,3,5-7"
 
 
 @app.post("/api/download")
@@ -76,9 +100,20 @@ async def api_start_download(req: DownloadRequest) -> dict:
     format_label = get_format_label(req.format)
 
     create_download(download_id, url, format_label)
-    start_download(download_id, url, req.format)
+    start_download(download_id, url, req.format, req.playlist_items)
 
     return {"download_id": download_id, "status": "started"}
+
+
+# ─── API: cancelar download ────────────────────────────────────────────────────
+
+@app.post("/api/cancel/{download_id}")
+async def api_cancel(download_id: str) -> dict:
+    found = cancel_download(download_id)
+    if not found:
+        # Pode já ter terminado — não é erro
+        return {"status": "not_active"}
+    return {"status": "cancelling"}
 
 
 # ─── API: progresso via SSE ────────────────────────────────────────────────────
@@ -105,7 +140,7 @@ async def api_progress(download_id: str) -> StreamingResponse:
 
             yield f"data: {json.dumps(data)}\n\n"
 
-            if data.get("status") in ("complete", "error"):
+            if data.get("status") in ("complete", "error", "cancelled"):
                 break
 
             await asyncio.sleep(0.8)

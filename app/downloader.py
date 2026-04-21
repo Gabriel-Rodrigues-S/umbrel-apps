@@ -10,7 +10,7 @@ Celery/Redis. Revisitar se volume de usuários simultâneos crescer.
 import os
 import threading
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 import yt_dlp
 
@@ -19,6 +19,9 @@ DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "/app/downloads")
 # Mapa em memória: {download_id: {status, percent, speed, eta, title, ...}}
 # Lido pela rota SSE /api/progress/{id}
 progress_store: dict[str, dict[str, Any]] = {}
+
+# Flags de cancelamento: {download_id: threading.Event}
+cancel_flags: dict[str, threading.Event] = {}
 
 # ─── Opções de formato disponíveis ────────────────────────────────────────────
 
@@ -51,14 +54,74 @@ FORMAT_OPTIONS: dict[str, dict] = {
     },
 }
 
+_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
+
 
 def get_format_label(format_key: str) -> str:
     return FORMAT_OPTIONS.get(format_key, {}).get("label", format_key)
 
 
+# ─── Informações de playlist (sem baixar) ─────────────────────────────────────
+
+def get_playlist_info(url: str) -> dict:
+    """Extrai metadados de playlist sem baixar. Retorna lista de entradas."""
+    ydl_opts = {
+        "extract_flat": "in_playlist",
+        "quiet": True,
+        "no_warnings": True,
+        "nocheckcertificate": True,
+        "http_headers": {"User-Agent": _UA},
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+
+    if not info or info.get("_type") != "playlist":
+        return {"is_playlist": False}
+
+    entries = []
+    for i, entry in enumerate(info.get("entries") or []):
+        if not entry:
+            continue
+        duration = entry.get("duration")
+        dur_str = ""
+        if isinstance(duration, (int, float)) and duration > 0:
+            total_s = int(duration)
+            m, s = divmod(total_s, 60)
+            h, m2 = divmod(m, 60)
+            dur_str = f"{h}:{m2:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+        entries.append({
+            "index": i + 1,
+            "title": entry.get("title") or f"Vídeo {i + 1}",
+            "duration": dur_str,
+            "uploader": entry.get("uploader") or entry.get("channel") or "",
+        })
+
+    return {
+        "is_playlist": True,
+        "title": info.get("title") or "Playlist",
+        "count": len(entries),
+        "entries": entries,
+    }
+
+
+# ─── Exceção interna de cancelamento ──────────────────────────────────────────
+
+class _DownloadCancelled(Exception):
+    pass
+
+
 # ─── Lógica de download (roda em thread separada) ─────────────────────────────
 
-def _run_download(download_id: str, url: str, format_key: str) -> None:
+def _run_download(
+    download_id: str,
+    url: str,
+    format_key: str,
+    playlist_items: Optional[str] = None,
+) -> None:
     """Executa o download e atualiza progress_store e banco de dados."""
     from app.database import update_download  # import local para evitar circular
 
@@ -78,8 +141,12 @@ def _run_download(download_id: str, url: str, format_key: str) -> None:
     }
 
     fmt = FORMAT_OPTIONS.get(format_key, FORMAT_OPTIONS["video-720"])
+    cancel_event = cancel_flags.get(download_id, threading.Event())
 
     def progress_hook(d: dict) -> None:
+        if cancel_event.is_set():
+            raise _DownloadCancelled("Cancelado pelo usuário")
+
         store = progress_store[download_id]
 
         if d["status"] == "downloading":
@@ -124,18 +191,14 @@ def _run_download(download_id: str, url: str, format_key: str) -> None:
         "ignoreerrors": False,
         "geo_bypass": True,
         "extractor_retries": 3,
-        "http_headers": {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            )
-        },
+        "http_headers": {"User-Agent": _UA},
     }
     if "merge_output_format" in fmt:
         ydl_opts["merge_output_format"] = fmt["merge_output_format"]
     if "postprocessors" in fmt:
         ydl_opts["postprocessors"] = fmt["postprocessors"]
+    if playlist_items:
+        ydl_opts["playlist_items"] = playlist_items
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -145,15 +208,12 @@ def _run_download(download_id: str, url: str, format_key: str) -> None:
         is_playlist = 1 if info and info.get("_type") == "playlist" else 0
         playlist_total = info.get("n_entries", 0) if info else 0
 
-        # Pega o nome do arquivo final (após merge do ffmpeg)
-        # requested_downloads[0]['filepath'] contém o path real do arquivo final
         filename = ""
         if info:
             requested = info.get("requested_downloads") or []
             if requested:
                 filepath = requested[0].get("filepath", "")
                 filename = os.path.basename(filepath)
-            # Para playlists, pega o último item baixado
             elif info.get("_type") == "playlist":
                 entries = info.get("entries") or []
                 for entry in reversed(entries):
@@ -163,7 +223,6 @@ def _run_download(download_id: str, url: str, format_key: str) -> None:
                             filename = os.path.basename(req[0].get("filepath", ""))
                             break
 
-        # Fallback: arquivo mais recente na pasta de downloads
         if not filename and os.path.exists(DOWNLOAD_DIR):
             files = sorted(
                 [f for f in os.scandir(DOWNLOAD_DIR) if f.is_file()],
@@ -193,6 +252,12 @@ def _run_download(download_id: str, url: str, format_key: str) -> None:
             completed_at=datetime.now().isoformat(),
         )
 
+    except _DownloadCancelled:
+        progress_store[download_id].update(
+            {"status": "cancelled", "error": "Cancelado pelo usuário", "speed": "", "eta": ""}
+        )
+        update_download(download_id, status="cancelled")
+
     except Exception as exc:
         error_msg = str(exc)
         progress_store[download_id].update(
@@ -200,13 +265,31 @@ def _run_download(download_id: str, url: str, format_key: str) -> None:
         )
         update_download(download_id, status="error", error_msg=error_msg)
 
+    finally:
+        cancel_flags.pop(download_id, None)
 
-def start_download(download_id: str, url: str, format_key: str) -> None:
+
+def start_download(
+    download_id: str,
+    url: str,
+    format_key: str,
+    playlist_items: Optional[str] = None,
+) -> None:
     """Inicia o download em uma thread daemon de background."""
+    cancel_flags[download_id] = threading.Event()
     thread = threading.Thread(
         target=_run_download,
-        args=(download_id, url, format_key),
+        args=(download_id, url, format_key, playlist_items),
         daemon=True,
         name=f"dl-{download_id[:8]}",
     )
     thread.start()
+
+
+def cancel_download(download_id: str) -> bool:
+    """Sinaliza cancelamento. Retorna True se havia um download ativo."""
+    flag = cancel_flags.get(download_id)
+    if flag:
+        flag.set()
+        return True
+    return False

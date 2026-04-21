@@ -21,6 +21,7 @@
       --success:   #22c55e;
       --error:     #ef4444;
       --warning:   #f59e0b;
+      --cancelled: #a855f7;
       --radius:    12px;
       --shadow:    0 4px 24px rgba(0,0,0,.45);
     }
@@ -83,15 +84,6 @@
       padding: 24px;
       box-shadow: var(--shadow);
       margin-bottom: 20px;
-    }
-
-    .card-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: .06em;
-      margin-bottom: 16px;
     }
 
     /* ── Download Form ──────────────────────────────────────── */
@@ -215,17 +207,35 @@
       transition: width .5s ease;
       width: 0%;
     }
-    .progress-fill.done { background: var(--success); }
-    .progress-fill.fail { background: var(--error); }
+    .progress-fill.done      { background: var(--success); }
+    .progress-fill.fail      { background: var(--error); }
+    .progress-fill.cancelled { background: var(--cancelled); }
 
     .dl-meta {
       display: flex;
       gap: 16px;
       font-size: 12px;
       color: var(--muted);
+      align-items: center;
+      flex-wrap: wrap;
     }
 
     .dl-percent { font-weight: 700; color: var(--text); }
+
+    .btn-cancel {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11px;
+      padding: 3px 10px;
+      transition: border-color .15s, color .15s;
+      white-space: nowrap;
+      margin-left: auto;
+    }
+    .btn-cancel:hover:not(:disabled) { border-color: var(--error); color: var(--error); }
+    .btn-cancel:disabled { opacity: .5; cursor: not-allowed; }
 
     /* ── Badge ───────────────────────────────────────────────── */
     .badge {
@@ -236,10 +246,11 @@
       padding: 2px 10px;
       letter-spacing: .04em;
     }
-    .badge-downloading { background: rgba(255,51,51,.15); color: var(--accent); }
+    .badge-downloading { background: rgba(255,51,51,.15);  color: var(--accent); }
     .badge-complete    { background: rgba(34,197,94,.15);  color: var(--success); }
     .badge-error       { background: rgba(239,68,68,.15);  color: var(--error); }
     .badge-pending     { background: rgba(245,158,11,.15); color: var(--warning); }
+    .badge-cancelled   { background: rgba(168,85,247,.15); color: var(--cancelled); }
 
     /* ── History Table ───────────────────────────────────────── */
     .table-wrap { overflow-x: auto; }
@@ -311,12 +322,210 @@
     }
     .error-banner.visible { display: block; }
 
+    /* ── Playlist Modal ───────────────────────────────────────── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.75);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .modal-overlay.visible { display: flex; }
+
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      width: 100%;
+      max-width: 640px;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .modal-header {
+      padding: 20px 24px 16px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .modal-title {
+      font-size: 17px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .modal-subtitle {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .modal-toolbar {
+      padding: 10px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    .modal-toolbar label {
+      font-size: 13px;
+      color: var(--muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      user-select: none;
+    }
+
+    .modal-toolbar input[type="checkbox"] {
+      width: 15px;
+      height: 15px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .selected-count {
+      font-size: 13px;
+      color: var(--muted);
+      margin-left: auto;
+    }
+
+    .modal-list {
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .playlist-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 24px;
+      border-bottom: 1px solid var(--border);
+      transition: background .12s;
+      cursor: pointer;
+    }
+    .playlist-item:last-child { border-bottom: none; }
+    .playlist-item:hover { background: var(--surface2); }
+    .playlist-item.checked { background: rgba(255,51,51,.06); }
+
+    .playlist-item input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--accent);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .item-index {
+      font-size: 12px;
+      color: var(--muted);
+      min-width: 28px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .item-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .item-title {
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .item-meta {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 1px;
+    }
+
+    .modal-footer {
+      padding: 16px 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 10px;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 700;
+      padding: 11px 22px;
+      transition: background .15s;
+      white-space: nowrap;
+    }
+    .btn-primary:hover:not(:disabled) { background: #e02020; }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+
+    .btn-secondary {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 11px 22px;
+      transition: background .15s;
+      white-space: nowrap;
+    }
+    .btn-secondary:hover { background: var(--border); }
+
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 11px 18px;
+      transition: border-color .15s, color .15s;
+      margin-left: auto;
+    }
+    .btn-ghost:hover { border-color: var(--text); color: var(--text); }
+
+    /* loading spinner */
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255,255,255,.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     /* ── Responsive ──────────────────────────────────────────── */
     @media (max-width: 520px) {
       .url-row { flex-direction: column; }
       .format-row { flex-direction: column; }
       .btn-download { width: 100%; }
       .logo { font-size: 22px; }
+      .modal-footer { flex-direction: column; }
+      .btn-ghost { margin-left: 0; width: 100%; text-align: center; }
     }
   </style>
 </head>
@@ -326,7 +535,7 @@
   <!-- Header -->
   <header>
     <div class="logo">
-      <div class="logo-icon">▶</div>
+      <div class="logo-icon">&#9654;</div>
       Video Downloader
     </div>
     <p class="tagline">Baixe vídeos e músicas de qualquer plataforma direto no servidor</p>
@@ -348,13 +557,13 @@
 
     <div class="format-row">
       <select id="formatSelect">
-        <option value="video-1080">🎬 Vídeo 1080p (MP4)</option>
-        <option value="video-720" selected>🎬 Vídeo 720p (MP4)</option>
-        <option value="video-480">🎬 Vídeo 480p (MP4)</option>
-        <option value="audio-mp3">🎵 Apenas Áudio (MP3)</option>
+        <option value="video-1080">&#127916; Vídeo 1080p (MP4)</option>
+        <option value="video-720" selected>&#127916; Vídeo 720p (MP4)</option>
+        <option value="video-480">&#127916; Vídeo 480p (MP4)</option>
+        <option value="audio-mp3">&#127925; Apenas Áudio (MP3)</option>
       </select>
-      <button id="downloadBtn" class="btn-download" onclick="startDownload()">
-        ⬇&nbsp; Baixar
+      <button id="downloadBtn" class="btn-download" onclick="handleDownloadClick()">
+        &#11015;&#160; Baixar
       </button>
     </div>
   </div>
@@ -375,16 +584,45 @@
 
 </div>
 
+<!-- Playlist Selection Modal -->
+<div id="playlistModal" class="modal-overlay" onclick="closeModalOnOverlay(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modalPlaylistTitle">Playlist detectada</div>
+      <div class="modal-subtitle" id="modalPlaylistSubtitle"></div>
+    </div>
+    <div class="modal-toolbar">
+      <label>
+        <input type="checkbox" id="selectAllCheck" onchange="toggleSelectAll(this.checked)" />
+        Selecionar todos
+      </label>
+      <span class="selected-count" id="selectedCount">Nenhum selecionado</span>
+    </div>
+    <div class="modal-list" id="playlistItems"></div>
+    <div class="modal-footer">
+      <button class="btn-primary" id="btnDownloadSelected" onclick="downloadSelected()" disabled>
+        &#11015;&#160; Baixar selecionados
+      </button>
+      <button class="btn-secondary" onclick="downloadAll()">
+        &#11015;&#160; Baixar tudo
+      </button>
+      <button class="btn-ghost" onclick="closeModal()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
 <script>
   /* ─────────────────────────────────────────────────────────
-     Estado local: rastreia downloads ativos nesta sessão
+     Estado
   ───────────────────────────────────────────────────────── */
   const activeDownloads = {};  // {id: {eventSource, format}}
+  let _pendingUrl    = '';
+  let _pendingFormat = '';
 
   /* ─────────────────────────────────────────────────────────
-     Iniciar download
+     Botão principal: verifica se é playlist antes de baixar
   ───────────────────────────────────────────────────────── */
-  async function startDownload() {
+  async function handleDownloadClick() {
     const urlEl  = document.getElementById('urlInput');
     const fmtEl  = document.getElementById('formatSelect');
     const btn    = document.getElementById('downloadBtn');
@@ -401,40 +639,179 @@
       return;
     }
 
-    btn.disabled    = true;
-    btn.textContent = 'Iniciando...';
+    btn.disabled  = true;
+    btn.innerHTML = '<span class="spinner"></span>Verificando...';
 
     try {
-      const res = await fetch('/api/download', {
+      const res = await fetch('/api/playlist-info', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ url, format }),
+        body:    JSON.stringify({ url }),
       });
 
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail || `Erro ${res.status}`);
+      if (!res.ok) throw new Error('Erro ao verificar URL.');
+
+      const info = await res.json();
+
+      if (info.is_playlist && info.count > 0) {
+        _pendingUrl    = url;
+        _pendingFormat = format;
+        urlEl.value = '';
+        openPlaylistModal(info);
+      } else {
+        urlEl.value = '';
+        await startDownload(url, format, null);
       }
 
-      const { download_id } = await res.json();
-      urlEl.value = '';
-
-      // Mostrar card de progresso e conectar SSE
-      addProgressCard(download_id, url, format);
-      connectSSE(download_id, format);
-
     } catch (err) {
-      showError('Erro ao iniciar: ' + err.message);
+      showError('Erro: ' + err.message);
     } finally {
-      btn.disabled    = false;
-      btn.textContent = '⬇\u00a0 Baixar';
+      btn.disabled  = false;
+      btn.innerHTML = '&#11015;&#160; Baixar';
     }
   }
 
   function showError(msg) {
     const el = document.getElementById('formError');
-    el.textContent = '⚠ ' + msg;
+    el.textContent = '\u26a0 ' + msg;
     el.classList.add('visible');
+  }
+
+  /* ─────────────────────────────────────────────────────────
+     Iniciar download (chamado após escolha do usuário)
+  ───────────────────────────────────────────────────────── */
+  async function startDownload(url, format, playlistItems) {
+    try {
+      const body = { url, format };
+      if (playlistItems) body.playlist_items = playlistItems;
+
+      const res = await fetch('/api/download', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const b = await res.json().catch(() => ({}));
+        throw new Error(b.detail || 'Erro ' + res.status);
+      }
+
+      const { download_id } = await res.json();
+      addProgressCard(download_id, url, format);
+      connectSSE(download_id, format);
+
+    } catch (err) {
+      showError('Erro ao iniciar: ' + err.message);
+    }
+  }
+
+  /* ─────────────────────────────────────────────────────────
+     Modal de playlist
+  ───────────────────────────────────────────────────────── */
+  function openPlaylistModal(info) {
+    document.getElementById('modalPlaylistTitle').textContent = info.title;
+    document.getElementById('modalPlaylistSubtitle').textContent =
+      info.count + ' v\u00eddeo' + (info.count !== 1 ? 's' : '') +
+      ' encontrado' + (info.count !== 1 ? 's' : '');
+
+    const list = document.getElementById('playlistItems');
+    list.innerHTML = '';
+
+    info.entries.forEach(entry => {
+      const row = document.createElement('div');
+      row.className = 'playlist-item';
+      row.dataset.index = entry.index;
+
+      const metaParts = [];
+      if (entry.duration) metaParts.push(entry.duration);
+      if (entry.uploader) metaParts.push(entry.uploader);
+
+      const metaHtml = metaParts.length
+        ? '<div class="item-meta">' + escHtml(metaParts.join(' \u00b7 ')) + '</div>'
+        : '';
+
+      row.innerHTML =
+        '<input type="checkbox" onchange="onItemCheck()" />' +
+        '<span class="item-index">' + entry.index + '</span>' +
+        '<div class="item-info">' +
+          '<div class="item-title">' + escHtml(entry.title) + '</div>' +
+          metaHtml +
+        '</div>';
+
+      row.addEventListener('click', function(e) {
+        if (e.target.tagName === 'INPUT') return;
+        const cb = row.querySelector('input[type="checkbox"]');
+        cb.checked = !cb.checked;
+        onItemCheck();
+      });
+
+      list.appendChild(row);
+    });
+
+    document.getElementById('selectAllCheck').checked = false;
+    updateSelectedCount();
+    document.getElementById('playlistModal').classList.add('visible');
+  }
+
+  function closeModal() {
+    document.getElementById('playlistModal').classList.remove('visible');
+    _pendingUrl    = '';
+    _pendingFormat = '';
+  }
+
+  function closeModalOnOverlay(e) {
+    if (e.target === document.getElementById('playlistModal')) closeModal();
+  }
+
+  function toggleSelectAll(checked) {
+    document.querySelectorAll('#playlistItems .playlist-item').forEach(function(row) {
+      row.querySelector('input[type="checkbox"]').checked = checked;
+      row.classList.toggle('checked', checked);
+    });
+    updateSelectedCount();
+  }
+
+  function onItemCheck() {
+    document.querySelectorAll('#playlistItems .playlist-item').forEach(function(row) {
+      const cb = row.querySelector('input[type="checkbox"]');
+      row.classList.toggle('checked', cb.checked);
+    });
+    const total   = document.querySelectorAll('#playlistItems .playlist-item').length;
+    const checked = document.querySelectorAll('#playlistItems .playlist-item input:checked').length;
+    document.getElementById('selectAllCheck').checked = (checked === total && total > 0);
+    updateSelectedCount();
+  }
+
+  function updateSelectedCount() {
+    const checked = document.querySelectorAll('#playlistItems .playlist-item input:checked').length;
+    document.getElementById('selectedCount').textContent =
+      checked === 0
+        ? 'Nenhum selecionado'
+        : checked + ' selecionado' + (checked !== 1 ? 's' : '');
+    document.getElementById('btnDownloadSelected').disabled = (checked === 0);
+  }
+
+  function downloadSelected() {
+    const indices = [];
+    document.querySelectorAll('#playlistItems .playlist-item').forEach(function(row) {
+      if (row.querySelector('input[type="checkbox"]').checked) {
+        indices.push(row.dataset.index);
+      }
+    });
+    if (!indices.length) return;
+
+    const playlistItems = indices.join(',');
+    const url    = _pendingUrl;
+    const format = _pendingFormat;
+    closeModal();
+    startDownload(url, format, playlistItems);
+  }
+
+  function downloadAll() {
+    const url    = _pendingUrl;
+    const format = _pendingFormat;
+    closeModal();
+    startDownload(url, format, null);
   }
 
   /* ─────────────────────────────────────────────────────────
@@ -457,24 +834,36 @@
     const card = document.createElement('div');
     card.className = 'dl-card';
     card.id = 'card-' + id;
-    card.innerHTML = `
-      <div class="dl-card-header">
-        <div class="dl-title" id="title-${id}">Aguardando servidor...</div>
-        <div class="dl-format">${formatLabel(format)}</div>
-      </div>
-      <div class="progress-track">
-        <div class="progress-fill" id="fill-${id}"></div>
-      </div>
-      <div class="dl-meta">
-        <span class="dl-percent" id="pct-${id}">0%</span>
-        <span id="speed-${id}"></span>
-        <span id="eta-${id}"></span>
-        <span id="badge-${id}"><span class="badge badge-downloading">Baixando</span></span>
-      </div>
-    `;
+    card.innerHTML =
+      '<div class="dl-card-header">' +
+        '<div class="dl-title" id="title-' + id + '">Aguardando servidor...</div>' +
+        '<div class="dl-format">' + formatLabel(format) + '</div>' +
+      '</div>' +
+      '<div class="progress-track">' +
+        '<div class="progress-fill" id="fill-' + id + '"></div>' +
+      '</div>' +
+      '<div class="dl-meta">' +
+        '<span class="dl-percent" id="pct-' + id + '">0%</span>' +
+        '<span id="speed-' + id + '"></span>' +
+        '<span id="eta-' + id + '"></span>' +
+        '<span id="badge-' + id + '"><span class="badge badge-downloading">Baixando</span></span>' +
+        '<button class="btn-cancel" id="cancel-' + id + '" onclick="cancelDownload(\'' + id + '\')">&#10005; Cancelar</button>' +
+      '</div>';
 
     list.prepend(card);
     section.style.display = '';
+  }
+
+  /* ─────────────────────────────────────────────────────────
+     Cancelar download
+  ───────────────────────────────────────────────────────── */
+  async function cancelDownload(id) {
+    const btn = document.getElementById('cancel-' + id);
+    if (btn) { btn.disabled = true; btn.textContent = 'Cancelando...'; }
+
+    try {
+      await fetch('/api/cancel/' + id, { method: 'POST' });
+    } catch (_) { /* SSE vai notificar o resultado */ }
   }
 
   /* ─────────────────────────────────────────────────────────
@@ -482,42 +871,41 @@
   ───────────────────────────────────────────────────────── */
   function connectSSE(id, format) {
     const es = new EventSource('/api/progress/' + id);
-    activeDownloads[id] = { es, format };
+    activeDownloads[id] = { es: es, format: format };
 
-    es.onmessage = function (evt) {
+    es.onmessage = function(evt) {
       const data = JSON.parse(evt.data);
       updateCard(id, data);
 
-      if (data.status === 'complete' || data.status === 'error') {
+      if (data.status === 'complete' || data.status === 'error' || data.status === 'cancelled') {
         es.close();
         delete activeDownloads[id];
         loadHistory();
 
-        // Suaviza saída do card após 4 s
-        setTimeout(() => {
+        setTimeout(function() {
           const card = document.getElementById('card-' + id);
           if (card) card.style.opacity = '0.45';
         }, 4000);
       }
     };
 
-    es.onerror = function () { es.close(); };
+    es.onerror = function() { es.close(); };
   }
 
   function updateCard(id, d) {
-    const titleEl = document.getElementById('title-' + id);
-    const fillEl  = document.getElementById('fill-'  + id);
-    const pctEl   = document.getElementById('pct-'   + id);
-    const spdEl   = document.getElementById('speed-' + id);
-    const etaEl   = document.getElementById('eta-'   + id);
-    const badgeEl = document.getElementById('badge-' + id);
+    const titleEl  = document.getElementById('title-'  + id);
+    const fillEl   = document.getElementById('fill-'   + id);
+    const pctEl    = document.getElementById('pct-'    + id);
+    const spdEl    = document.getElementById('speed-'  + id);
+    const etaEl    = document.getElementById('eta-'    + id);
+    const badgeEl  = document.getElementById('badge-'  + id);
+    const cancelEl = document.getElementById('cancel-' + id);
 
     if (!titleEl) return;
 
-    // Título: exibir playlist_index se aplicável
     if (d.title) {
       titleEl.textContent = (d.playlist_total > 0)
-        ? `[${d.playlist_index}/${d.playlist_total}] ${d.title}`
+        ? '[' + d.playlist_index + '/' + d.playlist_total + '] ' + d.title
         : d.title;
     }
 
@@ -528,16 +916,24 @@
 
     if (d.status === 'complete') {
       fillEl.classList.add('done');
-      pctEl.textContent  = '100%';
-      spdEl.textContent  = '';
-      etaEl.textContent  = '';
-      badgeEl.innerHTML  = '<span class="badge badge-complete">✓ Concluído</span>';
+      pctEl.textContent = '100%';
+      spdEl.textContent = '';
+      etaEl.textContent = '';
+      badgeEl.innerHTML = '<span class="badge badge-complete">&#10003; Conclu\u00eddo</span>';
+      if (cancelEl) cancelEl.remove();
+    } else if (d.status === 'cancelled') {
+      fillEl.classList.add('cancelled');
+      spdEl.textContent = '';
+      etaEl.textContent = '';
+      badgeEl.innerHTML = '<span class="badge badge-cancelled">&#10007; Cancelado</span>';
+      if (cancelEl) cancelEl.remove();
     } else if (d.status === 'error') {
       fillEl.classList.add('fail');
       titleEl.textContent = 'Erro: ' + (d.error || 'falha desconhecida');
-      badgeEl.innerHTML   = '<span class="badge badge-error">✗ Erro</span>';
+      badgeEl.innerHTML   = '<span class="badge badge-error">&#10007; Erro</span>';
       spdEl.textContent   = '';
       etaEl.textContent   = '';
+      if (cancelEl) cancelEl.remove();
     }
   }
 
@@ -555,42 +951,29 @@
         return;
       }
 
-      const rows = history.map(item => {
+      const rows = history.map(function(item) {
         const dlBtn = item.filename
-          ? `<a class="btn-dl-file" href="/files/${encodeURIComponent(item.filename)}" download>⬇ Baixar</a>`
+          ? '<a class="btn-dl-file" href="/files/' + encodeURIComponent(item.filename) + '" download>&#11015; Baixar</a>'
           : '—';
-
         const title = item.title || truncate(item.url, 45);
-
-        return `
-          <tr>
-            <td class="td-title" title="${escHtml(item.title || item.url)}">${escHtml(title)}</td>
-            <td>${escHtml(item.format_label || '—')}</td>
-            <td><span class="badge badge-${item.status}">${statusLabel(item.status)}</span></td>
-            <td style="white-space:nowrap;color:var(--muted)">${fmtDate(item.created_at)}</td>
-            <td>${dlBtn}</td>
-          </tr>
-        `;
+        return '<tr>' +
+          '<td class="td-title" title="' + escHtml(item.title || item.url) + '">' + escHtml(title) + '</td>' +
+          '<td>' + escHtml(item.format_label || '—') + '</td>' +
+          '<td><span class="badge badge-' + item.status + '">' + statusLabel(item.status) + '</span></td>' +
+          '<td style="white-space:nowrap;color:var(--muted)">' + fmtDate(item.created_at) + '</td>' +
+          '<td>' + dlBtn + '</td>' +
+          '</tr>';
       }).join('');
 
-      container.innerHTML = `
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Título</th>
-                <th>Formato</th>
-                <th>Status</th>
-                <th>Data</th>
-                <th>Arquivo</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-      `;
-    } catch {
-      container.innerHTML = '<p class="empty-msg" style="color:var(--error)">Erro ao carregar histórico.</p>';
+      container.innerHTML =
+        '<div class="table-wrap"><table>' +
+        '<thead><tr>' +
+          '<th>T\u00edtulo</th><th>Formato</th><th>Status</th><th>Data</th><th>Arquivo</th>' +
+        '</tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+        '</table></div>';
+    } catch (_) {
+      container.innerHTML = '<p class="empty-msg" style="color:var(--error)">Erro ao carregar hist\u00f3rico.</p>';
     }
   }
 
@@ -598,7 +981,13 @@
      Helpers
   ───────────────────────────────────────────────────────── */
   function statusLabel(s) {
-    return { complete: '✓ Concluído', error: '✗ Erro', pending: '⏳ Pendente', downloading: '⬇ Baixando' }[s] || s;
+    return {
+      complete:    '&#10003; Conclu\u00eddo',
+      error:       '&#10007; Erro',
+      pending:     '\u23f3 Pendente',
+      downloading: '&#11015; Baixando',
+      cancelled:   '&#10007; Cancelado',
+    }[s] || s;
   }
 
   function fmtDate(iso) {
@@ -607,11 +996,15 @@
   }
 
   function truncate(s, n) {
-    return s && s.length > n ? s.slice(0, n) + '…' : (s || '');
+    return s && s.length > n ? s.slice(0, n) + '\u2026' : (s || '');
   }
 
   function escHtml(s) {
-    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
   /* ─────────────────────────────────────────────────────────
@@ -619,8 +1012,12 @@
   ───────────────────────────────────────────────────────── */
   loadHistory();
 
-  document.getElementById('urlInput').addEventListener('keypress', e => {
-    if (e.key === 'Enter') startDownload();
+  document.getElementById('urlInput').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') handleDownloadClick();
+  });
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeModal();
   });
 </script>
 </body>
