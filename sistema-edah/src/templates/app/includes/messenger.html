@@ -1,0 +1,181 @@
+{% load static %}
+<button id="msng-fab" type="button" title="Mensagens" aria-label="Abrir mensagens" aria-expanded="false" aria-controls="msng-panel">
+  <i class="fas fa-comments"></i>
+  <span id="msng-fab-badge"></span>
+</button>
+<div id="msng-panel" role="dialog" aria-modal="false" aria-labelledby="msng-col-contacts-head">
+  <div id="msng-col-contacts">
+    <div id="msng-col-contacts-head">Mensagens</div>
+    <div id="msng-search-wrap">
+      <input type="text" id="msng-search" placeholder="Buscar..." autocomplete="off" aria-label="Buscar contato">
+    </div>
+    <div id="msng-list"><div class="text-center p-3 text-muted small"><i class="fas fa-spinner fa-spin"></i></div></div>
+  </div>
+  <div id="msng-col-conv">
+    <div id="msng-conv-head" style="display:none">
+      <div class="msng-av" id="msng-conv-av"></div>
+      <span id="msng-conv-nome"></span>
+    </div>
+    <div id="msng-conv-ph">
+      <i class="fas fa-comments"></i>
+      <p>Selecione um contato para iniciar a conversa</p>
+    </div>
+    <div id="msng-conv-msgs" style="display:none" aria-live="polite" aria-label="Mensagens da conversa"></div>
+    <div id="msng-conv-footer" style="display:none">
+      <input type="text" id="msng-txt" placeholder="Aa" maxlength="1000" autocomplete="off" aria-label="Digite a mensagem">
+      <button type="button" id="msng-enviar" title="Enviar" aria-label="Enviar mensagem"><i class="fas fa-paper-plane"></i></button>
+    </div>
+  </div>
+</div>
+<script>
+(function() {
+  const EU_ID = {{ request.user.pk }};
+  const PING_URL = "{% url 'api_chat_ping' %}";
+  const CHAT_URL = "{% url 'api_chat_mensagens' %}";
+  const SEND_URL = "{% url 'api_chat_enviar' %}";
+  let painelAberto = false, uidAtivo = null, ultimoId = 0, naoLidas = {}, todosUsuarios = [];
+  function av(nome) { return (nome || '?').trim()[0].toUpperCase(); }
+  function hrFmt(iso) {
+    const d = new Date(iso.replace(' ', 'T'));
+    return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+  }
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+  function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+    return '';
+  }
+  const fab = document.getElementById('msng-fab');
+  const panel = document.getElementById('msng-panel');
+  if (!fab || !panel) return;
+  fab.addEventListener('click', function() {
+    painelAberto = !painelAberto;
+    panel.classList.toggle('open', painelAberto);
+    fab.setAttribute('aria-expanded', painelAberto ? 'true' : 'false');
+    if (painelAberto) fazerPing();
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && painelAberto) {
+      painelAberto = false;
+      panel.classList.remove('open');
+      fab.setAttribute('aria-expanded', 'false');
+      fab.focus();
+    }
+  });
+  document.getElementById('msng-search').addEventListener('input', function() {
+    const q = this.value.toLowerCase();
+    renderLista(todosUsuarios.filter(u => u.nome.toLowerCase().indexOf(q) >= 0), naoLidas);
+  });
+  function fazerPing() {
+    $.getJSON(PING_URL, function(data) {
+      if (!data.ok) return;
+      naoLidas = data.nao_lidas || {};
+      todosUsuarios = data.usuarios || [];
+      let total = 0;
+      Object.values(naoLidas).forEach(n => { total += parseInt(n, 10); });
+      const badge = document.getElementById('msng-fab-badge');
+      badge.textContent = total > 99 ? '99+' : total;
+      badge.style.display = total > 0 ? 'block' : 'none';
+      renderLista(todosUsuarios, naoLidas);
+      if (uidAtivo) buscarNovas();
+    });
+  }
+  function renderLista(lista, nl) {
+    const el = document.getElementById('msng-list');
+    if (!lista.length) {
+      el.innerHTML = '<div class="text-center p-3 text-muted small">Nenhum contato</div>';
+      return;
+    }
+    let html = '';
+    lista.forEach(u => {
+      const badge = nl[u.id] || 0;
+      const ativo = uidAtivo === u.id ? ' ativo' : '';
+      html += '<div class="msng-item' + ativo + '" data-id="' + u.id + '" data-nome="' + esc(u.nome) + '">'
+        + '<div class="msng-av">' + av(u.nome) + '</div>'
+        + '<div class="msng-item-info"><div class="msng-item-name">' + esc(u.nome) + '</div></div>'
+        + (badge > 0 ? '<div class="msng-item-badge">' + badge + '</div>' : '')
+        + '</div>';
+    });
+    el.innerHTML = html;
+    el.querySelectorAll('.msng-item').forEach(item => {
+      item.addEventListener('click', function() {
+        abrirConversa(parseInt(this.dataset.id, 10), this.dataset.nome);
+      });
+    });
+  }
+  function abrirConversa(userId, nome) {
+    uidAtivo = userId;
+    ultimoId = 0;
+    document.querySelectorAll('.msng-item').forEach(el => el.classList.remove('ativo'));
+    const item = document.querySelector('.msng-item[data-id="' + userId + '"]');
+    if (item) item.classList.add('ativo');
+    document.getElementById('msng-conv-head').style.display = 'flex';
+    document.getElementById('msng-conv-av').textContent = av(nome);
+    document.getElementById('msng-conv-nome').textContent = nome;
+    document.getElementById('msng-conv-ph').style.display = 'none';
+    document.getElementById('msng-conv-msgs').style.display = 'flex';
+    document.getElementById('msng-conv-footer').style.display = 'flex';
+    carregarHistorico();
+    document.getElementById('msng-txt').focus();
+  }
+  function carregarHistorico() {
+    $.getJSON(CHAT_URL, { com: uidAtivo }, function(data) {
+      if (!data.ok) return;
+      const msgs = document.getElementById('msng-conv-msgs');
+      msgs.innerHTML = '';
+      data.mensagens.forEach(m => appendMsg(m, false));
+      msgs.scrollTop = msgs.scrollHeight;
+      if (data.mensagens.length) ultimoId = data.mensagens[data.mensagens.length - 1].id;
+    });
+  }
+  function buscarNovas() {
+    $.getJSON(CHAT_URL, { com: uidAtivo, desde: ultimoId }, function(data) {
+      if (!data.ok || !data.mensagens.length) return;
+      const msgs = document.getElementById('msng-conv-msgs');
+      data.mensagens.forEach(m => appendMsg(m, true));
+      ultimoId = data.mensagens[data.mensagens.length - 1].id;
+    });
+  }
+  function appendMsg(m, rolar) {
+    const msgs = document.getElementById('msng-conv-msgs');
+    const minha = parseInt(m.remetente_id, 10) === EU_ID;
+    const div = document.createElement('div');
+    div.className = 'msng-msg ' + (minha ? 'mine' : 'theirs');
+    div.innerHTML = esc(m.mensagem) + '<span class="msng-msg-time">' + hrFmt(m.criado_em) + '</span>';
+    msgs.appendChild(div);
+    if (rolar !== false) msgs.scrollTop = msgs.scrollHeight;
+  }
+  document.getElementById('msng-enviar').addEventListener('click', enviar);
+  document.getElementById('msng-txt').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviar(); }
+  });
+  function enviar() {
+    if (!uidAtivo) return;
+    const input = document.getElementById('msng-txt');
+    const txt = (input.value || '').trim();
+    if (!txt) return;
+    input.value = '';
+    $.ajax({
+      url: SEND_URL, method: 'POST', contentType: 'application/json',
+      headers: { 'X-CSRFToken': getCookie('csrftoken') },
+      data: JSON.stringify({ destinatario_id: uidAtivo, mensagem: txt }),
+      success: function(res) {
+        if (res.ok) {
+          appendMsg({ id: res.id, remetente_id: EU_ID, mensagem: txt, criado_em: res.criado_em }, true);
+          ultimoId = res.id;
+        }
+      },
+      error: function() {
+        input.value = txt;
+        if (typeof window.exibirErro === 'function') {
+          window.exibirErro('Nao foi possivel enviar a mensagem. Tente novamente.');
+        }
+      }
+    });
+  }
+  $(function() { fazerPing(); setInterval(fazerPing, 30000); setInterval(function() { if (uidAtivo) buscarNovas(); }, 3000); });
+})();
+</script>

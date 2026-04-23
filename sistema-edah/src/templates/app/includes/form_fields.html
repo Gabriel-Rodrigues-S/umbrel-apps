@@ -1,0 +1,8 @@
+{% for field in form %}
+<div class="mb-3 field-shell{% if field.errors %} has-error{% endif %}">
+  <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span class="required-mark">*</span>{% endif %}</label>
+  {{ field }}
+  {% if field.help_text %}<div class="form-text field-help">{{ field.help_text }}</div>{% endif %}
+  {% if field.errors %}<div class="field-error small">{{ field.errors }}</div>{% endif %}
+</div>
+{% endfor %}

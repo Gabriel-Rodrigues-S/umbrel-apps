@@ -1,0 +1,101 @@
+{% load church_nav %}
+<nav id="sidebarMenu" class="col-md-3 col-lg-2 collapse d-md-block sidebar">
+  <div class="sidebar-sticky position-sticky pt-3">
+    <ul class="nav flex-column">
+      <li class="nav-item">
+        <a class="nav-link {% nav_active request 'dashboard' %}" href="{% url 'dashboard' %}"><i class="fas fa-home"></i> Dashboard</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="collapse" href="#cadastrosMenu"><i class="fas fa-users"></i> Cadastros <i class="fas fa-chevron-down float-end"></i></a>
+        <div class="collapse" id="cadastrosMenu">
+          <ul class="nav flex-column ms-3">
+            <li class="nav-item"><a class="nav-link {% nav_active_prefix request '/igreja/' %}" href="{% url 'igreja_editar' %}"><i class="fas fa-church"></i> Dados da Igreja</a></li>
+            <li class="nav-item"><a class="nav-link {% nav_active_prefix request '/membros/' %}" href="{% url 'membros_listar' %}"><i class="fas fa-user"></i> Membros</a></li>
+            <li class="nav-item"><a class="nav-link {% nav_active_prefix request '/visitantes/' %}" href="{% url 'visitantes_listar' %}"><i class="fas fa-user-plus"></i> Visitantes</a></li>
+            <li class="nav-item"><a class="nav-link {% nav_active_prefix request '/lideres/' %}" href="{% url 'lideres_listar' %}"><i class="fas fa-user-tie"></i> Líderes</a></li>
+            <li class="nav-item"><a class="nav-link {% nav_active_prefix request '/funcionarios/' %}" href="{% url 'funcionarios_listar' %}"><i class="fas fa-id-badge"></i> Funcionários</a></li>
+            <li class="nav-item"><a class="nav-link {% nav_active_prefix request '/familias/' %}" href="{% url 'familias_listar' %}"><i class="fas fa-users"></i> Famílias</a></li>
+          </ul>
+        </div>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="collapse" href="#discipuladoMenu"><i class="fas fa-book-reader"></i> Discipulado <i class="fas fa-chevron-down float-end"></i></a>
+        <div class="collapse" id="discipuladoMenu">
+          <ul class="nav flex-column ms-3">
+            <li class="nav-item"><a class="nav-link {% nav_active_prefix request '/discipulado/' %}" href="{% url 'discipulado_listar' %}"><i class="fas fa-hands-helping"></i> Discipulados</a></li>
+            <li class="nav-item"><a class="nav-link {% nav_active_prefix request '/classes/' %}" href="{% url 'classes_listar' %}"><i class="fas fa-chalkboard-teacher"></i> Classes de Estudo</a></li>
+          </ul>
+        </div>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="collapse" href="#gruposMenu"><i class="fas fa-home"></i> Pequenos Grupos <i class="fas fa-chevron-down float-end"></i></a>
+        <div class="collapse" id="gruposMenu">
+          <ul class="nav flex-column ms-3">
+            <li class="nav-item"><a class="nav-link {% nav_active_prefix request '/pequenos-grupos/' %}" href="{% url 'pequenos_grupos_listar' %}"><i class="fas fa-list"></i> Listar Grupos</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'pequenos_grupos_membros' %}"><i class="fas fa-users"></i> Membros de Grupos</a></li>
+          </ul>
+        </div>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="collapse" href="#ministeriosMenu"><i class="fas fa-hands"></i> Ministérios <i class="fas fa-chevron-down float-end"></i></a>
+        <div class="collapse" id="ministeriosMenu">
+          <ul class="nav flex-column ms-3">
+            <li class="nav-item"><a class="nav-link {% nav_active_prefix request '/ministerios/' %}" href="{% url 'ministerios_listar' %}"><i class="fas fa-list"></i> Listar Ministérios</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'ministerios_membros' %}"><i class="fas fa-users"></i> Membros de Ministérios</a></li>
+          </ul>
+        </div>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="collapse" href="#financeiroMenu"><i class="fas fa-dollar-sign"></i> Financeiro <i class="fas fa-chevron-down float-end"></i></a>
+        <div class="collapse" id="financeiroMenu">
+          <ul class="nav flex-column ms-3">
+            <li class="nav-item"><a class="nav-link {% nav_active_prefix request '/financeiro/lancamentos' %}" href="{% url 'financeiro_lancamentos' %}"><i class="fas fa-exchange-alt"></i> Lançamentos</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'financeiro_dizimos' %}"><i class="fas fa-hand-holding-usd"></i> Dízimos</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'financeiro_ofertas' %}"><i class="fas fa-donate"></i> Ofertas</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'financeiro_relatorios' %}"><i class="fas fa-chart-bar"></i> Relatórios</a></li>
+          </ul>
+        </div>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="collapse" href="#ensinosMenu"><i class="fas fa-graduation-cap"></i> Ensinos <i class="fas fa-chevron-down float-end"></i></a>
+        <div class="collapse" id="ensinosMenu">
+          <ul class="nav flex-column ms-3">
+            <li class="nav-item"><a class="nav-link {% nav_active_prefix request '/cursos/' %}" href="{% url 'cursos_listar' %}"><i class="fas fa-book"></i> Cursos</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'cursos_matriculas' %}"><i class="fas fa-user-graduate"></i> Matrículas</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'cursos_presencas' %}"><i class="fas fa-clipboard-check"></i> Presenças</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'cursos_certificados' %}"><i class="fas fa-certificate"></i> Certificados</a></li>
+          </ul>
+        </div>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="collapse" href="#eventosMenu"><i class="fas fa-calendar-alt"></i> Eventos <i class="fas fa-chevron-down float-end"></i></a>
+        <div class="collapse" id="eventosMenu">
+          <ul class="nav flex-column ms-3">
+            <li class="nav-item"><a class="nav-link {% nav_active_prefix request '/eventos/' %}" href="{% url 'eventos_listar' %}"><i class="fas fa-list"></i> Listar Eventos</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'eventos_inscricoes' %}"><i class="fas fa-user-check"></i> Inscrições</a></li>
+          </ul>
+        </div>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="collapse" href="#comunicacaoMenu"><i class="fas fa-bullhorn"></i> Comunicação <i class="fas fa-chevron-down float-end"></i></a>
+        <div class="collapse" id="comunicacaoMenu">
+          <ul class="nav flex-column ms-3">
+            <li class="nav-item"><a class="nav-link" href="{% url 'noticias_portal' %}"><i class="fas fa-globe"></i> Mural da Igreja</a></li>
+            {% if request.user|nivel_in:"admin,pastor,secretaria,lider" %}
+            <li class="nav-item"><a class="nav-link" href="{% url 'noticias_listar' %}"><i class="fas fa-newspaper"></i> Gerenciar Publicações</a></li>
+            {% endif %}
+            <li class="nav-item"><a class="nav-link" href="{% url 'pedidos_oracao_listar' %}"><i class="fas fa-praying-hands"></i> Pedidos de Oração</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'galeria_listar' %}"><i class="fas fa-images"></i> Galeria</a></li>
+            <li class="nav-item"><a class="nav-link" href="{% url 'mensagens_listar' %}"><i class="fas fa-envelope"></i> Mensagens</a></li>
+          </ul>
+        </div>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link {% nav_active_prefix request '/relatorios/' %}" href="{% url 'relatorios_index' %}"><i class="fas fa-file-alt"></i> Relatórios</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link {% nav_active_prefix request '/configuracoes/' %}" href="{% url 'configuracoes_index' %}"><i class="fas fa-cog"></i> Configurações</a>
+      </li>
+    </ul>
+  </div>
+</nav>

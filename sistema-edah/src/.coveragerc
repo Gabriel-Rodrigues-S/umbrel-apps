@@ -1,0 +1,16 @@
+[run]
+source = church
+omit =
+    # Arquivos de teste não devem ser medidos como source
+    church/tests.py
+    church/tests_theme_api.py
+    church/migrations/*
+    church/tenants/migrations/*
+
+[report]
+exclude_lines =
+    # Linhas puramente de interface/abstração
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if TYPE_CHECKING:

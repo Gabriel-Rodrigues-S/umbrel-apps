@@ -1,0 +1,6 @@
+{% extends "app/form_padrao.html" %}
+{% block page_h1 %}Converter visitante em membro{% endblock %}
+{% block form_inner %}
+<p class="text-muted">Visitante: <strong>{{ visitante.pessoa.nome }}</strong></p>
+{% include "app/includes/form_fields.html" with form=membro_form %}
+{% endblock %}

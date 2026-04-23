@@ -1,0 +1,545 @@
+/* ============== TOKENS DE TEMA - CLARO E ESCURO ============== */
+/* Este arquivo define as variáveis CSS (tokens) para os temas claro e escuro */
+/* Componentes devem usar essas variáveis para suportar ambos os temas */
+
+:root {
+    --primary-color: #667eea;
+    --secondary-color: #764ba2;
+    --success-color: #1cc88a;
+    --info-color: #36b9cc;
+    --warning-color: #f6c23e;
+    --danger-color: #e74a3b;
+}
+
+/* ============== TEMA CLARO (PADRÃO) ============== */
+
+:root[data-theme="light"],
+:root {
+    /* Cores de fundo */
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8f9fa;
+    --bg-tertiary: #e9ecef;
+    
+    /* Cores de texto */
+    --text-primary: #212529;
+    --text-secondary: #6c757d;
+    --text-tertiary: #adb5bd;
+    
+    /* Bordas */
+    --border-color: #dee2e6;
+    --border-light: #f1f3f5;
+    
+    /* Componentes */
+    --card-bg: #ffffff;
+    --card-border: #dee2e6;
+    --input-bg: #ffffff;
+    --input-border: #ced4da;
+    --input-focus-color: #80bdff;
+    
+    /* Sidebar */
+    --sidebar-bg: #f8f9fa;
+    --sidebar-text: #212529;
+    --sidebar-hover: #e9ecef;
+    --sidebar-border: #dee2e6;
+    --sidebar-active-bg: #dbeafe;
+    --sidebar-active-text: #1e3a8a;
+    --sidebar-focus-ring: #0ea5e9;
+    
+    /* Navbar */
+    --navbar-bg: #ffffff;
+    --navbar-text: #212529;
+    --navbar-border: #dee2e6;
+
+    /* Shell e superfícies premium */
+    --shell-bg: #f3f5fb;
+    --shell-accent: rgba(41, 98, 255, 0.08);
+    --surface-elevated: rgba(255, 255, 255, 0.82);
+    --surface-muted: #eef2ff;
+    --page-header-bg: rgba(255, 255, 255, 0.72);
+    --page-header-border: rgba(148, 163, 184, 0.24);
+    --page-header-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+    --card-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);
+    --card-shadow-hover: 0 24px 55px rgba(15, 23, 42, 0.12);
+    --metric-icon-bg: rgba(37, 99, 235, 0.12);
+    --hero-bg: linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(14, 165, 233, 0.08));
+    --hero-border: rgba(37, 99, 235, 0.18);
+    --list-item-hover: rgba(37, 99, 235, 0.06);
+    --button-primary-shadow: 0 12px 24px rgba(37, 99, 235, 0.22);
+}
+
+/* ============== TEMA ESCURO ============== */
+
+:root[data-theme="dark"] {
+    /* Cores de fundo */
+    --bg-primary: #1a1a1a;
+    --bg-secondary: #2d2d2d;
+    --bg-tertiary: #3d3d3d;
+    
+    /* Cores de texto */
+    --text-primary: #f0f0f0;
+    --text-secondary: #b0b0b0;
+    --text-tertiary: #808080;
+    
+    /* Bordas */
+    --border-color: #404040;
+    --border-light: #2d2d2d;
+    
+    /* Componentes */
+    --card-bg: #252525;
+    --card-border: #404040;
+    --input-bg: #2d2d2d;
+    --input-border: #404040;
+    --input-focus-color: #4a9eff;
+    
+    /* Sidebar */
+    --sidebar-bg: #1e1e1e;
+    --sidebar-text: #f0f0f0;
+    --sidebar-hover: #2d2d2d;
+    --sidebar-border: #404040;
+    --sidebar-active-bg: #2f3f5a;
+    --sidebar-active-text: #eaf2ff;
+    --sidebar-focus-ring: #7dd3fc;
+    
+    /* Navbar */
+    --navbar-bg: #1a1a1a;
+    --navbar-text: #f0f0f0;
+    --navbar-border: #404040;
+
+    /* Shell e superfícies premium */
+    --shell-bg: #111827;
+    --shell-accent: rgba(96, 165, 250, 0.12);
+    --surface-elevated: rgba(17, 24, 39, 0.82);
+    --surface-muted: #1f2937;
+    --page-header-bg: rgba(15, 23, 42, 0.78);
+    --page-header-border: rgba(148, 163, 184, 0.18);
+    --page-header-shadow: 0 22px 48px rgba(0, 0, 0, 0.35);
+    --card-shadow: 0 22px 48px rgba(0, 0, 0, 0.28);
+    --card-shadow-hover: 0 28px 60px rgba(0, 0, 0, 0.34);
+    --metric-icon-bg: rgba(96, 165, 250, 0.16);
+    --hero-bg: linear-gradient(135deg, rgba(30, 64, 175, 0.22), rgba(14, 116, 144, 0.18));
+    --hero-border: rgba(96, 165, 250, 0.18);
+    --list-item-hover: rgba(96, 165, 250, 0.1);
+    --button-primary-shadow: 0 12px 24px rgba(37, 99, 235, 0.28);
+}
+
+/* ============== APLICACAO DE TOKENS NOS COMPONENTES CRITICOS ============== */
+
+/* Body - Fundo principal */
+body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+/* Sidebar */
+.sidebar {
+    background-color: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+}
+
+.sidebar .nav-link {
+    color: var(--sidebar-text);
+}
+
+.sidebar .nav-link:hover {
+    background-color: var(--sidebar-hover);
+    color: var(--sidebar-text);
+}
+
+.sidebar .nav-link.active {
+    background-color: var(--sidebar-active-bg);
+    color: var(--sidebar-active-text);
+    border-left: 3px solid var(--sidebar-focus-ring);
+}
+
+.sidebar .nav-link:focus-visible {
+    outline: 2px solid var(--sidebar-focus-ring);
+    outline-offset: -2px;
+}
+
+.sidebar .collapse .nav-link {
+    color: var(--sidebar-text);
+    opacity: 0.95;
+}
+
+/* Cards */
+.card {
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+    color: var(--text-primary);
+}
+
+.card-header {
+    background-color: var(--bg-secondary);
+    border-bottom-color: var(--card-border);
+    color: var(--text-primary);
+}
+
+.card-footer {
+    background-color: var(--bg-secondary);
+    border-top-color: var(--card-border);
+}
+
+/* Inputs e Formularios */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="date"],
+input[type="datetime-local"],
+input[type="month"],
+input[type="time"],
+input[type="url"],
+input[type="tel"],
+textarea,
+select {
+    background-color: var(--input-bg);
+    border-color: var(--input-border);
+    color: var(--text-primary);
+}
+
+.form-control,
+.form-select,
+.form-check-input,
+.input-group-text {
+    background-color: var(--input-bg);
+    border-color: var(--input-border);
+    color: var(--text-primary);
+}
+
+.form-control::placeholder,
+textarea::placeholder {
+    color: var(--text-secondary);
+    opacity: 1;
+}
+
+.form-text,
+.form-label,
+.col-form-label {
+    color: var(--text-secondary);
+}
+
+.form-control:disabled,
+.form-select:disabled,
+.form-check-input:disabled {
+    background-color: var(--bg-tertiary);
+    color: var(--text-tertiary);
+    border-color: var(--border-color);
+    opacity: 1;
+}
+
+.form-check-input {
+    box-shadow: none;
+}
+
+.form-check-input:checked {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.form-check-input:focus,
+.form-control:focus,
+.form-select:focus,
+.input-group-text:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+input[type="date"]:focus,
+input[type="datetime-local"]:focus,
+input[type="month"]:focus,
+input[type="time"]:focus,
+input[type="url"]:focus,
+input[type="tel"]:focus,
+textarea:focus,
+select:focus {
+    background-color: var(--input-bg);
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+}
+
+/* Tabs */
+.nav-tabs {
+    border-bottom-color: var(--border-color);
+}
+
+.nav-tabs .nav-link {
+    color: var(--text-secondary);
+    border-color: transparent;
+}
+
+.nav-tabs .nav-link:hover {
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.nav-tabs .nav-link.active {
+    background-color: var(--bg-primary);
+    border-color: var(--border-color) var(--border-color) var(--bg-primary);
+    color: var(--text-primary);
+}
+
+/* Tables */
+table {
+    color: var(--text-primary);
+    border-color: var(--border-color);
+}
+
+thead {
+    background-color: var(--bg-secondary);
+    border-bottom-color: var(--border-color);
+}
+
+tbody tr:hover {
+    background-color: var(--bg-tertiary);
+}
+
+/* DataTables (Bootstrap) */
+.dataTables_wrapper,
+.dataTables_wrapper .dataTables_length,
+.dataTables_wrapper .dataTables_filter,
+.dataTables_wrapper .dataTables_info,
+.dataTables_wrapper .dataTables_processing {
+    color: var(--text-primary);
+}
+
+.dataTables_wrapper .dataTables_length label,
+.dataTables_wrapper .dataTables_filter label,
+.dataTables_wrapper .dataTables_info {
+    color: var(--text-primary);
+}
+
+.dataTables_wrapper .dataTables_length select,
+.dataTables_wrapper .dataTables_filter input,
+.dataTables_wrapper .form-select,
+.dataTables_wrapper .form-control {
+    background-color: var(--input-bg);
+    border-color: var(--input-border);
+    color: var(--text-primary);
+}
+
+.dataTables_wrapper .dataTables_length select:focus,
+.dataTables_wrapper .dataTables_filter input:focus,
+.dataTables_wrapper .form-select:focus,
+.dataTables_wrapper .form-control:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+}
+
+.table.dataTable,
+.table.dataTable td,
+.table.dataTable th {
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.table.dataTable {
+    --bs-table-bg: var(--card-bg);
+    --bs-table-color: var(--text-primary);
+    --bs-table-border-color: var(--border-color);
+    --bs-table-striped-bg: var(--bg-tertiary);
+    --bs-table-striped-color: var(--text-primary);
+    --bs-table-hover-bg: var(--bg-tertiary);
+    --bs-table-hover-color: var(--text-primary);
+}
+
+.table.dataTable thead th,
+table.dataTable thead th,
+table.dataTable thead td {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    border-bottom-color: var(--border-color);
+}
+
+.table.dataTable tbody tr,
+table.dataTable tbody tr {
+    background-color: transparent;
+}
+
+.table.dataTable > :not(caption) > * > *,
+table.dataTable > :not(caption) > * > * {
+    background-color: var(--card-bg);
+    color: var(--text-primary);
+    box-shadow: none;
+}
+
+table.dataTable tbody td.dataTables_empty,
+.table.dataTable tbody td.dataTables_empty {
+    background-color: var(--card-bg) !important;
+    color: var(--text-secondary) !important;
+}
+
+.table.dataTable tbody tr:hover,
+table.dataTable tbody tr:hover {
+    background-color: var(--bg-tertiary);
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button,
+.dataTables_wrapper .dataTables_paginate .paginate_button.disabled,
+.dataTables_wrapper .dataTables_paginate .paginate_button.disabled:hover,
+.dataTables_wrapper .dataTables_paginate .paginate_button.disabled:active {
+    color: var(--text-primary) !important;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button.current,
+.dataTables_wrapper .dataTables_paginate .paginate_button.current:hover {
+    background: var(--bg-tertiary) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-primary) !important;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+    background: var(--bg-secondary) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-primary) !important;
+}
+
+/* DataTables + Bootstrap 5 pagination */
+.dataTables_wrapper .dataTables_paginate .pagination .page-link {
+    background-color: var(--bg-secondary);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.dataTables_wrapper .dataTables_paginate .pagination .page-link:hover {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.dataTables_wrapper .dataTables_paginate .pagination .page-item.active .page-link {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+    color: #ffffff;
+}
+
+.dataTables_wrapper .dataTables_paginate .pagination .page-item.disabled .page-link {
+    background-color: var(--bg-secondary);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+    opacity: 0.85;
+}
+
+/* Buttons */
+.btn-secondary {
+    background-color: var(--bg-secondary);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.btn-secondary:hover {
+    background-color: var(--bg-tertiary);
+    border-color: var(--border-color);
+}
+
+/* Modals */
+.modal-content {
+    background-color: var(--bg-primary);
+    border-color: var(--border-color);
+}
+
+.modal-header {
+    background-color: var(--bg-secondary);
+    border-bottom-color: var(--border-color);
+}
+
+.modal-footer {
+    background-color: var(--bg-secondary);
+    border-top-color: var(--border-color);
+}
+
+.close {
+    color: var(--text-primary);
+}
+
+/* Alerts */
+.alert-light {
+    background-color: var(--bg-secondary);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+/* Dropdowns */
+.dropdown-menu {
+    background-color: var(--bg-secondary);
+    border-color: var(--border-color);
+}
+
+.dropdown-item {
+    color: var(--text-primary);
+}
+
+.dropdown-item:hover {
+    background-color: var(--bg-tertiary);
+    color: var(--primary-color);
+}
+
+/* Select2 */
+.select2-container--bootstrap-5 .select2-selection,
+.select2-container--bootstrap-5 .select2-dropdown {
+    background-color: var(--input-bg);
+    border-color: var(--input-border);
+    color: var(--text-primary);
+}
+
+.select2-container--bootstrap-5 .select2-selection--single .select2-selection__rendered,
+.select2-container--bootstrap-5 .select2-selection--multiple .select2-selection__rendered,
+.select2-container--bootstrap-5 .select2-results__option {
+    color: var(--text-primary);
+}
+
+.select2-container--bootstrap-5 .select2-results__option--highlighted[aria-selected] {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+/* Date/time picker icon forca contraste no modo escuro */
+:root[data-theme="dark"] input[type="date"],
+:root[data-theme="dark"] input[type="time"],
+:root[data-theme="dark"] input[type="datetime-local"],
+:root[data-theme="dark"] input[type="month"] {
+    color-scheme: dark;
+}
+
+/* Links */
+a {
+    color: var(--primary-color);
+}
+
+a:hover {
+    color: var(--secondary-color);
+}
+
+/* Texto genérico */
+strong, b {
+    color: var(--text-primary);
+}
+
+/* Separadores */
+hr {
+    border-color: var(--border-color);
+}
+
+/* Focus visível */
+:focus-visible {
+    outline: 3px solid var(--focus-outline);
+    outline-offset: 2px;
+}
+
+/* ============== TRANSICAO SUAVE ENTRE TEMAS ============== */
+/* Evita flash no carregamento inicial; animacao so ocorre no toggle manual */
+
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+    transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* Excluir animacoes em elementos que nao devem animar */
+html.theme-transition .skip-link,
+html.theme-transition .modal-backdrop {
+    transition: none;
+}

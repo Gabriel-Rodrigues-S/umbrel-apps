@@ -1,0 +1,16 @@
+{% extends "app/base.html" %}
+{% block title %}Relatório Grupos{% endblock %}
+{% block content %}
+<div class="page-header">
+	<p class="page-eyebrow mb-2">Relatorio</p>
+	<h1 class="h2 mb-1">Relatório - Pequenos Grupos</h1>
+	<p class="page-subtitle mb-0">Resumo da estrutura de pequenos grupos cadastrados.</p>
+</div>
+
+<div class="card stat-card">
+	<div class="card-body">
+		<p class="stat-label">Total de grupos</p>
+		<p class="stat-value">{{ total }}</p>
+	</div>
+</div>
+{% endblock %}

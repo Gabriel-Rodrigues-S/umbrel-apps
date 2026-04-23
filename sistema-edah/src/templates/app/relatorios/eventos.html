@@ -1,0 +1,16 @@
+{% extends "app/base.html" %}
+{% block title %}Relatório Eventos{% endblock %}
+{% block content %}
+<div class="page-header">
+	<p class="page-eyebrow mb-2">Relatorio</p>
+	<h1 class="h2 mb-1">Relatório - Eventos</h1>
+	<p class="page-subtitle mb-0">Acompanhe o volume de eventos registrados na agenda.</p>
+</div>
+
+<div class="card stat-card">
+	<div class="card-body">
+		<p class="stat-label">Total de eventos</p>
+		<p class="stat-value">{{ total }}</p>
+	</div>
+</div>
+{% endblock %}

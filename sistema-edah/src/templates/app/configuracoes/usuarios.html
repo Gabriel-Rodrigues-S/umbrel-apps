@@ -1,0 +1,33 @@
+{% extends "app/base.html" %}
+{% block title %}Usuários - SYS_EDAH{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+  <h1 class="h2"><i class="fas fa-users-cog"></i> Usuários do Sistema</h1>
+  <a href="{% url 'configuracoes_usuario_novo' %}" class="btn btn-primary"><i class="fas fa-plus"></i> Novo usuário</a>
+</div>
+<div class="card shadow">
+  <div class="card-body">
+    <table class="table table-bordered datatable">
+      <thead><tr><th>Nome</th><th>E-mail</th><th>Nível</th><th>Ativo</th><th>Ações</th></tr></thead>
+      <tbody>
+        {% for u in usuarios %}
+        <tr>
+          <td>{{ u.nome }}</td>
+          <td>{{ u.email }}</td>
+          <td>{{ u.get_nivel_acesso_display }}</td>
+          <td>{% if u.is_active %}Sim{% else %}Não{% endif %}</td>
+          <td>
+            <a href="{% url 'configuracoes_usuario_editar' u.pk %}" class="btn btn-sm btn-warning"><i class="fas fa-edit"></i></a>
+            {% if request.user.is_superuser and u.pk != request.user.pk %}
+            <a href="{% url 'configuracoes_usuario_excluir' u.pk %}" class="btn btn-sm btn-danger"><i class="fas fa-trash"></i></a>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="text-center text-muted">Nenhum usuário.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,17 @@
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+db.sqlite3
+uploads/
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+playwright-report/
+test-results/
+markdown/
+.coverage
+artifacts/

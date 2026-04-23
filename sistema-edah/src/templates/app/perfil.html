@@ -1,0 +1,43 @@
+{% extends "app/base.html" %}
+{% block title %}Perfil - SYS_EDAH{% endblock %}
+{% block content %}
+<div class="page-header d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center gap-3">
+  <div>
+    <p class="page-eyebrow mb-2">Conta do usuario</p>
+    <h1 class="h2 mb-1"><i class="fas fa-user-circle"></i> Meu Perfil</h1>
+    <p class="page-subtitle mb-0">Atualize seus dados pessoais e mantenha a seguranca da sua conta em dia.</p>
+  </div>
+</div>
+<div class="row">
+  <div class="col-lg-6 mb-4">
+    <div class="card section-card shadow-sm form-shell">
+      <div class="card-header py-3"><h6 class="m-0 font-weight-bold text-primary">Dados</h6></div>
+      <div class="card-body">
+        <form method="post" novalidate class="stacked-form">
+          {% csrf_token %}
+          <input type="hidden" name="salvar_perfil" value="1">
+          {% include "app/includes/form_fields.html" with form=profile_form %}
+          <div class="form-actions pt-3">
+            <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Salvar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6 mb-4">
+    <div class="card section-card shadow-sm form-shell">
+      <div class="card-header py-3"><h6 class="m-0 font-weight-bold text-primary">Alterar senha</h6></div>
+      <div class="card-body">
+        <form method="post" novalidate class="stacked-form">
+          {% csrf_token %}
+          <input type="hidden" name="alterar_senha" value="1">
+          {% include "app/includes/form_fields.html" with form=password_form %}
+          <div class="form-actions pt-3">
+            <button type="submit" class="btn btn-warning"><i class="fas fa-key"></i> Alterar senha</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

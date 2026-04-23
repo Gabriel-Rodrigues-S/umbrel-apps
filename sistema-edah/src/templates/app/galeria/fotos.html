@@ -1,0 +1,29 @@
+{% extends "app/base.html" %}
+{% block title %}Fotos - SYS_EDAH{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+  <h1 class="h2"><i class="fas fa-list"></i> Fotos</h1>
+  <div><a href="{% url 'galeria_fotos_novo' %}" class="btn btn-primary"><i class="fas fa-plus"></i> Adicionar</a></div>
+</div>
+<div class="card shadow mb-4">
+  <div class="card-header py-3"><h6 class="m-0 font-weight-bold text-primary">Lista</h6></div>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-bordered datatable" width="100%">
+        <thead><tr><th>#</th><th>Descrição</th><th>Ações</th></tr></thead>
+        <tbody>
+        {% for o in fotos %}
+        <tr>
+          <td>{{ o.pk }}</td>
+          <td>{{ o }}</td>
+          <td><div class="btn-group btn-group-sm"></div></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="3" class="text-center text-muted">Nenhum registro.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

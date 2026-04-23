@@ -1,0 +1,37 @@
+{% extends "app/base.html" %}
+{% block title %}Galerias - SYS_EDAH{% endblock %}
+{% block content %}
+<div class="page-header d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center gap-3">
+  <div>
+    <p class="page-eyebrow mb-2">Midia</p>
+    <h1 class="h2 mb-1"><i class="fas fa-list"></i> Galerias</h1>
+    <p class="page-subtitle mb-0">Gerencie colecoes de imagens com leitura melhor para consulta e manutencao.</p>
+  </div>
+  <div><a href="{% url 'galeria_cadastrar' %}" class="btn btn-primary"><i class="fas fa-plus"></i> Nova</a></div>
+</div>
+<div class="card section-card data-panel shadow-sm mb-4">
+  <div class="card-header py-3">
+    <h6 class="panel-title">Lista de galerias</h6>
+    <span class="panel-caption">Visualize e organize galerias com acesso rapido para visualizar, editar e excluir.</span>
+  </div>
+  <div class="card-body">
+    <p class="table-intro">A listagem manteve o contrato atual de acoes com um contexto visual mais limpo.</p>
+    <div class="table-responsive">
+      <table class="table table-bordered align-middle datatable" width="100%">
+        <thead><tr><th>#</th><th>Descrição</th><th>Ações</th></tr></thead>
+        <tbody>
+        {% for o in galerias %}
+        <tr>
+          <td>{{ o.pk }}</td>
+          <td>{{ o }}</td>
+          <td><div class="btn-group btn-group-sm"><a href="{% url 'galeria_visualizar' o.pk %}" class="btn btn-sm btn-info" title="Ver"><i class="fas fa-eye"></i></a> <a href="{% url 'galeria_editar' o.pk %}" class="btn btn-sm btn-warning" title="Editar"><i class="fas fa-edit"></i></a> <a href="{% url 'galeria_excluir' o.pk %}" class="btn btn-sm btn-danger" title="Excluir"><i class="fas fa-trash"></i></a></div></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="3" class="text-center text-muted">Nenhum registro.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

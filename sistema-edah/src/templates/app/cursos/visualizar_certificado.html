@@ -1,0 +1,15 @@
+{% extends "app/base.html" %}
+{% block title %}Certificado{% endblock %}
+{% block content %}
+<div class="pt-3">
+  <h1 class="h2">Certificado</h1>
+  <div class="card shadow">
+    <div class="card-body">
+      <p><strong>Matrícula:</strong> {{ certificado.matricula }}</p>
+      <p><strong>Código:</strong> {{ certificado.codigo_verificacao }}</p>
+      <p><strong>Emissão:</strong> {{ certificado.data_emissao|date:"d/m/Y" }}</p>
+      {% if certificado.arquivo_pdf %}<p><a href="{{ certificado.arquivo_pdf }}" class="btn btn-primary">Arquivo</a></p>{% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

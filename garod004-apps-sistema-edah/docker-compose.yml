@@ -1,0 +1,22 @@
+version: '3.7'
+
+services:
+  app_proxy:
+    environment:
+      APP_HOST: garod004-apps-sistema-edah_server_1
+      APP_PORT: 8270
+
+  server:
+    image: ghcr.io/garod004/sistema-edah:latest
+    restart: on-failure
+    volumes:
+      - ${APP_DATA_DIR}/data:/app/data
+      - ${APP_DATA_DIR}/uploads:/app/uploads
+      - ${APP_DATA_DIR}/staticfiles:/app/staticfiles
+    environment:
+      DJANGO_ENV: production
+      DJANGO_DEBUG: 'False'
+      DJANGO_ALLOWED_HOSTS: '*'
+      DJANGO_CORS_ALLOWED_ORIGINS: 'http://localhost:8270'
+      BOOTSTRAP_ADMIN_EMAIL: admin@edah.local
+      BOOTSTRAP_ADMIN_PASSWORD: edah@2024

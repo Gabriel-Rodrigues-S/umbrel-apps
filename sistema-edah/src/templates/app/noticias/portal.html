@@ -1,0 +1,25 @@
+{% extends "app/base.html" %}
+{% block title %}Mural da Igreja{% endblock %}
+{% block content %}
+<div class="page-header">
+  <p class="page-eyebrow mb-2">Portal publico interno</p>
+  <h1 class="h2 mb-1"><i class="fas fa-globe"></i> Mural da Igreja</h1>
+  <p class="page-subtitle mb-0">Publicacoes e comunicados para a comunidade, com leitura mais limpa e foco no conteudo.</p>
+</div>
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    {% for n in noticias %}
+    <div class="card section-card feed-card shadow-sm mb-4">
+      {% if n.imagem %}<img src="{{ n.imagem }}" class="card-img-top" alt="">{% endif %}
+      <div class="card-body">
+        <h5 class="card-title">{{ n.titulo }}</h5>
+        <p class="card-text">{{ n.conteudo|linebreaks }}</p>
+        <small class="text-muted">{{ n.data_publicacao|default:n.data_criacao|date:"d/m/Y H:i" }}</small>
+      </div>
+    </div>
+    {% empty %}
+    <div class="empty-state">Nenhuma publicacao disponivel no mural.</div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

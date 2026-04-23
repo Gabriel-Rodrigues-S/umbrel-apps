@@ -1,0 +1,56 @@
+{% extends "app/base.html" %}
+{% block title %}Membros - SYS_EDAH{% endblock %}
+{% block content %}
+<div class="page-header d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center gap-3">
+  <div>
+    <p class="page-eyebrow mb-2">Cadastro principal</p>
+    <h1 class="h2 mb-1"><i class="fas fa-users"></i> Membros da Igreja</h1>
+    <p class="page-subtitle mb-0">Gerencie a base de membros com leitura mais clara para status, contato, funcao e acompanhamento da membresia.</p>
+  </div>
+  <a href="{% url 'membros_cadastrar' %}" class="btn btn-primary"><i class="fas fa-plus"></i> Novo Membro</a>
+</div>
+<div class="card section-card data-panel shadow-sm mb-4">
+  <div class="card-header py-3">
+    <h6 class="panel-title">Lista de membros</h6>
+    <span class="panel-caption">Use a listagem para localizar rapidamente dados de contato, funcao atual e situacao do membro.</span>
+  </div>
+  <div class="card-body">
+    <p class="table-intro">A busca, ordenacao e paginacao continuam ativas, agora com mais contraste visual e menos ruido na leitura.</p>
+    <div class="table-responsive">
+      <table class="table table-bordered align-middle datatable" width="100%">
+        <thead>
+          <tr>
+            <th>Nome</th>
+            <th>Email</th>
+            <th>Telefone</th>
+            <th>Cargo/Função</th>
+            <th>Data Entrada</th>
+            <th>Status</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in membros %}
+          <tr>
+            <td>{{ m.pessoa.nome }}</td>
+            <td>{{ m.pessoa.email|default:"-" }}</td>
+            <td>{{ m.pessoa.celular|default:m.pessoa.telefone|default:"-" }}</td>
+            <td>{{ m.cargo|default:m.funcao|default:"-" }}</td>
+            <td>{% if m.data_entrada %}{{ m.data_entrada|date:"d/m/Y" }}{% else %}-{% endif %}</td>
+            <td><span class="badge bg-{% if m.status == 'ativo' %}success{% elif m.status == 'inativo' %}secondary{% elif m.status == 'transferido' %}warning{% elif m.status == 'disciplinado' %}danger{% else %}dark{% endif %}">{{ m.get_status_display }}</span></td>
+            <td>
+              <div class="btn-group btn-group-sm">
+                <a href="{% url 'membros_visualizar' m.pk %}" class="btn btn-info" title="Visualizar"><i class="fas fa-eye"></i></a>
+                <a href="{% url 'membros_editar' m.pk %}" class="btn btn-warning" title="Editar"><i class="fas fa-edit"></i></a>
+              </div>
+            </td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="7" class="text-center text-muted">Nenhum membro cadastrado.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

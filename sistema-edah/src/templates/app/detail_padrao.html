@@ -1,0 +1,18 @@
+{% extends "app/base.html" %}
+{% block content %}
+<div class="page-header d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center gap-3">
+  <div>
+    <p class="page-eyebrow mb-2">Visualizacao</p>
+    <h1 class="h2 mb-1"><i class="fas fa-eye"></i> {% block detail_title %}Detalhes{% endblock %}</h1>
+    <p class="page-subtitle mb-0">Consulte as informacoes desta entidade com leitura mais clara e organizada.</p>
+  </div>
+  <a href="javascript:history.back()" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Voltar</a>
+</div>
+<div class="card section-card shadow-sm mb-4">
+  <div class="card-body">
+    {% block detail_body %}
+    <p class="lead">{{ object }}</p>
+    {% endblock %}
+  </div>
+</div>
+{% endblock %}

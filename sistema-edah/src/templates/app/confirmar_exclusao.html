@@ -1,0 +1,24 @@
+{% extends "app/base.html" %}
+{% block title %}Confirmar exclusão{% endblock %}
+{% block content %}
+<div class="page-header d-flex justify-content-between flex-wrap align-items-center gap-3">
+  <div>
+    <p class="page-eyebrow mb-2">Acao sensivel</p>
+    <h1 class="h2 mb-1"><i class="fas fa-exclamation-triangle text-danger"></i> Confirmar exclusao</h1>
+    <p class="page-subtitle mb-0">Esta acao remove dados do sistema. Revise antes de seguir.</p>
+  </div>
+</div>
+<div class="pt-1">
+  <div class="card shadow danger-shell">
+    <div class="card-header"><i class="fas fa-exclamation-triangle"></i> Confirmar exclusão</div>
+    <div class="card-body">
+      <p>Tem certeza que deseja excluir <strong>{{ object }}</strong>?</p>
+      <form method="post">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-danger"><i class="fas fa-trash"></i> Excluir</button>
+        <a href="javascript:history.back()" class="btn btn-secondary">Cancelar</a>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

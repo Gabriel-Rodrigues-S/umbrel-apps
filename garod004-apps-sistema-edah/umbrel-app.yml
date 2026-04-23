@@ -1,0 +1,30 @@
+manifestVersion: 1
+id: garod004-apps-sistema-edah
+name: Sistema EDAH
+tagline: Gestão completa para igrejas e ministérios
+icon: https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-sistema-edah/icon.svg
+category: productivity
+version: '1.0.0'
+port: 8270
+description: >-
+  Sistema EDAH — plataforma completa de gestão para igrejas.
+  Cadastro de membros, famílias e visitantes. Controle financeiro com dízimos,
+  ofertas e despesas. Gestão de eventos com inscrições, ministérios, pequenos grupos,
+  discipulado e cursos. Pedidos de oração, galeria de fotos e notícias.
+  Interface web administrativa + API REST para o app mobile Flutter.
+developer: garod004
+website: https://github.com/garod004/umbrel-apps
+dependencies: []
+repo: https://github.com/garod004/umbrel-apps
+support: https://github.com/garod004/umbrel-apps/issues
+gallery:
+  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-sistema-edah/icon.svg
+  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-sistema-edah/icon.svg
+  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-sistema-edah/icon.svg
+path: ''
+defaultUsername: 'admin@edah.local'
+defaultPassword: 'edah@2024'
+releaseNotes: >-
+  v1.0.0: Primeira versão. Membros, financeiro, eventos, ministérios, discipulado, cursos, oração e galeria.
+submitter: garod004
+submission: https://github.com/garod004/umbrel-apps

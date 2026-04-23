@@ -1,0 +1,16 @@
+{% extends "app/base.html" %}
+{% block title %}Relatório Cursos{% endblock %}
+{% block content %}
+<div class="page-header">
+	<p class="page-eyebrow mb-2">Relatorio</p>
+	<h1 class="h2 mb-1">Relatório - Cursos</h1>
+	<p class="page-subtitle mb-0">Resumo de cursos ativos e historicos cadastrados no sistema.</p>
+</div>
+
+<div class="card stat-card">
+	<div class="card-body">
+		<p class="stat-label">Total de cursos</p>
+		<p class="stat-value">{{ total }}</p>
+	</div>
+</div>
+{% endblock %}

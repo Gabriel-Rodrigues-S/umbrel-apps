@@ -1,0 +1,23 @@
+{% extends "app/base.html" %}
+{% block title %}Editar Membro - SYS_EDAH{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+  <h1 class="h2"><i class="fas fa-edit"></i> Editar Membro</h1>
+  <a href="{% url 'membros_listar' %}" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Voltar</a>
+</div>
+<div class="card shadow mb-4">
+  <div class="card-body">
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <h5 class="mb-3"><i class="fas fa-user"></i> Dados Pessoais</h5>
+      {% include "app/includes/form_fields.html" with form=pessoa_form %}
+      <h5 class="mb-3 mt-4"><i class="fas fa-church"></i> Dados da Membresia</h5>
+      {% include "app/includes/form_fields.html" with form=membro_form %}
+      <div class="d-grid gap-2 d-md-flex justify-content-md-end mt-3">
+        <a href="{% url 'membros_listar' %}" class="btn btn-secondary">Cancelar</a>
+        <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Salvar</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

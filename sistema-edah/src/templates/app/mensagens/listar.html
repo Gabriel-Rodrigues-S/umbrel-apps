@@ -1,0 +1,37 @@
+{% extends "app/base.html" %}
+{% block title %}Mensagens - SYS_EDAH{% endblock %}
+{% block content %}
+<div class="page-header d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center gap-3">
+  <div>
+    <p class="page-eyebrow mb-2">Comunicacao interna</p>
+    <h1 class="h2 mb-1"><i class="fas fa-list"></i> Mensagens</h1>
+    <p class="page-subtitle mb-0">Acompanhe mensagens registradas e mantenha o canal interno organizado.</p>
+  </div>
+  <div><a href="{% url 'mensagens_nova' %}" class="btn btn-primary"><i class="fas fa-plus"></i> Nova</a></div>
+</div>
+<div class="card section-card data-panel shadow-sm mb-4">
+  <div class="card-header py-3">
+    <h6 class="panel-title">Lista de mensagens</h6>
+    <span class="panel-caption">Painel de consulta rapida das mensagens com foco em acao e limpeza visual.</span>
+  </div>
+  <div class="card-body">
+    <p class="table-intro">Fluxo de visualizacao e exclusao mantido com melhor hierarquia de conteudo.</p>
+    <div class="table-responsive">
+      <table class="table table-bordered align-middle datatable" width="100%">
+        <thead><tr><th>#</th><th>Descrição</th><th>Ações</th></tr></thead>
+        <tbody>
+        {% for o in mensagens %}
+        <tr>
+          <td>{{ o.pk }}</td>
+          <td>{{ o }}</td>
+          <td><div class="btn-group btn-group-sm"><a href="{% url 'mensagens_visualizar' o.pk %}" class="btn btn-sm btn-info" title="Ver"><i class="fas fa-eye"></i></a> <a href="{% url 'mensagens_excluir' o.pk %}" class="btn btn-sm btn-danger" title="Excluir"><i class="fas fa-trash"></i></a></div></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="3" class="text-center text-muted">Nenhum registro.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

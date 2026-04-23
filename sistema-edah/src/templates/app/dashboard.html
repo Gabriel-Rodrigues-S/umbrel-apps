@@ -1,0 +1,230 @@
+{% extends "app/base.html" %}
+{% load static %}
+{% block title %}Dashboard - SYS_EDAH{% endblock %}
+{% block content %}
+<div class="page-header d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center gap-3">
+  <div>
+    <p class="page-eyebrow mb-2">Visao geral</p>
+    <h1 class="h2 mb-1">Dashboard</h1>
+    <p class="page-subtitle mb-0">Acompanhe indicadores, tendencias e compromissos da igreja em um painel mais claro e objetivo.</p>
+  </div>
+  <div class="btn-toolbar mb-0">
+    <button type="button" class="btn btn-sm btn-outline-secondary page-header-action">
+      <i class="fas fa-calendar"></i> Hoje: <span id="dataAtual"></span>
+    </button>
+  </div>
+</div>
+
+<div class="row mb-4">
+  <div class="col-xl-3 col-md-6 mb-4">
+    <div class="card metric-card metric-card-primary h-100 py-2">
+      <div class="card-body">
+        <div class="row g-0 align-items-center">
+          <div class="col me-3">
+            <div class="metric-label text-primary mb-2">Total de Membros</div>
+            <div class="metric-value">{{ total_membros }}</div>
+          </div>
+          <div class="col-auto"><span class="metric-icon"><i class="fas fa-users fa-lg"></i></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-3 col-md-6 mb-4">
+    <div class="card metric-card metric-card-success h-100 py-2">
+      <div class="card-body">
+        <div class="row g-0 align-items-center">
+          <div class="col me-3">
+            <div class="metric-label text-success mb-2">Visitantes do Mes</div>
+            <div class="metric-value">{{ visitantes_mes }}</div>
+          </div>
+          <div class="col-auto"><span class="metric-icon"><i class="fas fa-user-plus fa-lg"></i></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-3 col-md-6 mb-4">
+    <div class="card metric-card metric-card-info h-100 py-2">
+      <div class="card-body">
+        <div class="row g-0 align-items-center">
+          <div class="col me-3">
+            <div class="metric-label text-info mb-2">Pequenos Grupos</div>
+            <div class="metric-value">{{ pequenos_grupos }}</div>
+          </div>
+          <div class="col-auto"><span class="metric-icon"><i class="fas fa-home fa-lg"></i></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-3 col-md-6 mb-4">
+    <div class="card metric-card metric-card-warning h-100 py-2">
+      <div class="card-body">
+        <div class="row g-0 align-items-center">
+          <div class="col me-3">
+            <div class="metric-label text-warning mb-2">Receita do Mes</div>
+            <div class="metric-value">R$ {{ receita_mes|floatformat:2 }}</div>
+          </div>
+          <div class="col-auto"><span class="metric-icon"><i class="fas fa-dollar-sign fa-lg"></i></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-12">
+    <div class="alert alert-info hero-banner mb-0">
+      <h4 class="alert-heading"><i class="fas fa-info-circle"></i> Seja bem-vindo(a) ao Sistema Eclesiástico</h4>
+      <p class="mb-0">Comece cadastrando membros, visitantes e organizando os pequenos grupos da sua igreja.</p>
+    </div>
+  </div>
+</div>
+
+<div class="row mt-4">
+  <div class="col-lg-6 mb-4">
+    <div class="card section-card shadow-sm">
+      <div class="card-header py-3">
+        <h6 class="m-0 font-weight-bold text-primary"><i class="fas fa-chart-bar"></i> Crescimento de Membros</h6>
+      </div>
+      <div class="card-body">
+        <div class="chart-canvas-wrap">
+          <canvas id="membrosChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6 mb-4">
+    <div class="card section-card shadow-sm">
+      <div class="card-header py-3">
+        <h6 class="m-0 font-weight-bold text-primary"><i class="fas fa-chart-pie"></i> Distribuição por Faixa Etária</h6>
+      </div>
+      <div class="card-body">
+        <div class="chart-canvas-wrap">
+          <canvas id="faixaEtariaChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row mt-4">
+  <div class="col-12">
+    <div class="card section-card shadow-sm">
+      <div class="card-header py-3">
+        <h6 class="m-0 font-weight-bold text-primary"><i class="fas fa-calendar-alt"></i> Próximos Eventos</h6>
+      </div>
+      <div class="card-body">
+        {% if proximos_eventos %}
+        <div class="list-group activity-list">
+          {% for ev in proximos_eventos %}
+          <a href="{% url 'eventos_listar' %}" class="list-group-item list-group-item-action activity-list-item">
+            <div class="d-flex w-100 justify-content-between">
+              <h5 class="mb-1"><i class="fas fa-calendar-check text-primary"></i> {{ ev.nome }}</h5>
+              <small>{{ ev.data_inicio|date:"l, d/m/Y" }}</small>
+            </div>
+            {% if ev.descricao %}<p class="mb-1 text-muted">{{ ev.descricao|truncatewords:20 }}</p>{% endif %}
+          </a>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state"><i class="fas fa-info-circle"></i> Nenhum evento proximo cadastrado.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const d = new Date();
+  document.getElementById('dataAtual').textContent = d.toLocaleDateString('pt-BR');
+});
+
+function dashboardThemePalette() {
+  const css = getComputedStyle(document.documentElement);
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+
+  return {
+    primary: css.getPropertyValue('--primary-color').trim() || '#2563eb',
+    info: css.getPropertyValue('--info-color').trim() || '#0891b2',
+    warning: css.getPropertyValue('--warning-color').trim() || '#f59e0b',
+    success: css.getPropertyValue('--success-color').trim() || '#10b981',
+    text: css.getPropertyValue('--text-primary').trim() || (isDark ? '#f0f0f0' : '#212529'),
+    secondaryText: css.getPropertyValue('--text-secondary').trim() || (isDark ? '#b0b0b0' : '#6c757d'),
+    border: css.getPropertyValue('--border-color').trim() || (isDark ? '#404040' : '#dee2e6'),
+    surface: css.getPropertyValue('--card-bg').trim() || (isDark ? '#252525' : '#ffffff')
+  };
+}
+
+const ctxMembros = document.getElementById('membrosChart');
+if (ctxMembros) {
+  const palette = dashboardThemePalette();
+  new Chart(ctxMembros, {
+    type: 'line',
+    data: {
+      labels: {{ membros_chart_labels|safe }},
+      datasets: [{
+        label: 'Membros',
+        data: {{ membros_chart_data|safe }},
+        borderColor: palette.primary,
+        backgroundColor: palette.info + '33',
+        tension: 0.1
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color: palette.text }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: palette.secondaryText },
+          grid: { color: palette.border }
+        },
+        y: {
+          beginAtZero: true,
+          ticks: { color: palette.secondaryText },
+          grid: { color: palette.border }
+        }
+      }
+    }
+  });
+}
+const ctxFaixa = document.getElementById('faixaEtariaChart');
+if (ctxFaixa) {
+  const palette = dashboardThemePalette();
+  new Chart(ctxFaixa, {
+    type: 'pie',
+    data: {
+      labels: {{ faixa_labels_json|safe }},
+      datasets: [{
+        data: {{ faixa_data_json|safe }},
+        backgroundColor: [
+          palette.primary + 'cc',
+          palette.info + 'cc',
+          palette.warning + 'cc',
+          palette.success + 'cc',
+          '#8b5cf6cc'
+        ],
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: { color: palette.text }
+        }
+      }
+    }
+  });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,37 @@
+{% extends "app/base.html" %}
+{% block title %}Categorias Financeiras - SYS_EDAH{% endblock %}
+{% block content %}
+<div class="page-header d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center gap-3">
+  <div>
+    <p class="page-eyebrow mb-2">Financeiro</p>
+    <h1 class="h2 mb-1"><i class="fas fa-list"></i> Categorias Financeiras</h1>
+    <p class="page-subtitle mb-0">Visualize as categorias cadastradas para organizacao dos lancamentos financeiros.</p>
+  </div>
+  <div></div>
+</div>
+<div class="card section-card data-panel shadow-sm mb-4">
+  <div class="card-header py-3">
+    <h6 class="panel-title">Lista de categorias</h6>
+    <span class="panel-caption">Base de classificacao para melhorar consistencia dos registros financeiros.</span>
+  </div>
+  <div class="card-body">
+    <p class="table-intro">As categorias seguem como base de referencia para os fluxos de receita e despesa.</p>
+    <div class="table-responsive">
+      <table class="table table-bordered align-middle datatable" width="100%">
+        <thead><tr><th>#</th><th>Descrição</th><th>Ações</th></tr></thead>
+        <tbody>
+        {% for o in categorias %}
+        <tr>
+          <td>{{ o.pk }}</td>
+          <td>{{ o }}</td>
+          <td><div class="btn-group btn-group-sm"></div></td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="3" class="text-center text-muted">Nenhum registro.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

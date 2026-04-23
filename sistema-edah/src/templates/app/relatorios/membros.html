@@ -1,0 +1,31 @@
+{% extends "app/base.html" %}
+{% block title %}Relatório Membros{% endblock %}
+{% block content %}
+<div class="page-header">
+  <p class="page-eyebrow mb-2">Relatorio</p>
+  <h1 class="h2 mb-1">Relatório - Membros</h1>
+  <p class="page-subtitle mb-0">Resumo consolidado de membros com visao por status para apoio de decisao administrativa.</p>
+</div>
+
+<div class="card stat-card mb-3">
+  <div class="card-body">
+    <p class="stat-label">Total de membros</p>
+    <p class="stat-value">{{ total }}</p>
+  </div>
+</div>
+
+<div class="card section-card shadow-sm">
+  <div class="card-header py-3">
+    <h6 class="panel-title">Distribuicao por status</h6>
+  </div>
+  <div class="card-body">
+    <ul class="list-group shadow-sm">
+      {% for row in por_status %}
+      <li class="list-group-item d-flex justify-content-between align-items-center">{{ row.status }} <span class="badge bg-primary">{{ row.c }}</span></li>
+      {% empty %}
+      <li class="list-group-item text-muted">Sem dados para exibir.</li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,6 @@
+{% extends "app/base.html" %}
+{% block title %}Enviar certificado{% endblock %}
+{% block content %}
+<div class="alert alert-info mt-3">{{ mensagem }}</div>
+<a href="{% url 'cursos_certificados' %}" class="btn btn-secondary">Voltar</a>
+{% endblock %}
