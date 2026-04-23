@@ -223,18 +223,19 @@
     .dl-percent { font-weight: 700; color: var(--text); }
 
     .btn-cancel {
-      background: transparent;
-      border: 1px solid var(--border);
+      background: rgba(239,68,68,.12);
+      border: 1px solid rgba(239,68,68,.4);
       border-radius: 6px;
-      color: var(--muted);
+      color: var(--error);
       cursor: pointer;
-      font-size: 11px;
-      padding: 3px 10px;
-      transition: border-color .15s, color .15s;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 12px;
+      transition: background .15s, border-color .15s;
       white-space: nowrap;
       margin-left: auto;
     }
-    .btn-cancel:hover:not(:disabled) { border-color: var(--error); color: var(--error); }
+    .btn-cancel:hover:not(:disabled) { background: rgba(239,68,68,.25); border-color: var(--error); }
     .btn-cancel:disabled { opacity: .5; cursor: not-allowed; }
 
     /* ── Badge ───────────────────────────────────────────────── */
