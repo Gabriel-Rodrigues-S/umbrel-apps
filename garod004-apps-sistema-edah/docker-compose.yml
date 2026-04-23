@@ -16,6 +16,7 @@ services:
     environment:
       DJANGO_ENV: production
       DJANGO_DEBUG: 'False'
+      DJANGO_SECURE_SSL_REDIRECT: 'False'
       DJANGO_ALLOWED_HOSTS: '*'
       DJANGO_CORS_ALLOWED_ORIGINS: 'http://localhost:8270'
       BOOTSTRAP_ADMIN_EMAIL: admin@edah.local
