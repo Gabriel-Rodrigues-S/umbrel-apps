@@ -104,8 +104,8 @@ if IS_PRODUCTION and not DEBUG:
         os.getenv("DJANGO_SECURE_SSL_REDIRECT", secure_ssl_redirect_default).strip().lower()
         == "true"
     )
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = os.getenv("DJANGO_SESSION_COOKIE_SECURE", "True").strip().lower() == "true"
+    CSRF_COOKIE_SECURE = os.getenv("DJANGO_CSRF_COOKIE_SECURE", "True").strip().lower() == "true"
     SECURE_HSTS_SECONDS = int(os.getenv("DJANGO_SECURE_HSTS_SECONDS", "31536000"))
     SECURE_HSTS_INCLUDE_SUBDOMAINS = (
         os.getenv("DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", "True").strip().lower() == "true"
