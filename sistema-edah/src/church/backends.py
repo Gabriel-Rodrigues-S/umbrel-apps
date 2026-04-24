@@ -1,6 +1,12 @@
 from django.contrib.auth.backends import ModelBackend
 from django.db import connection
-from django_tenants.utils import schema_context
+
+try:
+    from django_tenants.utils import schema_context
+    _HAS_TENANTS = True
+except ImportError:
+    _HAS_TENANTS = False
+    schema_context = None
 
 
 class PublicSchemaAdminBackend(ModelBackend):
@@ -17,8 +23,8 @@ class PublicSchemaAdminBackend(ModelBackend):
     """
 
     def authenticate(self, request, username=None, password=None, **kwargs):
-        # Só atua em schemas de tenant
-        if getattr(connection, 'schema_name', 'public') == 'public':
+        # Só atua em modo multi-tenant e em schemas de tenant
+        if not _HAS_TENANTS or getattr(connection, 'schema_name', 'public') == 'public':
             return None
 
         from django.contrib.auth import get_user_model
@@ -42,8 +48,8 @@ class PublicSchemaAdminBackend(ModelBackend):
         return None
 
     def get_user(self, user_id):
-        # Só atua em schemas de tenant
-        if getattr(connection, 'schema_name', 'public') == 'public':
+        # Só atua em modo multi-tenant e em schemas de tenant
+        if not _HAS_TENANTS or getattr(connection, 'schema_name', 'public') == 'public':
             return None
 
         from django.contrib.auth import get_user_model
