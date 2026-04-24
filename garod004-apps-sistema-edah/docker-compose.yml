@@ -3,7 +3,7 @@ version: '3.7'
 services:
   app_proxy:
     environment:
-      APP_HOST: garod004-apps-sistema-edah_server_1
+      APP_HOST: garod004-apps-sistema-edah-server-1
       APP_PORT: 8270
 
   server:
