@@ -41,6 +41,8 @@ FORMAT_OPTIONS: dict[str, dict] = {
     "pdf-to-jpg":  {"label": "PDF → JPG por página (ZIP)", "type": "document", "ext_in": "pdf", "ext_out": "zip"},
     "pptx-to-pdf": {"label": "PPTX → PDF",             "type": "document", "ext_in": "pptx", "ext_out": "pdf"},
     "xlsx-to-pdf": {"label": "XLSX → PDF",             "type": "document", "ext_in": "xlsx", "ext_out": "pdf"},
+    # ── Lote ───────────────────────────────────────────────────────────────────
+    "merge-to-pdf": {"label": "Juntar tudo em um PDF",  "type": "batch",    "ext_in": None,   "ext_out": "pdf"},
 }
 
 
@@ -151,6 +153,93 @@ def _convert_document(job_id: str, input_path: str, output_path: str, fmt_key: s
                 progress_store[job_id]["percent"] = round((i + 1) / len(pages) * 98, 1)
 
     progress_store[job_id]["percent"] = 99.0
+
+
+# ── Mesclar arquivos em PDF ───────────────────────────────────────────────────
+
+def _merge_to_pdf(job_id: str, input_paths: list[str], output_path: str) -> None:
+    from pypdf import PdfWriter, PdfReader
+    from PIL import Image
+
+    writer = PdfWriter()
+    total = len(input_paths)
+
+    for i, path in enumerate(input_paths):
+        progress_store[job_id]["percent"] = round(i / total * 90, 1)
+        ext = Path(path).suffix.lower().lstrip(".")
+
+        if ext == "pdf":
+            reader = PdfReader(path)
+            for page in reader.pages:
+                writer.add_page(page)
+
+        elif ext in ("png", "jpg", "jpeg", "webp", "bmp", "tiff", "gif"):
+            img = Image.open(path).convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="PDF")
+            buf.seek(0)
+            reader = PdfReader(buf)
+            for page in reader.pages:
+                writer.add_page(page)
+
+        elif ext in ("docx", "pptx", "xlsx", "odt", "doc", "xls", "ppt"):
+            out_dir = str(Path(path).parent)
+            subprocess.run(
+                ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", out_dir, path],
+                check=True, capture_output=True,
+            )
+            lo_pdf = Path(out_dir) / f"{Path(path).stem}.pdf"
+            if lo_pdf.exists():
+                reader = PdfReader(str(lo_pdf))
+                for page in reader.pages:
+                    writer.add_page(page)
+                lo_pdf.unlink()
+
+    with open(output_path, "wb") as f:
+        writer.write(f)
+    progress_store[job_id]["percent"] = 99.0
+
+
+def _run_merge(job_id: str, input_paths: list[str]) -> None:
+    from app.database import update_conversion
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    output_filename = f"merged_{job_id[:8]}.pdf"
+    output_path = os.path.join(OUTPUT_DIR, output_filename)
+
+    progress_store[job_id] = {"status": "converting", "percent": 0.0, "filename": "", "error": None}
+
+    try:
+        _merge_to_pdf(job_id, input_paths, output_path)
+        filesize_out = os.path.getsize(output_path)
+        progress_store[job_id].update({"status": "complete", "percent": 100.0, "filename": output_filename})
+        update_conversion(
+            job_id,
+            status="complete",
+            output_filename=output_filename,
+            filesize_out=filesize_out,
+            completed_at=datetime.now().isoformat(),
+        )
+    except Exception as exc:
+        error_msg = str(exc)
+        progress_store[job_id].update({"status": "error", "error": error_msg})
+        update_conversion(job_id, status="error", error_msg=error_msg)
+    finally:
+        for p in input_paths:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
+def start_merge(job_id: str, input_paths: list[str]) -> None:
+    thread = threading.Thread(
+        target=_run_merge,
+        args=(job_id, input_paths),
+        daemon=True,
+        name=f"merge-{job_id[:8]}",
+    )
+    thread.start()
 
 
 # ── Thread principal ──────────────────────────────────────────────────────────

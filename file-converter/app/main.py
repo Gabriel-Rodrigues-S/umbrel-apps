@@ -2,8 +2,10 @@
 FastAPI — File Converter
 Rotas:
   GET  /                          → UI (index.html)
-  POST /api/convert               → upload + conversão, retorna job_id
+  POST /api/convert               → upload + conversão (arquivo único)
+  POST /api/convert-batch         → upload + conversão (múltiplos arquivos)
   GET  /api/progress/{id}         → SSE stream de progresso
+  GET  /api/batch-zip             → baixar vários arquivos em um ZIP
   GET  /api/history               → histórico de conversões (SQLite)
   GET  /api/files                 → lista arquivos em OUTPUT_DIR
   GET  /files/{filename}          → serve arquivo para download
@@ -11,10 +13,13 @@ Rotas:
 """
 
 import asyncio
+import io as _io
 import json
 import os
 import uuid
+import zipfile as _zipfile
 from pathlib import Path
+from typing import List
 
 import aiofiles
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -29,6 +34,7 @@ from app.converter import (
     progress_store,
     start_cleanup_thread,
     start_conversion,
+    start_merge,
 )
 from app.database import (
     create_conversion,
@@ -108,6 +114,101 @@ async def api_start_conversion(
     start_conversion(job_id, input_path, format)
 
     return {"job_id": job_id, "status": "started"}
+
+
+# ── API: conversão em lote ───────────────────────────────────────────────────
+
+@app.post("/api/convert-batch")
+async def api_start_batch_conversion(
+    files: List[UploadFile] = File(...),
+    format: str = Form(...),
+    mode: str = Form(...),
+) -> dict:
+    if mode not in ("individual", "merge"):
+        raise HTTPException(status_code=400, detail="Modo inválido.")
+    if not files:
+        raise HTTPException(status_code=400, detail="Nenhum arquivo enviado.")
+    if len(files) > 50:
+        raise HTTPException(status_code=400, detail="Máximo de 50 arquivos por vez.")
+
+    # Salva todos os arquivos em disco
+    saved: list[tuple[str, str, int]] = []  # (path, original_name, size)
+    for file in files:
+        content = await file.read()
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail=f"{file.filename}: arquivo muito grande.")
+        original_filename = file.filename or "upload"
+        tid = str(uuid.uuid4())[:8]
+        saved_name = f"{Path(original_filename).stem}_{tid}{Path(original_filename).suffix}"
+        input_path = os.path.join(UPLOAD_DIR, saved_name)
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        async with aiofiles.open(input_path, "wb") as f:
+            await f.write(content)
+        saved.append((input_path, original_filename, os.path.getsize(input_path)))
+
+    if mode == "merge":
+        job_id = str(uuid.uuid4())
+        input_paths = [s[0] for s in saved]
+        create_conversion(
+            job_id,
+            original_filename=f"{len(saved)} arquivo(s) → PDF",
+            input_format="mixed",
+            output_format="pdf",
+            conversion_type="batch-merge",
+            filesize_in=sum(s[2] for s in saved),
+        )
+        start_merge(job_id, input_paths)
+        return {"mode": "merge", "job_id": job_id}
+
+    # mode == "individual"
+    if format not in FORMAT_OPTIONS:
+        raise HTTPException(status_code=400, detail="Formato inválido.")
+    fmt_info = FORMAT_OPTIONS[format]
+    jobs = []
+    for input_path, original_filename, size in saved:
+        expected_ext = fmt_info.get("ext_in")
+        if expected_ext:
+            actual_ext = Path(original_filename).suffix.lstrip(".").lower()
+            if actual_ext != expected_ext:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{original_filename}: esperado .{expected_ext}, recebeu .{actual_ext}.",
+                )
+        job_id = str(uuid.uuid4())
+        create_conversion(
+            job_id,
+            original_filename=original_filename,
+            input_format=fmt_info.get("ext_in") or Path(original_filename).suffix.lstrip(".").lower(),
+            output_format=fmt_info["ext_out"],
+            conversion_type=fmt_info["type"],
+            filesize_in=size,
+        )
+        start_conversion(job_id, input_path, format)
+        jobs.append({"job_id": job_id, "filename": original_filename})
+    return {"mode": "individual", "jobs": jobs}
+
+
+# ── API: baixar múltiplos arquivos como ZIP ───────────────────────────────────
+
+@app.get("/api/batch-zip")
+async def api_batch_zip(files: str) -> StreamingResponse:
+    filenames = [f.strip() for f in files.split(",") if f.strip()]
+    buf = _io.BytesIO()
+    with _zipfile.ZipFile(buf, "w", _zipfile.ZIP_DEFLATED) as zf:
+        for filename in filenames:
+            filepath = Path(OUTPUT_DIR) / filename
+            try:
+                filepath.resolve().relative_to(Path(OUTPUT_DIR).resolve())
+            except ValueError:
+                continue
+            if filepath.exists():
+                zf.write(filepath, filename)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="arquivos_convertidos.zip"'},
+    )
 
 
 # ── API: progresso via SSE ────────────────────────────────────────────────────

@@ -80,6 +80,7 @@
     .drop-icon  { font-size: 28px; display: block; margin-bottom: 8px; }
     .drop-link  { color: var(--accent); cursor: pointer; text-decoration: underline; }
 
+    /* Arquivo(s) selecionado(s) */
     .selected-file {
       margin-top: 12px;
       font-size: 13px;
@@ -92,7 +93,81 @@
       gap: 8px;
     }
 
+    .file-list {
+      margin-top: 12px;
+      background: var(--surface2);
+      border-radius: 6px;
+      max-height: 160px;
+      overflow-y: auto;
+    }
+    .file-list-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      font-size: 13px;
+      border-bottom: 1px solid var(--border);
+    }
+    .file-list-item:last-child { border-bottom: none; }
+    .file-list-item .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-list-item .fsize { color: var(--muted); white-space: nowrap; font-size: 12px; }
+    .file-list-header {
+      padding: 6px 12px;
+      font-size: 12px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+    }
+    .file-list-clear {
+      color: var(--accent);
+      cursor: pointer;
+      font-size: 12px;
+      background: none;
+      border: none;
+      padding: 0;
+    }
+    .file-list-clear:hover { text-decoration: underline; }
+
+    /* Seleção de modo (individual / mesclar) */
+    .mode-row {
+      display: none;
+      gap: 8px;
+      margin-top: 14px;
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 4px;
+    }
+    .mode-btn {
+      flex: 1;
+      padding: 9px 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      background: transparent;
+      color: var(--muted);
+      transition: background .15s, color .15s;
+    }
+    .mode-btn.active {
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: 0 1px 4px rgba(0,0,0,.4);
+    }
+
+    /* Linha de formato + botão converter */
     .format-row { display: flex; gap: 10px; align-items: center; margin-top: 12px; }
+
+    .merge-label {
+      flex: 1;
+      background: var(--surface2);
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 14px;
+      padding: 11px 14px;
+    }
 
     select {
       flex: 1;
@@ -126,6 +201,37 @@
     .btn-convert:hover:not(:disabled) { background: #e02020; }
     .btn-convert:active:not(:disabled) { transform: scale(.97); }
     .btn-convert:disabled { opacity: .45; cursor: not-allowed; }
+
+    /* Ações após conversão em lote */
+    .batch-actions {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .btn-batch {
+      flex: 1;
+      min-width: 180px;
+      padding: 11px 18px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1.5px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+      transition: background .15s;
+    }
+    .btn-batch:hover { background: var(--border); }
+    .btn-batch.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .btn-batch.primary:hover { background: var(--accent-dk); border-color: var(--accent-dk); }
 
     .section-label {
       font-size: 13px; font-weight: 600;
@@ -225,6 +331,7 @@
       .format-row { flex-direction: column; }
       .btn-convert { width: 100%; }
       .logo { font-size: 22px; }
+      .batch-actions { flex-direction: column; }
     }
   </style>
 </head>
@@ -243,15 +350,39 @@
     <div id="formError" class="error-banner"></div>
 
     <div id="dropZone" class="drop-zone" onclick="document.getElementById('fileInput').click()">
-      <input type="file" id="fileInput" style="display:none" />
+      <input type="file" id="fileInput" style="display:none" multiple />
       <div class="drop-label">
         <span class="drop-icon">📂</span>
-        <span>Arraste um arquivo aqui ou <span class="drop-link">clique para selecionar</span></span>
+        <span>Arraste arquivos aqui ou <span class="drop-link">clique para selecionar</span></span>
       </div>
-      <div id="selectedFile" class="selected-file" style="display:none"></div>
     </div>
 
-    <div class="format-row">
+    <!-- Arquivo único selecionado -->
+    <div id="singleFile" class="selected-file" style="display:none"></div>
+
+    <!-- Múltiplos arquivos selecionados -->
+    <div id="multiFile" style="display:none">
+      <div class="file-list">
+        <div class="file-list-header">
+          <span id="multiFileCount"></span>
+          <button class="file-list-clear" onclick="clearFiles()">Limpar</button>
+        </div>
+        <div id="fileListItems"></div>
+      </div>
+    </div>
+
+    <!-- Seleção de modo (visível apenas para múltiplos arquivos) -->
+    <div id="modeRow" class="mode-row">
+      <button id="modeIndividual" class="mode-btn active" onclick="setMode('individual')">
+        Converter individualmente
+      </button>
+      <button id="modeMerge" class="mode-btn" onclick="setMode('merge')">
+        Juntar em um PDF
+      </button>
+    </div>
+
+    <!-- Formato + botão converter -->
+    <div class="format-row" id="formatRow">
       <select id="formatSelect">
         <optgroup label="🎬 Vídeo">
           <option value="mp4-to-mkv">MP4 → MKV</option>
@@ -287,10 +418,19 @@
         ⚙&nbsp; Converter
       </button>
     </div>
+
+    <!-- Rótulo estático exibido no modo "Juntar em PDF" -->
+    <div class="format-row" id="mergeRow" style="display:none">
+      <div class="merge-label">📄 Todos os arquivos serão mesclados em um único PDF</div>
+      <button id="mergeBtn" class="btn-convert" onclick="startConversion()" disabled>
+        ⚙&nbsp; Mesclar
+      </button>
+    </div>
   </div>
 
   <div id="activeSection" style="display:none">
     <p class="section-label">Em progresso</p>
+    <div id="batchActionsContainer"></div>
     <div id="activeList"></div>
   </div>
 
@@ -305,6 +445,8 @@
 
 <script>
   const activeJobs = {};
+  let selectedFiles = [];
+  let currentMode = 'individual';
 
   // Extensão → formatos válidos
   const EXT_MAP = {
@@ -327,10 +469,10 @@
     xlsx: ['xlsx-to-pdf'],
   };
 
-  let selectedFile = null;
+  // ── Seleção de arquivos ────────────────────────────────────────────────────
 
   document.getElementById('fileInput').addEventListener('change', function() {
-    if (this.files[0]) handleFileSelected(this.files[0]);
+    if (this.files.length) handleFilesSelected(Array.from(this.files));
   });
 
   const dropZone = document.getElementById('dropZone');
@@ -339,18 +481,91 @@
   dropZone.addEventListener('drop', e => {
     e.preventDefault(); e.stopPropagation();
     dropZone.classList.remove('dragover');
-    if (e.dataTransfer.files[0]) handleFileSelected(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files.length) handleFilesSelected(Array.from(e.dataTransfer.files));
   });
 
-  function handleFileSelected(file) {
-    selectedFile = file;
-    const ext = file.name.split('.').pop().toLowerCase();
-    const sf = document.getElementById('selectedFile');
-    sf.style.display = 'flex';
-    sf.innerHTML = `<span>📄</span><span><strong>${escHtml(file.name)}</strong> (${fmtSize(file.size)})</span>`;
-    filterFormats(ext);
-    document.getElementById('convertBtn').disabled = false;
+  function handleFilesSelected(files) {
+    selectedFiles = files;
     document.getElementById('formError').classList.remove('visible');
+
+    if (files.length === 1) {
+      // Exibe arquivo único
+      const f = files[0];
+      const sf = document.getElementById('singleFile');
+      sf.style.display = 'flex';
+      sf.innerHTML = `<span>📄</span><span><strong>${escHtml(f.name)}</strong> (${fmtSize(f.size)})</span>`;
+      document.getElementById('multiFile').style.display = 'none';
+      document.getElementById('modeRow').style.display = 'none';
+      currentMode = 'individual';
+      showFormatRow();
+      filterFormats(f.name.split('.').pop().toLowerCase());
+    } else {
+      // Exibe lista de arquivos
+      document.getElementById('singleFile').style.display = 'none';
+      renderFileList(files);
+      document.getElementById('modeRow').style.display = 'flex';
+      // filtra formatos pelo primeiro arquivo
+      filterFormats(files[0].name.split('.').pop().toLowerCase());
+      applyMode();
+    }
+
+    setConvertEnabled(true);
+  }
+
+  function renderFileList(files) {
+    const total = files.reduce((s, f) => s + f.size, 0);
+    document.getElementById('multiFileCount').textContent =
+      `${files.length} arquivo(s) · ${fmtSize(total)}`;
+
+    const items = files.map(f => `
+      <div class="file-list-item">
+        <span>📄</span>
+        <span class="fname" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
+        <span class="fsize">${fmtSize(f.size)}</span>
+      </div>`).join('');
+    document.getElementById('fileListItems').innerHTML = items;
+    document.getElementById('multiFile').style.display = 'block';
+  }
+
+  function clearFiles() {
+    selectedFiles = [];
+    document.getElementById('singleFile').style.display = 'none';
+    document.getElementById('multiFile').style.display = 'none';
+    document.getElementById('modeRow').style.display = 'none';
+    document.getElementById('fileInput').value = '';
+    currentMode = 'individual';
+    showFormatRow();
+    setConvertEnabled(false);
+  }
+
+  // ── Modo individual / mesclar ──────────────────────────────────────────────
+
+  function setMode(mode) {
+    currentMode = mode;
+    document.getElementById('modeIndividual').classList.toggle('active', mode === 'individual');
+    document.getElementById('modeMerge').classList.toggle('active', mode === 'merge');
+    applyMode();
+  }
+
+  function applyMode() {
+    if (currentMode === 'merge') {
+      document.getElementById('formatRow').style.display = 'none';
+      document.getElementById('mergeRow').style.display = 'flex';
+      document.getElementById('mergeBtn').disabled = selectedFiles.length === 0;
+    } else {
+      showFormatRow();
+    }
+  }
+
+  function showFormatRow() {
+    document.getElementById('formatRow').style.display = 'flex';
+    document.getElementById('mergeRow').style.display = 'none';
+    setConvertEnabled(selectedFiles.length > 0);
+  }
+
+  function setConvertEnabled(v) {
+    document.getElementById('convertBtn').disabled = !v;
+    document.getElementById('mergeBtn').disabled = !v;
   }
 
   function filterFormats(ext) {
@@ -366,8 +581,18 @@
     }
   }
 
+  // ── Iniciar conversão ──────────────────────────────────────────────────────
+
   async function startConversion() {
-    if (!selectedFile) return;
+    if (!selectedFiles.length) return;
+    if (selectedFiles.length === 1) {
+      await startSingleConversion();
+    } else {
+      await startBatchConversionFlow();
+    }
+  }
+
+  async function startSingleConversion() {
     const format = document.getElementById('formatSelect').value;
     const btn = document.getElementById('convertBtn');
     const errEl = document.getElementById('formError');
@@ -377,7 +602,7 @@
     btn.textContent = 'Enviando...';
 
     const formData = new FormData();
-    formData.append('file', selectedFile);
+    formData.append('file', selectedFiles[0]);
     formData.append('format', format);
 
     try {
@@ -388,11 +613,8 @@
       }
       const { job_id } = await res.json();
 
-      const fileName = selectedFile.name;
-      selectedFile = null;
-      document.getElementById('selectedFile').style.display = 'none';
-      document.getElementById('fileInput').value = '';
-      document.getElementById('convertBtn').disabled = true;
+      const fileName = selectedFiles[0].name;
+      clearFiles();
 
       addJobCard(job_id, fileName, format);
       connectSSE(job_id, format);
@@ -400,16 +622,151 @@
     } catch (err) {
       showError('Erro ao enviar: ' + err.message);
     } finally {
-      btn.disabled = !selectedFile;
-      btn.textContent = '⚙\u00a0 Converter';
+      btn.disabled = selectedFiles.length === 0;
+      btn.textContent = '⚙  Converter';
     }
   }
 
-  function showError(msg) {
-    const el = document.getElementById('formError');
-    el.textContent = '⚠ ' + msg;
-    el.classList.add('visible');
+  async function startBatchConversionFlow() {
+    const isMerge = currentMode === 'merge';
+    const format  = isMerge ? 'merge-to-pdf' : document.getElementById('formatSelect').value;
+    const activeBtn = isMerge
+      ? document.getElementById('mergeBtn')
+      : document.getElementById('convertBtn');
+    const errEl = document.getElementById('formError');
+    errEl.classList.remove('visible');
+
+    activeBtn.disabled = true;
+    activeBtn.textContent = 'Enviando...';
+
+    const formData = new FormData();
+    for (const file of selectedFiles) formData.append('files', file);
+    formData.append('format', format);
+    formData.append('mode', isMerge ? 'merge' : 'individual');
+
+    try {
+      const res = await fetch('/api/convert-batch', { method: 'POST', body: formData });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || `Erro ${res.status}`);
+      }
+      const result = await res.json();
+
+      const filesSnap = [...selectedFiles];
+      clearFiles();
+
+      if (result.mode === 'merge') {
+        const label = `${filesSnap.length} arquivo(s) → PDF`;
+        addJobCard(result.job_id, label, 'merge-to-pdf');
+        connectSSE(result.job_id, 'merge-to-pdf');
+
+      } else {
+        // Individual batch
+        const batchState = {
+          total: result.jobs.length,
+          completed: 0,
+          outputFiles: [],
+        };
+        for (const job of result.jobs) {
+          addJobCard(job.job_id, job.filename, format);
+          connectSSEBatch(job.job_id, format, batchState);
+        }
+      }
+
+    } catch (err) {
+      showError('Erro ao enviar: ' + err.message);
+    } finally {
+      activeBtn.textContent = isMerge ? '⚙  Mesclar' : '⚙  Converter';
+      setConvertEnabled(selectedFiles.length > 0);
+    }
   }
+
+  // ── SSE para job único ─────────────────────────────────────────────────────
+
+  function connectSSE(id, format) {
+    const es = new EventSource('/api/progress/' + id);
+    activeJobs[id] = es;
+
+    es.onmessage = function(evt) {
+      const data = JSON.parse(evt.data);
+      updateJobCard(id, data);
+      if (data.status === 'complete' || data.status === 'error') {
+        es.close();
+        delete activeJobs[id];
+        loadHistory();
+        setTimeout(() => {
+          const card = document.getElementById('card-' + id);
+          if (card) card.style.opacity = '0.45';
+        }, 4000);
+      }
+    };
+    es.onerror = () => es.close();
+  }
+
+  // ── SSE para batch individual ──────────────────────────────────────────────
+
+  function connectSSEBatch(id, format, batchState) {
+    const es = new EventSource('/api/progress/' + id);
+    activeJobs[id] = es;
+
+    es.onmessage = function(evt) {
+      const data = JSON.parse(evt.data);
+      updateJobCard(id, data);
+
+      if (data.status === 'complete' || data.status === 'error') {
+        es.close();
+        delete activeJobs[id];
+        batchState.completed++;
+
+        if (data.status === 'complete' && data.filename)
+          batchState.outputFiles.push(data.filename);
+
+        loadHistory();
+
+        if (batchState.completed === batchState.total)
+          showBatchActions(batchState.outputFiles);
+
+        setTimeout(() => {
+          const card = document.getElementById('card-' + id);
+          if (card) card.style.opacity = '0.45';
+        }, 4000);
+      }
+    };
+    es.onerror = () => es.close();
+  }
+
+  // ── Ações após conversão em lote ───────────────────────────────────────────
+
+  function showBatchActions(outputFiles) {
+    const container = document.getElementById('batchActionsContainer');
+    if (outputFiles.length < 2) { container.innerHTML = ''; return; }
+
+    const zipUrl = '/api/batch-zip?files=' + encodeURIComponent(outputFiles.join(','));
+
+    container.innerHTML = `
+      <div class="batch-actions">
+        <button class="btn-batch" onclick="downloadIndividually(${JSON.stringify(outputFiles)})">
+          ⬇ Baixar individualmente (${outputFiles.length} arquivos)
+        </button>
+        <a class="btn-batch primary" href="${escHtml(zipUrl)}" download="arquivos_convertidos.zip">
+          📦 Baixar todos em ZIP
+        </a>
+      </div>`;
+  }
+
+  async function downloadIndividually(filenames) {
+    for (const filename of filenames) {
+      const a = document.createElement('a');
+      a.href = '/files/' + encodeURIComponent(filename);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      await new Promise(r => setTimeout(r, 600));
+    }
+  }
+
+  // ── Cards de progresso ─────────────────────────────────────────────────────
 
   function addJobCard(id, filename, format) {
     const section = document.getElementById('activeSection');
@@ -434,26 +791,6 @@
     section.style.display = '';
   }
 
-  function connectSSE(id, format) {
-    const es = new EventSource('/api/progress/' + id);
-    activeJobs[id] = es;
-
-    es.onmessage = function(evt) {
-      const data = JSON.parse(evt.data);
-      updateJobCard(id, data);
-      if (data.status === 'complete' || data.status === 'error') {
-        es.close();
-        delete activeJobs[id];
-        loadHistory();
-        setTimeout(() => {
-          const card = document.getElementById('card-' + id);
-          if (card) card.style.opacity = '0.45';
-        }, 4000);
-      }
-    };
-    es.onerror = () => es.close();
-  }
-
   function updateJobCard(id, d) {
     const titleEl = document.getElementById('title-' + id);
     const fillEl  = document.getElementById('fill-'  + id);
@@ -474,6 +811,8 @@
       badgeEl.innerHTML = '<span class="badge badge-error">✗ Erro</span>';
     }
   }
+
+  // ── Histórico ──────────────────────────────────────────────────────────────
 
   async function loadHistory() {
     const container = document.getElementById('historyContent');
@@ -523,14 +862,23 @@
     }
   }
 
+  // ── Utilitários ────────────────────────────────────────────────────────────
+
+  function showError(msg) {
+    const el = document.getElementById('formError');
+    el.textContent = '⚠ ' + msg;
+    el.classList.add('visible');
+  }
+
   function fmtLabel(key) {
     const map = {
       'mp4-to-mkv':'MP4→MKV','mkv-to-mp4':'MKV→MP4','mp4-to-avi':'MP4→AVI','any-to-mp3':'→MP3',
       'mp3-to-wav':'MP3→WAV','wav-to-mp3':'WAV→MP3','flac-to-mp3':'FLAC→MP3','any-to-flac':'→FLAC',
       'png-to-jpg':'PNG→JPG','jpg-to-png':'JPG→PNG','webp-to-png':'WEBP→PNG','webp-to-jpg':'WEBP→JPG',
       'jpg-to-webp':'JPG→WEBP','png-to-webp':'PNG→WEBP','img-to-pdf':'→PDF',
-      'pdf-to-docx':'PDF→DOCX','docx-to-pdf':'DOCX→PDF','pdf-to-png':'PDF→PNG(ZIP)','pdf-to-jpg':'PDF→JPG(ZIP)',
-      'pptx-to-pdf':'PPTX→PDF','xlsx-to-pdf':'XLSX→PDF',
+      'pdf-to-docx':'PDF→DOCX','docx-to-pdf':'DOCX→PDF','pdf-to-png':'PDF→PNG(ZIP)',
+      'pdf-to-jpg':'PDF→JPG(ZIP)','pptx-to-pdf':'PPTX→PDF','xlsx-to-pdf':'XLSX→PDF',
+      'merge-to-pdf':'Mesclar→PDF',
     };
     return map[key] || key;
   }
