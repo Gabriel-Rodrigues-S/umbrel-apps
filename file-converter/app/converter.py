@@ -38,6 +38,7 @@ FORMAT_OPTIONS: dict[str, dict] = {
     "pdf-to-docx": {"label": "PDF → DOCX",             "type": "document", "ext_in": "pdf",  "ext_out": "docx"},
     "docx-to-pdf": {"label": "DOCX → PDF",             "type": "document", "ext_in": "docx", "ext_out": "pdf"},
     "pdf-to-png":  {"label": "PDF → PNG por página (ZIP)", "type": "document", "ext_in": "pdf", "ext_out": "zip"},
+    "pdf-to-jpg":  {"label": "PDF → JPG por página (ZIP)", "type": "document", "ext_in": "pdf", "ext_out": "zip"},
     "pptx-to-pdf": {"label": "PPTX → PDF",             "type": "document", "ext_in": "pptx", "ext_out": "pdf"},
     "xlsx-to-pdf": {"label": "XLSX → PDF",             "type": "document", "ext_in": "xlsx", "ext_out": "pdf"},
 }
@@ -129,14 +130,24 @@ def _convert_document(job_id: str, input_path: str, output_path: str, fmt_key: s
         lo_output = Path(out_dir) / f"{Path(input_path).stem}.pdf"
         os.rename(lo_output, output_path)
 
-    elif fmt_key == "pdf-to-png":
+    elif fmt_key in ("pdf-to-png", "pdf-to-jpg"):
         from pdf2image import convert_from_path
+        img_format = "PNG" if fmt_key == "pdf-to-png" else "JPEG"
+        img_ext = "png" if fmt_key == "pdf-to-png" else "jpg"
         pages = convert_from_path(input_path, dpi=150)
+        if len(pages) == 1:
+            actual_path = str(Path(output_path).with_suffix(f".{img_ext}"))
+            page = pages[0].convert("RGB") if img_format == "JPEG" else pages[0]
+            page.save(actual_path, format=img_format, quality=90)
+            progress_store[job_id]["percent"] = 98.0
+            return actual_path
         with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for i, page in enumerate(pages):
                 buf = io.BytesIO()
-                page.save(buf, format="PNG")
-                zf.writestr(f"page_{i+1:04d}.png", buf.getvalue())
+                if img_format == "JPEG":
+                    page = page.convert("RGB")
+                page.save(buf, format=img_format, quality=90)
+                zf.writestr(f"page_{i+1:04d}.{img_ext}", buf.getvalue())
                 progress_store[job_id]["percent"] = round((i + 1) / len(pages) * 98, 1)
 
     progress_store[job_id]["percent"] = 99.0
@@ -164,7 +175,10 @@ def _run_conversion(job_id: str, input_path: str, fmt_key: str) -> None:
         elif conv_type == "image":
             _convert_image(job_id, input_path, output_path, fmt_key)
         elif conv_type == "document":
-            _convert_document(job_id, input_path, output_path, fmt_key)
+            actual = _convert_document(job_id, input_path, output_path, fmt_key)
+            if actual:
+                output_path = actual
+                output_filename = Path(output_path).name
 
         filesize_out = os.path.getsize(output_path)
         progress_store[job_id].update({"status": "complete", "percent": 100.0, "filename": output_filename})

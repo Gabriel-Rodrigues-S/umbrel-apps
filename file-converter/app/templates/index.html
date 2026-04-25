@@ -278,6 +278,7 @@
           <option value="pdf-to-docx">PDF → DOCX</option>
           <option value="docx-to-pdf">DOCX → PDF</option>
           <option value="pdf-to-png">PDF → PNG por página (ZIP)</option>
+          <option value="pdf-to-jpg">PDF → JPG por página (ZIP)</option>
           <option value="pptx-to-pdf">PPTX → PDF</option>
           <option value="xlsx-to-pdf">XLSX → PDF</option>
         </optgroup>
@@ -320,7 +321,7 @@
     jpg:  ['jpg-to-png','jpg-to-webp','img-to-pdf'],
     jpeg: ['jpg-to-png','jpg-to-webp','img-to-pdf'],
     webp: ['webp-to-png','webp-to-jpg'],
-    pdf:  ['pdf-to-docx','pdf-to-png'],
+    pdf:  ['pdf-to-docx','pdf-to-png','pdf-to-jpg'],
     docx: ['docx-to-pdf'],
     pptx: ['pptx-to-pdf'],
     xlsx: ['xlsx-to-pdf'],
@@ -528,7 +529,7 @@
       'mp3-to-wav':'MP3→WAV','wav-to-mp3':'WAV→MP3','flac-to-mp3':'FLAC→MP3','any-to-flac':'→FLAC',
       'png-to-jpg':'PNG→JPG','jpg-to-png':'JPG→PNG','webp-to-png':'WEBP→PNG','webp-to-jpg':'WEBP→JPG',
       'jpg-to-webp':'JPG→WEBP','png-to-webp':'PNG→WEBP','img-to-pdf':'→PDF',
-      'pdf-to-docx':'PDF→DOCX','docx-to-pdf':'DOCX→PDF','pdf-to-png':'PDF→PNG(ZIP)',
+      'pdf-to-docx':'PDF→DOCX','docx-to-pdf':'DOCX→PDF','pdf-to-png':'PDF→PNG(ZIP)','pdf-to-jpg':'PDF→JPG(ZIP)',
       'pptx-to-pdf':'PPTX→PDF','xlsx-to-pdf':'XLSX→PDF',
     };
     return map[key] || key;

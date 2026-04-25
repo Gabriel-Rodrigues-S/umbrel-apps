@@ -4,14 +4,14 @@ name: File Converter
 tagline: Converta vídeos, áudios, imagens e documentos sem depender de serviços externos
 icon: https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-file-converter/icon.svg
 category: utilities
-version: '1.0.0'
+version: '1.1.0'
 port: 9191
 description: >-
   Conversor de arquivos local para toda a família usar no servidor de casa.
   Vídeo: MP4 ↔ MKV, MP4 → AVI, qualquer vídeo → MP3.
   Áudio: MP3 ↔ WAV, FLAC → MP3, qualquer áudio → FLAC.
   Imagem: PNG ↔ JPG, WEBP ↔ PNG/JPG, imagem → PDF.
-  Documento: PDF → DOCX, DOCX/PPTX/XLSX → PDF, PDF → PNG por página (ZIP).
+  Documento: PDF → DOCX, DOCX/PPTX/XLSX → PDF, PDF → PNG/JPG por página (ZIP, ou imagem direta se 1 página).
   Progresso em tempo real, histórico de conversões. Tudo offline, sem nuvem.
 developer: garod004
 website: https://github.com/garod004/umbrel-apps
@@ -26,6 +26,6 @@ path: ''
 defaultUsername: ''
 defaultPassword: ''
 releaseNotes: >-
-  v1.0.0: versão inicial com suporte a vídeo, áudio, imagem e documentos.
+  v1.1.0: adicionado PDF → JPG por página; PDFs de 1 página geram imagem direta (sem ZIP).
 submitter: garod004
 submission: https://github.com/garod004/umbrel-apps
