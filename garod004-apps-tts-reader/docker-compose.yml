@@ -1,0 +1,11 @@
+version: '3.7'
+
+services:
+  app_proxy:
+    environment:
+      APP_HOST: garod004-apps-tts-reader_server_1
+      APP_PORT: 80
+
+  server:
+    image: ghcr.io/garod004/tts-reader:latest
+    restart: on-failure
