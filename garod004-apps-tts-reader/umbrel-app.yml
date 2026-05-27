@@ -1,0 +1,28 @@
+manifestVersion: 1
+id: garod004-apps-tts-reader
+name: TTS Reader
+tagline: Leia qualquer texto em voz alta, com loop
+icon: https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-tts-reader/icon.svg
+category: utilities
+version: '1.0.0'
+port: 3457
+description: >-
+  Leitor de texto em voz alta para uso pessoal. Cole um texto ou carregue um arquivo
+  .txt, .md ou .docx, escolha a voz e a velocidade, e ouça em loop.
+  Tudo processado localmente no navegador, sem enviar dados para serviços externos.
+developer: garod004
+website: https://github.com/garod004/umbrel-apps
+dependencies: []
+repo: https://github.com/garod004/umbrel-apps
+support: https://github.com/garod004/umbrel-apps/issues
+gallery:
+  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-tts-reader/icon.svg
+  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-tts-reader/icon.svg
+  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-tts-reader/icon.svg
+path: ''
+defaultUsername: ''
+defaultPassword: ''
+releaseNotes: >-
+  Primeira versão. TTS com Web Speech API, loop, highlight de frase, upload de .txt, .md e .docx.
+submitter: garod004
+submission: https://github.com/garod004/umbrel-apps
