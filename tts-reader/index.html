@@ -651,6 +651,8 @@ async function speakOne(text, signal) {
 
 // ── Async play loop ────────────────────────────────────────────────────
 async function runLoop() {
+  let consecutiveErrors = 0;
+
   while (st.playing) {
     if (st.idx >= st.sentences.length) {
       if (st.loopOn) { st.idx = 0; } else { break; }
@@ -666,16 +668,32 @@ async function runLoop() {
     abortCtrl = new AbortController();
     try {
       await speakOne(st.sentences[st.idx], abortCtrl.signal);
+      consecutiveErrors = 0;  // reset on success
       st.idx++;
     } catch (err) {
       if (err?.name === 'AbortError') break;
+
       if (isElectron) {
         say('⚠️ Síntese não disponível no preview. Use Chrome ou Firefox.', '#f59e0b');
         break;
       }
-      // Non-fatal: log and skip sentence
-      console.warn(`[TTS] sentence ${st.idx} error:`, err?.message);
-      say(`Erro na frase ${st.idx + 1} — pulando.`, '#f59e0b');
+
+      consecutiveErrors++;
+      console.warn(`[TTS] frase ${st.idx} erro (${consecutiveErrors}):`, err?.message);
+
+      // 3 erros seguidos = parar e mostrar diagnóstico
+      if (consecutiveErrors >= 3) {
+        const engine = isPiper ? 'Piper' : 'Web Speech';
+        say(
+          `❌ ${engine} não está funcionando (${err?.message || 'erro desconhecido'}). ` +
+          `Verifique se o app foi reiniciado e tente novamente.`,
+          '#ef4444'
+        );
+        break;
+      }
+
+      // Erro isolado: pular frase e continuar
+      say(`⚠️ Erro na frase ${st.idx + 1} — pulando.`, '#f59e0b');
       st.idx++;
     }
   }
@@ -683,7 +701,7 @@ async function runLoop() {
   st.playing = false;
   abortCtrl  = null;
   syncUI();
-  if (st.idx >= st.sentences.length && !st.loopOn) {
+  if (st.idx >= st.sentences.length && !st.loopOn && consecutiveErrors === 0) {
     say('✅ Leitura concluída.', '#22c55e');
   }
 }
