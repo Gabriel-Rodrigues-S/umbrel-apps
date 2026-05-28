@@ -1,17 +1,18 @@
 FROM python:3.12-slim
 
-# System packages: nginx, supervisord, espeak-ng (required by piper-phonemize)
+# System packages: nginx, supervisord
+# NOTE: piper-tts 1.4.x bundles its own espeak-ng (espeakbridge.so + data),
+#       so the system espeak-ng package is NOT needed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         nginx \
         supervisor \
-        espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Python dependencies
+# Python dependencies — pin piper-tts to 1.4.x (API changed from 1.2.x)
 RUN pip install --no-cache-dir \
-    "piper-tts>=1.2.0" \
+    "piper-tts==1.4.2" \
     "fastapi>=0.110.0" \
     "uvicorn[standard]>=0.27.0"
 
