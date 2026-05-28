@@ -605,7 +605,11 @@ async function speakPiper(text, signal) {
     body: JSON.stringify({ text, speed: parseFloat(sRange.value) }),
     signal,
   });
-  if (!r.ok) throw new Error(`piper HTTP ${r.status}`);
+  if (!r.ok) {
+    let detail = `HTTP ${r.status}`;
+    try { const b = await r.json(); if (b.detail) detail = b.detail; } catch {}
+    throw new Error(detail);
+  }
 
   const url = URL.createObjectURL(await r.blob());
   return new Promise((resolve, reject) => {
