@@ -63,7 +63,13 @@ def synthesize(req: SynthReq) -> Response:
 
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
-        _voice.synthesize(text, wf, length_scale=length_scale)
+        # synthesize() is a generator — must be fully consumed to write audio frames
+        for _ in _voice.synthesize(text, wf, length_scale=length_scale):
+            pass
     buf.seek(0)
 
-    return Response(content=buf.read(), media_type="audio/wav")
+    audio_bytes = buf.read()
+    if len(audio_bytes) < 100:
+        raise HTTPException(status_code=500, detail="Piper produced empty audio")
+
+    return Response(content=audio_bytes, media_type="audio/wav")
