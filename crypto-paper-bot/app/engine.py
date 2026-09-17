@@ -9,6 +9,7 @@ from .strategy import (
     macd_crossover_signal,
     rsi_signal,
     sma_crossover_signal,
+    trend_direction,
 )
 
 logger = logging.getLogger("engine")
@@ -98,11 +99,50 @@ async def tick_bot(bot: dict):
         elif regime == "range" and adx_value >= bot["adx_threshold"]:
             signal = None
 
+    # confirmação multi-timeframe: só entra se um timeframe maior concordar
+    # com a direção do sinal — filtro mais forte que a persistência, mas o
+    # bot vai operar com bem menos frequência. Só se aplica a novas entradas
+    # de estratégias de tendência, nunca a saídas.
+    if bot["confirmation_mode"] == "higher_timeframe" and signal == "buy" and regime == "trend":
+        higher_candles = await asyncio.to_thread(
+            exchange.fetch_ohlcv, bot["symbol"], bot["higher_timeframe"], required_candles(bot)
+        )
+        higher_closes = [c[4] for c in higher_candles]
+        if trend_direction(bot["strategy"], higher_closes, bot) != "up":
+            signal = None
+
+    if bot["confirmation_mode"] == "higher_timeframe":
+        confirmed_signal = signal
+        pending_signal, pending_count = None, 0
+    else:
+        # confirmação por persistência: só executa quando o mesmo sinal aparece
+        # em `confirm_ticks` checagens seguidas, filtrando reversões relâmpago
+        # (whipsaw) que surgem e somem em segundos.
+        if signal is None:
+            pending_signal, pending_count = None, 0
+            confirmed_signal = None
+        else:
+            if bot["pending_signal"] == signal:
+                pending_count = bot["pending_signal_count"] + 1
+            else:
+                pending_count = 1
+            pending_signal = signal
+            if pending_count >= bot["confirm_ticks"]:
+                confirmed_signal = signal
+                pending_signal, pending_count = None, 0
+            else:
+                confirmed_signal = None
+
     with get_conn() as conn:
+        conn.execute(
+            "UPDATE bots SET pending_signal = ?, pending_signal_count = ? WHERE id = ?",
+            (pending_signal, pending_count, bot["id"]),
+        )
         row = conn.execute("SELECT * FROM bots WHERE id = ?", (bot["id"],)).fetchone()
         cash = row["cash"]
         qty = row["position_qty"]
         entry_price = row["position_entry_price"]
+        signal = confirmed_signal
 
         if signal == "buy" and qty == 0:
             spend = cash

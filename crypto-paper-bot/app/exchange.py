@@ -20,6 +20,16 @@ def fetch_last_price(symbol: str) -> float:
     return float(ticker["last"])
 
 
+def fetch_ticker_stats(symbol: str) -> dict:
+    """Estatísticas de 24h: preço atual, variação absoluta e percentual."""
+    ticker = get_exchange().fetch_ticker(symbol)
+    return {
+        "last": ticker.get("last"),
+        "change": ticker.get("change"),
+        "percentage": ticker.get("percentage"),
+    }
+
+
 def list_symbols() -> list[str]:
     markets = get_exchange().load_markets()
     return sorted(

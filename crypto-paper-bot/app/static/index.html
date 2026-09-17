@@ -45,6 +45,11 @@
   .regime-tag.range { background: #3a2f1e; color: #e0a952; }
   .adx-tag { font-size: 11px; color: var(--muted); }
   .adx-tag.active { color: var(--green); }
+  .ticker { display: flex; align-items: baseline; gap: 12px; margin: 8px 0 14px; }
+  .ticker .price { font-size: 32px; font-weight: 700; }
+  .ticker .change { font-size: 15px; font-weight: 600; padding: 3px 10px; border-radius: 6px; }
+  .ticker .change.pos { color: var(--green); background: rgba(46,204,113,0.12); }
+  .ticker .change.neg { color: var(--red); background: rgba(255,92,92,0.12); }
 </style>
 </head>
 <body>
@@ -106,8 +111,23 @@
     <div class="form-row" style="margin-top:10px">
       <div class="field"><label>Período ADX</label><input id="f-adx-period" type="number" value="14" style="width:70px" /></div>
       <div class="field"><label>Limiar ADX</label><input id="f-adx-threshold" type="number" value="25" style="width:70px" /></div>
+      <div class="field">
+        <label>Modo de confirmação</label>
+        <select id="f-confirmation-mode" onchange="onConfirmationModeChange()">
+          <option value="ticks">Persistência (checagens seguidas)</option>
+          <option value="higher_timeframe">Timeframe maior</option>
+        </select>
+      </div>
+      <div class="field" id="field-confirm-ticks"><label>Checagens seguidas</label><input id="f-confirm-ticks" type="number" value="2" min="1" style="width:70px" /></div>
+      <div class="field" id="field-higher-timeframe" style="display:none">
+        <label>Timeframe de confirmação</label>
+        <select id="f-higher-timeframe">
+          <option>15m</option><option selected>1h</option><option>4h</option>
+        </select>
+      </div>
     </div>
     <div class="warn" id="strategy-hint"></div>
+    <div class="warn" id="confirmation-hint">Persistência: só executa quando o sinal se repete por N checagens seguidas (a cada 10s), evitando reversões relâmpago (whipsaw).</div>
   </div>
 
   <div class="card">
@@ -121,7 +141,8 @@
   <div class="card" id="detail">
     <span class="close-btn" onclick="closeDetail()">fechar ✕</span>
     <strong id="detail-title"></strong>
-    <div class="sub" style="margin-bottom:6px">Preço da moeda — 🔺 compra 🔻 venda</div>
+    <div id="ticker" class="ticker"></div>
+    <div class="sub" style="margin-bottom:6px">🔺 compra 🔻 venda</div>
     <canvas id="price-chart"></canvas>
     <div class="sub" style="margin:14px 0 6px">Equity do bot (USDT)</div>
     <canvas id="equity-chart"></canvas>
@@ -164,6 +185,15 @@ function onStrategyChange() {
   }
 }
 
+function onConfirmationModeChange() {
+  const mode = document.getElementById('f-confirmation-mode').value;
+  document.getElementById('field-confirm-ticks').style.display = mode === 'ticks' ? 'flex' : 'none';
+  document.getElementById('field-higher-timeframe').style.display = mode === 'higher_timeframe' ? 'flex' : 'none';
+  document.getElementById('confirmation-hint').textContent = mode === 'ticks'
+    ? 'Persistência: só executa quando o sinal se repete por N checagens seguidas (a cada 10s), evitando reversões relâmpago (whipsaw).'
+    : 'Timeframe maior: só entra se a tendência do timeframe de confirmação concordar com o sinal do timeframe do bot. Filtro mais forte, opera com menos frequência.';
+}
+
 async function loadSymbols() {
   try {
     const list = await fetch('/api/symbols').then(r => r.json());
@@ -189,6 +219,9 @@ async function createBot() {
     bb_std: parseFloat(document.getElementById('f-bb-std').value),
     adx_period: parseInt(document.getElementById('f-adx-period').value),
     adx_threshold: parseFloat(document.getElementById('f-adx-threshold').value),
+    confirm_ticks: parseInt(document.getElementById('f-confirm-ticks').value),
+    confirmation_mode: document.getElementById('f-confirmation-mode').value,
+    higher_timeframe: document.getElementById('f-higher-timeframe').value,
   };
   const res = await fetch('/api/bots', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
   if (!res.ok) { alert('Erro ao criar bot: ' + await res.text()); return; }
@@ -219,7 +252,9 @@ async function loadBots() {
     return `
     <tr class="bot-row" onclick="openDetail(${b.id})">
       <td>${b.symbol} <span style="color:var(--muted);font-size:11px">${b.timeframe}</span></td>
-      <td>${strategyLabel(b.strategy)}<span class="regime-tag ${regimeClass}">${info ? info.regime : ''}</span></td>
+      <td>${strategyLabel(b.strategy)}<span class="regime-tag ${regimeClass}">${info ? info.regime : ''}</span>
+        <div style="color:var(--muted);font-size:11px">${b.confirmation_mode === 'higher_timeframe' ? `confirma em ${b.higher_timeframe}` : `persistência ${b.confirm_ticks}x`}</div>
+      </td>
       <td class="adx-tag ${adxClass}" title="${adxHint}">${adxText}</td>
       <td><span class="badge ${b.status}">${b.status}</span></td>
       <td>$${b.equity.toFixed(2)}</td>
@@ -276,14 +311,36 @@ async function openDetail(id) {
 }
 
 async function renderPriceChart(bot, trades) {
-  let candles;
+  let data;
   try {
-    candles = await fetch(`/api/bots/${bot.id}/candles`).then(r => r.json());
+    data = await fetch(`/api/bots/${bot.id}/candles`).then(r => r.json());
   } catch (e) {
-    candles = [];
+    data = null;
   }
+  const tickerEl = document.getElementById('ticker');
+  if (!data || !Array.isArray(data.candles) || data.candles.length === 0) {
+    tickerEl.innerHTML = '';
+    if (priceChart) { priceChart.destroy(); priceChart = null; }
+    return;
+  }
+  const candles = data.candles;
+  const ticker = data.ticker || {};
+
+  if (ticker.last != null) {
+    const change = ticker.change ?? 0;
+    const pct = ticker.percentage ?? 0;
+    const cls = change >= 0 ? 'pos' : 'neg';
+    const sign = change >= 0 ? '+' : '';
+    tickerEl.innerHTML = `
+      <span class="price">$${formatPrice(ticker.last)}</span>
+      <span class="change ${cls}">${sign}${formatPrice(change)} (${sign}${pct.toFixed(2)}%)</span>
+      <span class="sub" style="align-self:center">24h</span>
+    `;
+  } else {
+    tickerEl.innerHTML = '';
+  }
+
   if (priceChart) { priceChart.destroy(); priceChart = null; }
-  if (!Array.isArray(candles) || candles.length === 0) return;
 
   const halfCandle = (TIMEFRAME_MS[bot.timeframe] || 300e3) / 2;
   const labels = candles.map(c => new Date(c.time).toLocaleString());
