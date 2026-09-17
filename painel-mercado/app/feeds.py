@@ -64,8 +64,10 @@ EXCLUDE_KEYWORDS = [
 
 MAX_ITEMS_TOTAL = 90
 MAX_ITEMS_PER_CATEGORY = 15
+MAX_ITEMS_PER_CATEGORY_IN_ALL = 8
 FETCH_TIMEOUT = 12
 ENTRIES_PER_FEED = 20
+CATEGORY_ORDER = list(CATEGORY_LABELS.keys())
 
 _cache = {"items": [], "by_cat": {}, "updated": 0, "sources": []}
 
@@ -152,6 +154,24 @@ def fetch_all():
     return items, sorted(ok_sources)
 
 
+def _interleave_by_category(by_cat):
+    """Mistura as categorias em rodízio para que nenhuma domine o topo da lista
+    'Tudo' e todas fiquem visíveis sem precisar rolar até o fim."""
+    lists = [by_cat.get(cat, [])[:MAX_ITEMS_PER_CATEGORY_IN_ALL] for cat in CATEGORY_ORDER]
+    result = []
+    round_idx = 0
+    while True:
+        added = False
+        for lst in lists:
+            if round_idx < len(lst):
+                result.append(lst[round_idx])
+                added = True
+        if not added:
+            break
+        round_idx += 1
+    return result
+
+
 def refresh():
     items, ok_sources = fetch_all()
     if not items:
@@ -160,8 +180,9 @@ def refresh():
     by_cat = {}
     for it in items:
         by_cat.setdefault(it["category"], []).append(it)
-    _cache["items"] = items[:MAX_ITEMS_TOTAL]
-    _cache["by_cat"] = {c: v[:MAX_ITEMS_PER_CATEGORY] for c, v in by_cat.items()}
+    by_cat = {c: v[:MAX_ITEMS_PER_CATEGORY] for c, v in by_cat.items()}
+    _cache["items"] = _interleave_by_category(by_cat)[:MAX_ITEMS_TOTAL]
+    _cache["by_cat"] = by_cat
     _cache["updated"] = time.time()
     _cache["sources"] = ok_sources
     _save_disk_cache()

@@ -112,8 +112,6 @@
   .src-item .ok{ color:var(--pos); font-size:.72rem; }
 
   footer{ border-top:1px solid var(--border); margin-top:1rem; padding-top:1.25rem; font-size:.76rem; color:var(--muted); display:flex; justify-content:space-between; flex-wrap:wrap; gap:.5rem; }
-
-  .hidden-story{ display:none !important; }
   .skel{ background:linear-gradient(90deg, var(--surface-2) 25%, var(--border) 37%, var(--surface-2) 63%); background-size:400% 100%; animation:sk 1.4s ease infinite; border-radius:6px; color:transparent !important; }
   @keyframes sk{ 0%{background-position:100% 50%;} 100%{background-position:0 50%;} }
 </style>
@@ -368,15 +366,20 @@
   }
 
   var allItems = [];
+  var restItems = [];
+  var byCategory = {};
   var currentLead = null;
   var currentFilter = 'all';
 
   function applyFilter(){
-    var stories = document.querySelectorAll('#storyList [data-cat]');
-    stories.forEach(function(s){
-      var show = currentFilter === 'all' || s.getAttribute('data-cat') === currentFilter;
-      s.classList.toggle('hidden-story', !show);
+    if(currentFilter === 'all'){
+      renderStoryList(restItems);
+      return;
+    }
+    var items = (byCategory[currentFilter] || []).filter(function(it){
+      return !currentLead || it.link !== currentLead.link;
     });
+    renderStoryList(items);
   }
 
   async function loadNews(){
@@ -385,6 +388,7 @@
       if(!res.ok) throw new Error('status ' + res.status);
       var data = await res.json();
       allItems = data.items || [];
+      byCategory = data.by_category || {};
       if(!allItems.length){
         showNotice('Ainda não há notícias em cache — o servidor busca as fontes a cada poucos minutos. Volte em instantes.', false);
         renderLead(null, true);
@@ -394,9 +398,8 @@
         var leadIdx = allItems.findIndex(function(it){ return it.source !== 'TradingView Brasil'; });
         if(leadIdx === -1) leadIdx = 0;
         currentLead = allItems[leadIdx];
-        var rest = allItems.slice(0, leadIdx).concat(allItems.slice(leadIdx + 1));
+        restItems = allItems.slice(0, leadIdx).concat(allItems.slice(leadIdx + 1));
         renderLead(currentLead, true);
-        renderStoryList(rest);
         applyFilter();
       }
       renderSources(data.sources, data.updated);
