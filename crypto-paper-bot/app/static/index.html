@@ -253,7 +253,7 @@ async function openDetail(id) {
   chart = new Chart(document.getElementById('equity-chart'), {
     type: 'line',
     data: { labels, datasets: [{ label: 'Equity (USDT)', data: values, borderColor: '#4f8cff', tension: 0.2, pointRadius: 0 }] },
-    options: { plugins: { legend: { display: false } }, scales: { x: { display: false } } }
+    options: { animation: false, plugins: { legend: { display: false } }, scales: { x: { display: false } } }
   });
 
   await renderPriceChart(data.bot, data.trades);
@@ -310,6 +310,7 @@ async function renderPriceChart(bot, trades) {
       ],
     },
     options: {
+      animation: false,
       plugins: { legend: { display: false } },
       scales: {
         x: { display: false },
