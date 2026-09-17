@@ -4,7 +4,7 @@ name: Crypto Paper Bot
 tagline: Bot de trading de criptomoedas em modo simulado (paper trading)
 icon: https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-crypto-paper-bot/icon.svg
 category: finance
-version: '1.3.1'
+version: '1.3.2'
 port: 3458
 description: >-
   Bot de trading automático que opera com dinheiro simulado usando preços reais
@@ -26,7 +26,8 @@ path: ''
 defaultUsername: ''
 defaultPassword: ''
 releaseNotes: >-
-  v1.3.1: adiciona separador de milhar nos valores em dólar (preço, saldo,
-  P&L) pra facilitar leitura rápida — ex: $76,552.01 em vez de $76552.01.
+  v1.3.2: cabeçalho anti-cache em todas as respostas da API (garante que o
+  navegador nunca reaproveite dados antigos) e indicador "atualizado há Xs"
+  no ticker de preço, pra confirmar visualmente que os dados estão ao vivo.
 submitter: garod004
 submission: https://github.com/garod004/umbrel-apps
