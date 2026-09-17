@@ -396,7 +396,7 @@
         currentLead = allItems[leadIdx];
         var rest = allItems.slice(0, leadIdx).concat(allItems.slice(leadIdx + 1));
         renderLead(currentLead, true);
-        renderStoryList(rest.slice(0, 40));
+        renderStoryList(rest);
         applyFilter();
       }
       renderSources(data.sources, data.updated);
