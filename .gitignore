@@ -16,3 +16,6 @@ venv/
 # Sistema
 .DS_Store
 Thumbs.db
+
+# Worktrees/sessões do Claude Code
+.claude/

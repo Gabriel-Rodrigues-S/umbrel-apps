@@ -1,0 +1,33 @@
+manifestVersion: 1
+id: garod004-apps-painel-mercado
+name: Painel Mercado
+tagline: Agregador de notícias e cotações do mercado financeiro
+icon: https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-painel-mercado/icon.svg
+category: finance
+version: '1.0.0'
+port: 8420
+description: >-
+  Painel que reúne, em um só lugar, notícias reais de mercado financeiro (InfoMoney,
+  Investing.com, Cointelegraph Brasil, CNBC e TradingView Brasil) e cotações ao vivo
+  de Ibovespa, S&P 500, Nasdaq, dólar, euro, Bitcoin, Ethereum, petróleo, ouro e Selic,
+  via Yahoo Finance e Banco Central do Brasil. Notícias são filtráveis por categoria
+  (Ações & B3, Câmbio, Juros & BC, Cripto, Commodities, Mercados globais) e as
+  cotações são atualizadas automaticamente em segundo plano.
+developer: garod004
+website: https://github.com/garod004/umbrel-apps
+dependencies: []
+repo: https://github.com/garod004/umbrel-apps
+support: https://github.com/garod004/umbrel-apps/issues
+gallery:
+  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-painel-mercado/icon.svg
+  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-painel-mercado/icon.svg
+  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-painel-mercado/icon.svg
+path: ''
+defaultUsername: ''
+defaultPassword: ''
+releaseNotes: >-
+  Primeira versão. Agregação de notícias via RSS e cotações via Yahoo Finance/BCB,
+  com filtros por categoria e cache em disco para manter os últimos dados bons
+  caso alguma fonte fique indisponível.
+submitter: garod004
+submission: https://github.com/garod004/umbrel-apps

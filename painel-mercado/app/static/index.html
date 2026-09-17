@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Painel Mercado</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%88%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    color-scheme: light dark;
+    --bg:#eef0ea;
+    --surface:#ffffff;
+    --surface-2:#e4e7de;
+    --ink:#12181f;
+    --muted:#5b6570;
+    --border:#d6dbd0;
+    --accent:#a85a1e;
+    --pos:#1f6f5c;
+    --neg:#a13d3d;
+    --shadow: 0 1px 2px rgba(20,20,10,.06), 0 8px 24px -12px rgba(20,20,10,.15);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0c1118; --surface:#131b26; --surface-2:#1a2431; --ink:#e8ecf0;
+      --muted:#8b97a3; --border:#25313f; --accent:#dd934a; --pos:#49b696; --neg:#d97878;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 28px -14px rgba(0,0,0,.55);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0c1118; --surface:#131b26; --surface-2:#1a2431; --ink:#e8ecf0;
+    --muted:#8b97a3; --border:#25313f; --accent:#dd934a; --pos:#49b696; --neg:#d97878;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 28px -14px rgba(0,0,0,.55);
+  }
+  *{box-sizing:border-box;}
+  html,body{ margin:0; }
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:'Public Sans', system-ui, sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{ color:inherit; text-decoration:none; }
+  .mono{font-family:'IBM Plex Mono', ui-monospace, monospace; font-variant-numeric:tabular-nums;}
+  h1,h2,h3{font-family:'Fraunces', Georgia, serif; text-wrap:balance; margin:0;}
+
+  .ticker-wrap{ background:var(--ink); color:var(--bg); overflow:hidden; white-space:nowrap; border-bottom:1px solid var(--border); }
+  .ticker{ display:inline-flex; gap:2.5rem; padding:.5rem 0; animation:scroll 42s linear infinite; }
+  @media (prefers-reduced-motion: reduce){ .ticker{ animation:none; } }
+  @keyframes scroll{ from{ transform:translateX(0); } to{ transform:translateX(-50%); } }
+  .tick{ display:inline-flex; align-items:baseline; gap:.5rem; font-size:.8rem; padding-inline:1.25rem; }
+  .tick b{ font-family:'IBM Plex Mono', monospace; font-weight:600; letter-spacing:.02em; }
+  .up{ color:var(--pos); } .down{ color:var(--neg); }
+
+  .shell{ max-width:1180px; margin-inline:auto; padding-inline:20px; padding-block:0 3rem; }
+
+  header.masthead{ display:flex; align-items:flex-end; justify-content:space-between; gap:1rem; flex-wrap:wrap; padding-block:1.75rem 1.1rem; border-bottom:3px solid var(--ink); }
+  .brand{ display:flex; flex-direction:column; gap:.15rem; }
+  .brand .name{ font-size:2.15rem; font-weight:700; letter-spacing:-.01em; }
+  .brand .tagline{ font-size:.78rem; color:var(--muted); text-transform:uppercase; letter-spacing:.12em; }
+  .masthead-right{ display:flex; align-items:center; gap:1rem; }
+  .datestamp{ font-size:.8rem; color:var(--muted); text-align:right; line-height:1.4; }
+  .datestamp .mono{ display:block; color:var(--ink); font-size:.85rem; }
+
+  .theme-toggle{ border:1px solid var(--border); background:var(--surface); color:var(--ink); border-radius:100px; padding:.45rem .9rem; font:inherit; font-size:.78rem; cursor:pointer; display:flex; align-items:center; gap:.4rem; }
+  .theme-toggle:focus-visible, button:focus-visible, .chip:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+
+  .notice{ margin-top:1rem; display:flex; gap:.6rem; align-items:flex-start; background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:.65rem .9rem; font-size:.78rem; color:var(--muted); }
+  .notice strong{ color:var(--ink); }
+  .notice.error{ border-color:var(--neg); color:var(--neg); }
+  [hidden]{ display:none !important; }
+
+  .filters{ display:flex; gap:.5rem; flex-wrap:wrap; padding-block:1.1rem; }
+  .chip{ border:1px solid var(--border); background:var(--surface); color:var(--muted); font:inherit; font-size:.78rem; font-weight:600; letter-spacing:.02em; padding:.4rem .85rem; border-radius:100px; cursor:pointer; white-space:nowrap; }
+  .chip[aria-pressed="true"]{ background:var(--ink); color:var(--bg); border-color:var(--ink); }
+
+  .grid{ display:grid; grid-template-columns: 2fr 1fr; gap:2rem; align-items:start; }
+  @media (max-width: 760px){ .grid{ grid-template-columns: 1fr; } }
+
+  .lead{ display:grid; grid-template-columns: 1.1fr .9fr; gap:1.5rem; border-bottom:1px solid var(--border); padding-block-end:1.75rem; margin-block-end:1.75rem; }
+  @media (max-width:600px){ .lead{ grid-template-columns:1fr; } }
+  .lead .art{ aspect-ratio: 4/3; border-radius:12px; background: linear-gradient(155deg, color-mix(in srgb, var(--accent) 28%, var(--surface)) 0%, var(--surface-2) 100%); position:relative; overflow:hidden; }
+  .lead .art svg{ position:absolute; inset:0; width:100%; height:100%; }
+  .eyebrow{ font-size:.72rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); }
+  .lead h2{ font-size:1.7rem; line-height:1.15; margin-block:.5rem .6rem; font-weight:600; }
+  .lead p.dek{ color:var(--muted); font-size:.95rem; line-height:1.55; margin:0 0 .75rem; }
+  .byline{ font-size:.76rem; color:var(--muted); }
+  .lead a.cover{ display:block; }
+
+  .story-list{ display:flex; flex-direction:column; }
+  .story{ display:grid; grid-template-columns: 1fr auto; gap:1rem; padding-block:1.15rem; border-bottom:1px solid var(--border); }
+  .story:first-child{ padding-top:0; }
+  .story h3{ font-size:1.02rem; font-weight:600; line-height:1.3; margin-block-end:.35rem; }
+  .story p{ margin:0; color:var(--muted); font-size:.86rem; line-height:1.5; }
+  .story .meta{ margin-top:.5rem; display:flex; gap:.6rem; align-items:center; font-size:.72rem; color:var(--muted); flex-wrap:wrap; }
+  .badge{ font-size:.68rem; font-weight:700; padding:.15rem .5rem; border-radius:5px; background:var(--surface-2); color:var(--ink); white-space:nowrap; letter-spacing:.03em; }
+  .story .src{ font-weight:600; }
+
+  .panel{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:1.1rem 1.15rem; box-shadow:var(--shadow); margin-block-end:1.5rem; }
+  .panel h3.head{ font-family:'Public Sans',sans-serif; font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); margin-block-end:.85rem; display:flex; justify-content:space-between; align-items:center; }
+  .row{ display:flex; justify-content:space-between; align-items:baseline; padding-block:.5rem; border-bottom:1px solid var(--border); gap:.75rem; }
+  .row:last-child{ border-bottom:none; padding-bottom:0; }
+  .row:first-of-type{ padding-top:0; }
+  .row .name{ font-size:.85rem; }
+  .row .val{ font-family:'IBM Plex Mono',monospace; font-size:.85rem; text-align:right; white-space:nowrap; }
+  .row .val .delta{ display:block; font-size:.72rem; }
+
+  .src-item{ display:flex; justify-content:space-between; padding-block:.4rem; border-bottom:1px solid var(--border); font-size:.8rem; }
+  .src-item:last-child{ border-bottom:none; padding-bottom:0; }
+  .src-item:first-of-type{ padding-top:0; }
+  .src-item .ok{ color:var(--pos); font-size:.72rem; }
+
+  footer{ border-top:1px solid var(--border); margin-top:1rem; padding-top:1.25rem; font-size:.76rem; color:var(--muted); display:flex; justify-content:space-between; flex-wrap:wrap; gap:.5rem; }
+
+  .hidden-story{ display:none !important; }
+  .skel{ background:linear-gradient(90deg, var(--surface-2) 25%, var(--border) 37%, var(--surface-2) 63%); background-size:400% 100%; animation:sk 1.4s ease infinite; border-radius:6px; color:transparent !important; }
+  @keyframes sk{ 0%{background-position:100% 50%;} 100%{background-position:0 50%;} }
+</style>
+</head>
+<body>
+
+<div class="ticker-wrap" aria-hidden="true">
+  <div class="ticker" id="tickerTrack"><span class="tick">Carregando cotações…</span></div>
+</div>
+
+<div class="shell">
+  <header class="masthead">
+    <div class="brand">
+      <span class="name">Painel Mercado</span>
+      <span class="tagline">Economia · Câmbio · Cripto · Renda fixa</span>
+    </div>
+    <div class="masthead-right">
+      <div class="datestamp">
+        Atualizado<span class="mono" id="updatedStamp">—</span>
+      </div>
+      <button class="theme-toggle" id="themeToggle" type="button" aria-pressed="false">
+        <span id="themeIcon">🌗</span><span id="themeLabel">Auto</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="notice" id="notice" hidden></div>
+
+  <nav class="filters" id="filters">
+    <button class="chip" data-filter="all" aria-pressed="true">Tudo</button>
+    <button class="chip" data-filter="acoes" aria-pressed="false">Ações &amp; B3</button>
+    <button class="chip" data-filter="cambio" aria-pressed="false">Câmbio</button>
+    <button class="chip" data-filter="juros" aria-pressed="false">Juros &amp; BC</button>
+    <button class="chip" data-filter="cripto" aria-pressed="false">Cripto</button>
+    <button class="chip" data-filter="commodities" aria-pressed="false">Commodities</button>
+    <button class="chip" data-filter="global" aria-pressed="false">Mercados globais</button>
+  </nav>
+
+  <div class="grid">
+    <main>
+      <article class="lead" id="leadStory">
+        <div class="art"><svg viewBox="0 0 400 300" preserveAspectRatio="none"></svg></div>
+        <div>
+          <span class="eyebrow skel">Carregando</span>
+          <h2 class="skel">Carregando manchete principal…</h2>
+          <p class="dek skel">Carregando resumo…</p>
+          <span class="byline">&nbsp;</span>
+        </div>
+      </article>
+
+      <div class="story-list" id="storyList"></div>
+    </main>
+
+    <aside>
+      <div class="panel">
+        <h3 class="head">Painel de cotações</h3>
+        <div id="quotesPanel">
+          <div class="row"><span class="name skel">Ibovespa</span><span class="val skel">000.000</span></div>
+          <div class="row"><span class="name skel">S&amp;P 500</span><span class="val skel">0.000</span></div>
+          <div class="row"><span class="name skel">USD/BRL</span><span class="val skel">0,00</span></div>
+          <div class="row"><span class="name skel">Bitcoin</span><span class="val skel">00.000</span></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 class="head">Fontes ativas</h3>
+        <div id="sourcesPanel">
+          <div class="src-item"><span class="skel">Carregando fontes…</span></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 class="head">Sobre este painel</h3>
+        <p style="font-size:.83rem; color:var(--muted); line-height:1.55; margin:0;">
+          Agrega manchetes reais via RSS de InfoMoney, Investing.com, Cointelegraph Brasil, CNBC e TradingView Brasil,
+          e cotações do Yahoo Finance e do Banco Central do Brasil (Selic/PTAX). As notícias são recategorizadas
+          automaticamente por palavras-chave — a classificação pode falhar ocasionalmente.
+        </p>
+      </div>
+    </aside>
+  </div>
+
+  <footer>
+    <span>Painel Mercado — agregador de notícias e cotações do mercado financeiro</span>
+    <span id="footerNote">Dados de mercado e notícias de terceiros, sem fins de recomendação de investimento</span>
+  </footer>
+</div>
+
+<script>
+(function(){
+  var CATEGORY_LABELS = {
+    acoes: 'Ações & B3', cambio: 'Câmbio', juros: 'Juros & BC',
+    cripto: 'Cripto', commodities: 'Commodities', global: 'Mercados globais'
+  };
+
+  var TICKER_ORDER = ['ibov','sp500','nasdaq','usdbrl','eurusd','btc','eth','wti','gold','selic'];
+  var TICKER_SHORT = {
+    ibov:'IBOV', sp500:'S&P 500', nasdaq:'NASDAQ', usdbrl:'USD/BRL', eurusd:'EUR/USD',
+    btc:'BTC', eth:'ETH', wti:'WTI', gold:'OURO', selic:'SELIC'
+  };
+  var QUOTE_PANEL_ORDER = ['ibov','sp500','nasdaq','usdbrl','btc','selic'];
+
+  function fmtNumber(n, digits){
+    if(n === null || n === undefined || isNaN(n)) return '—';
+    return n.toLocaleString('pt-BR', {minimumFractionDigits:digits, maximumFractionDigits:digits});
+  }
+  function fmtPrice(key, v){
+    if(key === 'selic') return fmtNumber(v,2) + '%';
+    if(key === 'usdbrl' || key === 'eurusd') return fmtNumber(v,4);
+    if(key === 'btc' || key === 'eth') return fmtNumber(v,0);
+    return fmtNumber(v,2);
+  }
+  function fmtPct(p){
+    if(p === null || p === undefined || isNaN(p)) return '';
+    var arrow = p >= 0 ? '▲' : '▼';
+    return arrow + ' ' + fmtNumber(Math.abs(p),1) + '%';
+  }
+  function pctClass(p){
+    if(p === null || p === undefined || isNaN(p)) return '';
+    return p >= 0 ? 'up' : 'down';
+  }
+  function relTime(ts){
+    if(!ts) return '';
+    var diffMin = Math.max(0, Math.round((Date.now()/1000 - ts) / 60));
+    if(diffMin < 1) return 'agora';
+    if(diffMin < 60) return 'há ' + diffMin + 'min';
+    var h = Math.round(diffMin/60);
+    if(h < 24) return 'há ' + h + 'h';
+    var d = Math.round(h/24);
+    return 'há ' + d + 'd';
+  }
+  function escapeHtml(s){
+    var div = document.createElement('div');
+    div.textContent = s || '';
+    return div.innerHTML;
+  }
+
+  function renderTicker(quotes){
+    var track = document.getElementById('tickerTrack');
+    if(!track) return;
+    var parts = [];
+    TICKER_ORDER.forEach(function(key){
+      var q = quotes[key];
+      if(!q || q.price === undefined || q.price === null) return;
+      var cls = q.change_pct === null || q.change_pct === undefined ? '' : pctClass(q.change_pct);
+      var deltaTxt = q.change_pct === null || q.change_pct === undefined ? '' : ' ' + fmtPct(q.change_pct);
+      parts.push('<span class="tick">' + TICKER_SHORT[key] + ' <b class="' + cls + '">' +
+        fmtPrice(key, q.price) + deltaTxt + '</b></span>');
+    });
+    if(!parts.length){ track.innerHTML = '<span class="tick">Cotações indisponíveis no momento</span>'; return; }
+    var html = parts.join('');
+    track.innerHTML = html + html;
+  }
+
+  function renderQuotesPanel(quotes){
+    var el = document.getElementById('quotesPanel');
+    if(!el) return;
+    var rows = QUOTE_PANEL_ORDER.map(function(key){
+      var q = quotes[key];
+      if(!q) return '';
+      var deltaHtml = (q.change_pct === null || q.change_pct === undefined)
+        ? '<span class="delta">— estável</span>'
+        : '<span class="delta ' + pctClass(q.change_pct) + '">' + fmtPct(q.change_pct) + '</span>';
+      return '<div class="row"><span class="name">' + escapeHtml(q.label) + '</span>' +
+        '<span class="val">' + fmtPrice(key, q.price) + deltaHtml + '</span></div>';
+    }).join('');
+    el.innerHTML = rows || '<p style="color:var(--muted); font-size:.85rem;">Sem cotações disponíveis.</p>';
+  }
+
+  function leadSvg(positive){
+    var color = positive ? 'var(--pos)' : 'var(--neg)';
+    var pts = positive
+      ? '0,220 40,205 80,212 120,165 160,178 200,125 240,145 280,95 320,110 360,65 400,85'
+      : '0,80 40,95 80,88 120,135 160,120 200,175 240,155 280,205 320,190 360,235 400,215';
+    return '<svg viewBox="0 0 400 300" preserveAspectRatio="none">' +
+      '<polyline points="' + pts + '" fill="none" stroke="' + color + '" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<polyline points="' + pts + ' 400,300 0,300" fill="color-mix(in srgb, ' + color + ' 14%, transparent)" stroke="none"/>' +
+      '</svg>';
+  }
+
+  function renderLead(item, ibovUp){
+    var el = document.getElementById('leadStory');
+    if(!el) return;
+    if(!item){
+      el.querySelector('.art').innerHTML = leadSvg(true);
+      el.querySelector('.eyebrow').textContent = 'Sem manchete';
+      el.querySelector('.eyebrow').classList.remove('skel');
+      el.querySelector('h2').textContent = 'Não foi possível carregar as notícias agora.';
+      el.querySelector('h2').classList.remove('skel');
+      el.querySelector('.dek').textContent = 'Tente atualizar a página em alguns instantes.';
+      el.querySelector('.dek').classList.remove('skel');
+      el.querySelector('.byline').textContent = '';
+      return;
+    }
+    el.querySelector('.art').innerHTML = leadSvg(ibovUp);
+    var eyebrow = el.querySelector('.eyebrow');
+    eyebrow.textContent = (CATEGORY_LABELS[item.category] || 'Mercado') + ' · ' + item.source;
+    eyebrow.classList.remove('skel');
+    var h2 = el.querySelector('h2');
+    h2.classList.remove('skel');
+    h2.innerHTML = '';
+    var link = document.createElement('a');
+    link.href = item.link; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    link.textContent = item.title;
+    h2.appendChild(link);
+    var dek = el.querySelector('.dek');
+    dek.textContent = item.summary || '';
+    dek.classList.remove('skel');
+    el.querySelector('.byline').textContent = item.source + ' · atualizado ' + relTime(item.ts);
+  }
+
+  function renderStoryList(items){
+    var list = document.getElementById('storyList');
+    if(!list) return;
+    if(!items.length){
+      list.innerHTML = '<p style="color:var(--muted); padding-block:1rem;">Nenhuma notícia nesta categoria no momento.</p>';
+      return;
+    }
+    list.innerHTML = items.map(function(item){
+      return '<a class="story" data-cat="' + item.category + '" href="' + item.link +
+        '" target="_blank" rel="noopener noreferrer">' +
+        '<div>' +
+          '<h3>' + escapeHtml(item.title) + '</h3>' +
+          '<p>' + escapeHtml(item.summary) + '</p>' +
+          '<div class="meta"><span class="badge">' + (CATEGORY_LABELS[item.category] || item.category) + '</span>' +
+          '<span class="src">' + escapeHtml(item.source) + '</span><span>' + relTime(item.ts) + '</span></div>' +
+        '</div>' +
+      '</a>';
+    }).join('');
+  }
+
+  function renderSources(sources, updatedTs){
+    var el = document.getElementById('sourcesPanel');
+    if(!el) return;
+    if(!sources || !sources.length){
+      el.innerHTML = '<div class="src-item"><span style="color:var(--muted);">Nenhuma fonte respondeu agora</span></div>';
+      return;
+    }
+    el.innerHTML = sources.map(function(s){
+      return '<div class="src-item"><span>' + escapeHtml(s) + '</span><span class="ok">ativa</span></div>';
+    }).join('');
+  }
+
+  function showNotice(msg, isError){
+    var el = document.getElementById('notice');
+    if(!el) return;
+    if(!msg){ el.hidden = true; return; }
+    el.hidden = false;
+    el.classList.toggle('error', !!isError);
+    el.innerHTML = '<span>' + (isError ? '⚠' : 'ⓘ') + '</span><span>' + msg + '</span>';
+  }
+
+  var allItems = [];
+  var currentLead = null;
+  var currentFilter = 'all';
+
+  function applyFilter(){
+    var stories = document.querySelectorAll('#storyList [data-cat]');
+    stories.forEach(function(s){
+      var show = currentFilter === 'all' || s.getAttribute('data-cat') === currentFilter;
+      s.classList.toggle('hidden-story', !show);
+    });
+  }
+
+  async function loadNews(){
+    try{
+      var res = await fetch('/api/news');
+      if(!res.ok) throw new Error('status ' + res.status);
+      var data = await res.json();
+      allItems = data.items || [];
+      if(!allItems.length){
+        showNotice('Ainda não há notícias em cache — o servidor busca as fontes a cada poucos minutos. Volte em instantes.', false);
+        renderLead(null, true);
+        renderStoryList([]);
+      } else {
+        showNotice(null);
+        var leadIdx = allItems.findIndex(function(it){ return it.source !== 'TradingView Brasil'; });
+        if(leadIdx === -1) leadIdx = 0;
+        currentLead = allItems[leadIdx];
+        var rest = allItems.slice(0, leadIdx).concat(allItems.slice(leadIdx + 1));
+        renderLead(currentLead, true);
+        renderStoryList(rest.slice(0, 40));
+        applyFilter();
+      }
+      renderSources(data.sources, data.updated);
+      if(data.updated){
+        var d = new Date(data.updated * 1000);
+        document.getElementById('updatedStamp').textContent =
+          d.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+      }
+    }catch(e){
+      showNotice('Não foi possível carregar as notícias agora. Tentando novamente em breve.', true);
+    }
+  }
+
+  async function loadQuotes(){
+    try{
+      var res = await fetch('/api/quotes');
+      if(!res.ok) throw new Error('status ' + res.status);
+      var data = await res.json();
+      var quotes = data.quotes || {};
+      if(Object.keys(quotes).length){
+        renderTicker(quotes);
+        renderQuotesPanel(quotes);
+        var ibov = quotes.ibov;
+        if(ibov && currentLead) renderLead(currentLead, ibov.change_pct >= 0);
+      }
+    }catch(e){ /* silencioso: o ticker mantém o último valor bom */ }
+  }
+
+  document.querySelectorAll('.chip').forEach(function(chip){
+    chip.addEventListener('click', function(){
+      document.querySelectorAll('.chip').forEach(function(c){ c.setAttribute('aria-pressed','false'); });
+      chip.setAttribute('aria-pressed','true');
+      currentFilter = chip.getAttribute('data-filter');
+      applyFilter();
+    });
+  });
+
+  var root = document.documentElement;
+  var btn = document.getElementById('themeToggle');
+  var label = document.getElementById('themeLabel');
+  var icon = document.getElementById('themeIcon');
+  var STATES = ['auto','light','dark'];
+  var ICONS = {auto:'🌗', light:'☀️', dark:'🌙'};
+  var LABELS = {auto:'Auto', light:'Claro', dark:'Escuro'};
+  function applyTheme(state){
+    if(state === 'auto'){ root.removeAttribute('data-theme'); } else { root.setAttribute('data-theme', state); }
+    if(label) label.textContent = LABELS[state];
+    if(icon) icon.textContent = ICONS[state];
+  }
+  var current = 'auto';
+  try{
+    var saved = localStorage.getItem('painel-mercado-theme');
+    if(saved && STATES.indexOf(saved) !== -1) current = saved;
+  }catch(e){}
+  applyTheme(current);
+  if(btn){
+    btn.addEventListener('click', function(){
+      current = STATES[(STATES.indexOf(current) + 1) % STATES.length];
+      applyTheme(current);
+      try{ localStorage.setItem('painel-mercado-theme', current); }catch(e){}
+    });
+  }
+
+  loadQuotes();
+  loadNews();
+  setInterval(loadQuotes, 90 * 1000);
+  setInterval(loadNews, 5 * 60 * 1000);
+})();
+</script>
+</body>
+</html>

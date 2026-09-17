@@ -34,6 +34,20 @@ Conversor de arquivos local para toda a família usar sem depender de serviços 
 
 ---
 
+### 📈 Painel Mercado
+Agregador de notícias e cotações do mercado financeiro, atualizado em segundo plano.
+
+- Notícias reais via RSS: InfoMoney, Investing.com, Cointelegraph Brasil, CNBC e TradingView Brasil
+- Categorização automática por palavras-chave (Ações & B3, Câmbio, Juros & BC, Cripto, Commodities, Mercados globais)
+- Cotações ao vivo via Yahoo Finance: Ibovespa, S&P 500, Nasdaq, USD/BRL, EUR/USD, Bitcoin, Ethereum, petróleo (WTI) e ouro
+- Selic e PTAX via API pública do Banco Central do Brasil
+- Cache em disco: se uma fonte cair, o painel mantém o último dado bom em vez de ficar vazio
+
+**Imagem Docker:** `ghcr.io/garod004/painel-mercado:latest`
+**Porta:** 8420
+
+---
+
 ## Estrutura do repositório
 
 ```
