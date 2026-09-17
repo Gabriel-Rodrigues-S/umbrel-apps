@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -9,6 +10,7 @@ from pydantic import BaseModel
 
 from . import engine, exchange
 from .db import get_conn, init_db
+from .strategy import adx as compute_adx
 
 logging.basicConfig(level=logging.INFO)
 
@@ -23,13 +25,40 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Crypto Paper Bot", lifespan=lifespan)
 
+STRATEGIES = ["sma_crossover", "macd_crossover", "rsi_reversion", "bollinger_reversion"]
+
 
 class BotCreate(BaseModel):
     symbol: str = "BTC/USDT"
     timeframe: str = "5m"
+    strategy: Literal["sma_crossover", "macd_crossover", "rsi_reversion", "bollinger_reversion"] = "sma_crossover"
+    starting_balance: float = 1000
     fast_period: int = 9
     slow_period: int = 21
-    starting_balance: float = 1000
+    adx_period: int = 14
+    adx_threshold: float = 25
+    rsi_period: int = 14
+    rsi_oversold: float = 30
+    rsi_overbought: float = 70
+    bb_period: int = 20
+    bb_std: float = 2.0
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal: int = 9
+
+
+@app.get("/api/strategies")
+def api_strategies():
+    return [
+        {"id": "sma_crossover", "name": "SMA Crossover", "regime": "tendência",
+         "description": "Compra/vende no cruzamento de médias móveis. Bom em tendência forte."},
+        {"id": "macd_crossover", "name": "MACD Crossover", "regime": "tendência",
+         "description": "Como o SMA crossover, mas com médias exponenciais (reage mais rápido)."},
+        {"id": "rsi_reversion", "name": "RSI Reversão", "regime": "lateral",
+         "description": "Compra na volta da sobrevenda, vende na volta da sobrecompra. Bom sem tendência."},
+        {"id": "bollinger_reversion", "name": "Bandas de Bollinger", "regime": "lateral",
+         "description": "Compra no repique da banda inferior, vende no repique da banda superior."},
+    ]
 
 
 @app.get("/api/symbols")
@@ -44,15 +73,30 @@ def api_symbols():
 def create_bot(payload: BotCreate):
     with get_conn() as conn:
         cur = conn.execute(
-            """INSERT INTO bots (symbol, timeframe, fast_period, slow_period,
-               starting_balance, cash) VALUES (?,?,?,?,?,?)""",
+            """INSERT INTO bots (
+                   symbol, timeframe, strategy, starting_balance, cash,
+                   fast_period, slow_period, adx_period, adx_threshold,
+                   rsi_period, rsi_oversold, rsi_overbought,
+                   bb_period, bb_std, macd_fast, macd_slow, macd_signal
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 payload.symbol,
                 payload.timeframe,
+                payload.strategy,
+                payload.starting_balance,
+                payload.starting_balance,
                 payload.fast_period,
                 payload.slow_period,
-                payload.starting_balance,
-                payload.starting_balance,
+                payload.adx_period,
+                payload.adx_threshold,
+                payload.rsi_period,
+                payload.rsi_oversold,
+                payload.rsi_overbought,
+                payload.bb_period,
+                payload.bb_std,
+                payload.macd_fast,
+                payload.macd_slow,
+                payload.macd_signal,
             ),
         )
         return {"id": cur.lastrowid}
@@ -64,11 +108,27 @@ def list_bots():
         bots = [dict(r) for r in conn.execute("SELECT * FROM bots ORDER BY id DESC").fetchall()]
         for bot in bots:
             last_price = None
+            current_adx = None
             try:
                 last_price = exchange.fetch_last_price(bot["symbol"])
+                candles = exchange.fetch_ohlcv(
+                    bot["symbol"], bot["timeframe"], engine.required_candles(bot)
+                )
+                highs = [c[2] for c in candles]
+                lows = [c[3] for c in candles]
+                closes = [c[4] for c in candles]
+                current_adx = compute_adx(highs, lows, closes, bot["adx_period"])
             except Exception:
                 pass
             bot["last_price"] = last_price
+            bot["current_adx"] = current_adx
+            regime = engine.STRATEGY_REGIME[bot["strategy"]]
+            if current_adx is None:
+                bot["trading_active"] = None
+            elif regime == "trend":
+                bot["trading_active"] = current_adx >= bot["adx_threshold"]
+            else:
+                bot["trading_active"] = current_adx < bot["adx_threshold"]
             bot["equity"] = bot["cash"] + bot["position_qty"] * (last_price or bot.get("position_entry_price") or 0)
             bot["pnl"] = bot["equity"] - bot["starting_balance"]
             bot["pnl_pct"] = (bot["pnl"] / bot["starting_balance"] * 100) if bot["starting_balance"] else 0

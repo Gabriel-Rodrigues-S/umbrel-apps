@@ -38,6 +38,13 @@
   canvas { max-height: 260px; }
   .close-btn { float: right; cursor: pointer; color: var(--muted); }
   .warn { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .strategy-params { display: none; }
+  .strategy-params.active { display: flex; }
+  .regime-tag { font-size: 10px; padding: 1px 7px; border-radius: 999px; margin-left: 6px; }
+  .regime-tag.trend { background: #1e2f47; color: #6fa8ff; }
+  .regime-tag.range { background: #3a2f1e; color: #e0a952; }
+  .adx-tag { font-size: 11px; color: var(--muted); }
+  .adx-tag.active { color: var(--green); }
 </style>
 </head>
 <body>
@@ -63,12 +70,13 @@
         </select>
       </div>
       <div class="field">
-        <label>SMA rápida</label>
-        <input id="f-fast" type="number" value="9" style="width:70px" />
-      </div>
-      <div class="field">
-        <label>SMA lenta</label>
-        <input id="f-slow" type="number" value="21" style="width:70px" />
+        <label>Estratégia</label>
+        <select id="f-strategy" onchange="onStrategyChange()">
+          <option value="sma_crossover">SMA Crossover</option>
+          <option value="macd_crossover">MACD Crossover</option>
+          <option value="rsi_reversion">RSI Reversão</option>
+          <option value="bollinger_reversion">Bandas de Bollinger</option>
+        </select>
       </div>
       <div class="field">
         <label>Saldo inicial (USDT)</label>
@@ -76,13 +84,36 @@
       </div>
       <button onclick="createBot()">Criar bot</button>
     </div>
-    <div class="warn">Estratégia: cruzamento de médias móveis simples (SMA). Dados reais da Binance, execução simulada.</div>
+
+    <div class="form-row strategy-params active" id="params-sma_crossover" style="margin-top:10px">
+      <div class="field"><label>SMA rápida</label><input id="f-fast" type="number" value="9" style="width:70px" /></div>
+      <div class="field"><label>SMA lenta</label><input id="f-slow" type="number" value="21" style="width:70px" /></div>
+    </div>
+    <div class="form-row strategy-params" id="params-macd_crossover" style="margin-top:10px">
+      <div class="field"><label>EMA rápida</label><input id="f-macd-fast" type="number" value="12" style="width:70px" /></div>
+      <div class="field"><label>EMA lenta</label><input id="f-macd-slow" type="number" value="26" style="width:70px" /></div>
+      <div class="field"><label>Linha de sinal</label><input id="f-macd-signal" type="number" value="9" style="width:70px" /></div>
+    </div>
+    <div class="form-row strategy-params" id="params-rsi_reversion" style="margin-top:10px">
+      <div class="field"><label>Período RSI</label><input id="f-rsi-period" type="number" value="14" style="width:70px" /></div>
+      <div class="field"><label>Sobrevenda</label><input id="f-rsi-oversold" type="number" value="30" style="width:70px" /></div>
+      <div class="field"><label>Sobrecompra</label><input id="f-rsi-overbought" type="number" value="70" style="width:70px" /></div>
+    </div>
+    <div class="form-row strategy-params" id="params-bollinger_reversion" style="margin-top:10px">
+      <div class="field"><label>Período</label><input id="f-bb-period" type="number" value="20" style="width:70px" /></div>
+      <div class="field"><label>Desvios padrão</label><input id="f-bb-std" type="number" value="2" step="0.1" style="width:70px" /></div>
+    </div>
+    <div class="form-row" style="margin-top:10px">
+      <div class="field"><label>Período ADX</label><input id="f-adx-period" type="number" value="14" style="width:70px" /></div>
+      <div class="field"><label>Limiar ADX</label><input id="f-adx-threshold" type="number" value="25" style="width:70px" /></div>
+    </div>
+    <div class="warn" id="strategy-hint"></div>
   </div>
 
   <div class="card">
     <strong>Bots ativos</strong>
     <table style="margin-top:10px">
-      <thead><tr><th>Par</th><th>Status</th><th>Equity</th><th>P&L</th><th></th></tr></thead>
+      <thead><tr><th>Par</th><th>Estratégia</th><th>ADX</th><th>Status</th><th>Equity</th><th>P&L</th><th></th></tr></thead>
       <tbody id="bots-body"></tbody>
     </table>
   </div>
@@ -100,6 +131,32 @@
 
 <script>
 let chart = null;
+let strategies = [];
+
+function formatPrice(p) {
+  if (p == null) return '—';
+  if (p >= 1) return p.toFixed(2);
+  return p.toPrecision(4);
+}
+
+async function loadStrategies() {
+  try {
+    strategies = await fetch('/api/strategies').then(r => r.json());
+  } catch (e) {}
+  onStrategyChange();
+}
+
+function onStrategyChange() {
+  const selected = document.getElementById('f-strategy').value;
+  document.querySelectorAll('.strategy-params').forEach(el => {
+    el.classList.toggle('active', el.id === `params-${selected}`);
+  });
+  const info = strategies.find(s => s.id === selected);
+  const hint = document.getElementById('strategy-hint');
+  if (info) {
+    hint.innerHTML = `${info.description} Regime: <b>${info.regime}</b> — o filtro de ADX só deixa esse bot operar quando o mercado estiver nesse regime.`;
+  }
+}
 
 async function loadSymbols() {
   try {
@@ -112,21 +169,45 @@ async function createBot() {
   const payload = {
     symbol: document.getElementById('f-symbol').value.trim(),
     timeframe: document.getElementById('f-timeframe').value,
+    strategy: document.getElementById('f-strategy').value,
+    starting_balance: parseFloat(document.getElementById('f-balance').value),
     fast_period: parseInt(document.getElementById('f-fast').value),
     slow_period: parseInt(document.getElementById('f-slow').value),
-    starting_balance: parseFloat(document.getElementById('f-balance').value),
+    macd_fast: parseInt(document.getElementById('f-macd-fast').value),
+    macd_slow: parseInt(document.getElementById('f-macd-slow').value),
+    macd_signal: parseInt(document.getElementById('f-macd-signal').value),
+    rsi_period: parseInt(document.getElementById('f-rsi-period').value),
+    rsi_oversold: parseFloat(document.getElementById('f-rsi-oversold').value),
+    rsi_overbought: parseFloat(document.getElementById('f-rsi-overbought').value),
+    bb_period: parseInt(document.getElementById('f-bb-period').value),
+    bb_std: parseFloat(document.getElementById('f-bb-std').value),
+    adx_period: parseInt(document.getElementById('f-adx-period').value),
+    adx_threshold: parseFloat(document.getElementById('f-adx-threshold').value),
   };
   const res = await fetch('/api/bots', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
-  if (!res.ok) { alert('Erro ao criar bot'); return; }
+  if (!res.ok) { alert('Erro ao criar bot: ' + await res.text()); return; }
   loadBots();
+}
+
+function strategyLabel(id) {
+  const info = strategies.find(s => s.id === id);
+  return info ? info.name : id;
 }
 
 async function loadBots() {
   const bots = await fetch('/api/bots').then(r => r.json());
   const body = document.getElementById('bots-body');
-  body.innerHTML = bots.map(b => `
+  body.innerHTML = bots.map(b => {
+    const info = strategies.find(s => s.id === b.strategy);
+    const regimeClass = info && info.regime === 'tendência' ? 'trend' : 'range';
+    const adxText = b.current_adx != null ? b.current_adx.toFixed(1) : '—';
+    const adxClass = b.trading_active ? 'active' : '';
+    const adxHint = b.trading_active == null ? 'aguardando dados' : (b.trading_active ? 'filtro liberado' : 'filtro bloqueando');
+    return `
     <tr class="bot-row" onclick="openDetail(${b.id})">
       <td>${b.symbol} <span style="color:var(--muted);font-size:11px">${b.timeframe}</span></td>
+      <td>${strategyLabel(b.strategy)}<span class="regime-tag ${regimeClass}">${info ? info.regime : ''}</span></td>
+      <td class="adx-tag ${adxClass}" title="${adxHint}">${adxText}</td>
       <td><span class="badge ${b.status}">${b.status}</span></td>
       <td>$${b.equity.toFixed(2)}</td>
       <td class="${b.pnl >= 0 ? 'pos' : 'neg'}">${b.pnl >= 0 ? '+' : ''}${b.pnl.toFixed(2)} (${b.pnl_pct.toFixed(2)}%)</td>
@@ -136,7 +217,8 @@ async function loadBots() {
           : `<button class="secondary" onclick="toggleBot(${b.id}, true)">retomar</button>`}
         <button class="danger" onclick="removeBot(${b.id})">excluir</button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 async function toggleBot(id, resume) {
@@ -171,8 +253,8 @@ async function openDetail(id) {
   document.getElementById('trades-body').innerHTML = data.trades.map(t => `
     <tr>
       <td>${new Date(t.created_at + 'Z').toLocaleString()}</td>
-      <td class="${t.side === 'buy' ? 'pos' : 'neg'}">${t.side}</td>
-      <td>$${t.price.toFixed(2)}</td>
+      <td class="${t.side === 'buy' ? 'pos' : 'neg'}">${t.side} <span style="color:var(--muted);font-size:11px">${t.reason || ''}</span></td>
+      <td>$${formatPrice(t.price)}</td>
       <td>${t.qty.toFixed(6)}</td>
       <td class="${t.pnl >= 0 ? 'pos' : 'neg'}">${t.pnl != null ? t.pnl.toFixed(2) : '—'}</td>
     </tr>`).join('');
@@ -183,9 +265,12 @@ function closeDetail() {
   currentDetailId = null;
 }
 
-loadSymbols();
-loadBots();
-setInterval(() => { loadBots(); if (currentDetailId) openDetail(currentDetailId); }, 15000);
+(async function init() {
+  await loadStrategies();
+  await loadSymbols();
+  await loadBots();
+  setInterval(() => { loadBots(); if (currentDetailId) openDetail(currentDetailId); }, 15000);
+})();
 </script>
 </body>
 </html>
