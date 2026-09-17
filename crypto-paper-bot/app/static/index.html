@@ -121,6 +121,9 @@
   <div class="card" id="detail">
     <span class="close-btn" onclick="closeDetail()">fechar ✕</span>
     <strong id="detail-title"></strong>
+    <div class="sub" style="margin-bottom:6px">Preço da moeda — 🔺 compra 🔻 venda</div>
+    <canvas id="price-chart"></canvas>
+    <div class="sub" style="margin:14px 0 6px">Equity do bot (USDT)</div>
     <canvas id="equity-chart"></canvas>
     <table style="margin-top:14px">
       <thead><tr><th>Data</th><th>Lado</th><th>Preço</th><th>Qtd</th><th>PnL</th></tr></thead>
@@ -131,7 +134,10 @@
 
 <script>
 let chart = null;
+let priceChart = null;
 let strategies = [];
+
+const TIMEFRAME_MS = { '1m': 60e3, '5m': 300e3, '15m': 900e3, '1h': 3600e3, '4h': 14400e3 };
 
 function formatPrice(p) {
   if (p == null) return '—';
@@ -250,6 +256,8 @@ async function openDetail(id) {
     options: { plugins: { legend: { display: false } }, scales: { x: { display: false } } }
   });
 
+  await renderPriceChart(data.bot, data.trades);
+
   document.getElementById('trades-body').innerHTML = data.trades.map(t => `
     <tr>
       <td>${new Date(t.created_at + 'Z').toLocaleString()}</td>
@@ -260,9 +268,61 @@ async function openDetail(id) {
     </tr>`).join('');
 }
 
+async function renderPriceChart(bot, trades) {
+  let candles;
+  try {
+    candles = await fetch(`/api/bots/${bot.id}/candles`).then(r => r.json());
+  } catch (e) {
+    candles = [];
+  }
+  if (priceChart) { priceChart.destroy(); priceChart = null; }
+  if (!Array.isArray(candles) || candles.length === 0) return;
+
+  const halfCandle = (TIMEFRAME_MS[bot.timeframe] || 300e3) / 2;
+  const labels = candles.map(c => new Date(c.time).toLocaleString());
+  const closes = candles.map(c => c.close);
+
+  const buyPoints = new Array(candles.length).fill(null);
+  const sellPoints = new Array(candles.length).fill(null);
+  for (const t of trades) {
+    const tradeTime = new Date(t.created_at + 'Z').getTime();
+    let bestIdx = -1, bestDiff = Infinity;
+    candles.forEach((c, i) => {
+      const diff = Math.abs(c.time - tradeTime);
+      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+    });
+    if (bestIdx >= 0 && bestDiff <= halfCandle * 3) {
+      if (t.side === 'buy') buyPoints[bestIdx] = t.price;
+      else sellPoints[bestIdx] = t.price;
+    }
+  }
+
+  priceChart = new Chart(document.getElementById('price-chart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Preço', data: closes, borderColor: '#8b93a3', borderWidth: 1.5, tension: 0.15, pointRadius: 0 },
+        { label: 'Compra', data: buyPoints, borderColor: 'transparent', backgroundColor: '#2ecc71',
+          pointStyle: 'triangle', pointRadius: buyPoints.map(v => v != null ? 7 : 0), showLine: false },
+        { label: 'Venda', data: sellPoints, borderColor: 'transparent', backgroundColor: '#ff5c5c',
+          pointStyle: 'rectRot', pointRadius: sellPoints.map(v => v != null ? 7 : 0), showLine: false },
+      ],
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: { ticks: { callback: (v) => formatPrice(v) } },
+      },
+    },
+  });
+}
+
 function closeDetail() {
   document.getElementById('detail').style.display = 'none';
   currentDetailId = null;
+  if (priceChart) { priceChart.destroy(); priceChart = null; }
 }
 
 (async function init() {
