@@ -23,6 +23,9 @@ FEEDS = [
     {"url": "https://www.cnbc.com/id/10000664/device/rss/rss.html", "source": "CNBC", "default_cat": "global"},
     {"url": "https://www.cnbc.com/id/100003114/device/rss/rss.html", "source": "CNBC", "default_cat": "global"},
     {"url": "https://br.tradingview.com/feed/", "source": "TradingView Brasil", "default_cat": "acoes"},
+    {"url": "https://livecoins.com.br/feed/", "source": "Livecoins", "default_cat": "cripto"},
+    {"url": "https://invezz.com/feed/", "source": "Invezz", "default_cat": "global"},
+    {"url": "https://br.beincrypto.com/feed/", "source": "BeInCrypto Brasil", "default_cat": "cripto"},
 ]
 
 CATEGORY_LABELS = {
