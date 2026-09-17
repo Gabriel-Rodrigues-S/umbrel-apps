@@ -13,7 +13,7 @@ from .strategy import (
 
 logger = logging.getLogger("engine")
 
-POLL_SECONDS = 30
+POLL_SECONDS = 10
 FEE_RATE = 0.001  # 0.1%, taxa típica de spot da Binance, simulada
 
 # regime em que cada estratégia funciona bem: 'trend' (segue tendência,
