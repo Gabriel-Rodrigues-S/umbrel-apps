@@ -199,3 +199,31 @@ def bollinger_reversion_signal(closes: list[float], period: int, num_std: float)
     if close_prev >= upper_prev and close_now < upper_now:
         return "sell"
     return None
+
+
+def trend_direction(strategy: str, closes: list[float], bot: dict) -> str | None:
+    """
+    Direção da tendência 'up'/'down' segundo a mesma lógica da estratégia,
+    mas sem exigir um cruzamento fresco — usado pra confirmar num timeframe
+    maior se a tendência do timeframe do bot é real ou só ruído local.
+    """
+    if strategy == "sma_crossover":
+        fast = sma(closes, bot["fast_period"])
+        slow = sma(closes, bot["slow_period"])
+        if fast is None or slow is None:
+            return None
+        return "up" if fast > slow else "down"
+
+    if strategy == "macd_crossover":
+        ema_fast = ema_series(closes, bot["macd_fast"])
+        ema_slow = ema_series(closes, bot["macd_slow"])
+        if not ema_fast or not ema_slow:
+            return None
+        offset = len(ema_fast) - len(ema_slow)
+        macd_line = [f - s for f, s in zip(ema_fast[offset:], ema_slow)]
+        signal_line = ema_series(macd_line, bot["macd_signal"])
+        if not signal_line:
+            return None
+        return "up" if macd_line[-1] > signal_line[-1] else "down"
+
+    return None

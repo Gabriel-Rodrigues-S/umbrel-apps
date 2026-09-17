@@ -17,6 +17,11 @@ BOT_COLUMN_MIGRATIONS = [
     ("macd_fast", "INTEGER NOT NULL DEFAULT 12"),
     ("macd_slow", "INTEGER NOT NULL DEFAULT 26"),
     ("macd_signal", "INTEGER NOT NULL DEFAULT 9"),
+    ("confirm_ticks", "INTEGER NOT NULL DEFAULT 2"),
+    ("pending_signal", "TEXT"),
+    ("pending_signal_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("confirmation_mode", "TEXT NOT NULL DEFAULT 'ticks'"),
+    ("higher_timeframe", "TEXT NOT NULL DEFAULT '1h'"),
 ]
 
 

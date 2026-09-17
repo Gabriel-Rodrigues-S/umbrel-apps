@@ -45,6 +45,9 @@ class BotCreate(BaseModel):
     macd_fast: int = 12
     macd_slow: int = 26
     macd_signal: int = 9
+    confirm_ticks: int = 2
+    confirmation_mode: Literal["ticks", "higher_timeframe"] = "ticks"
+    higher_timeframe: str = "1h"
 
 
 @app.get("/api/strategies")
@@ -77,8 +80,9 @@ def create_bot(payload: BotCreate):
                    symbol, timeframe, strategy, starting_balance, cash,
                    fast_period, slow_period, adx_period, adx_threshold,
                    rsi_period, rsi_oversold, rsi_overbought,
-                   bb_period, bb_std, macd_fast, macd_slow, macd_signal
-               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   bb_period, bb_std, macd_fast, macd_slow, macd_signal,
+                   confirm_ticks, confirmation_mode, higher_timeframe
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 payload.symbol,
                 payload.timeframe,
@@ -97,6 +101,9 @@ def create_bot(payload: BotCreate):
                 payload.macd_fast,
                 payload.macd_slow,
                 payload.macd_signal,
+                payload.confirm_ticks,
+                payload.confirmation_mode,
+                payload.higher_timeframe,
             ),
         )
         return {"id": cur.lastrowid}
@@ -158,12 +165,16 @@ def get_bot_candles(bot_id: int):
             raise HTTPException(404, "bot não encontrado")
     try:
         candles = exchange.fetch_ohlcv(bot["symbol"], bot["timeframe"], 150)
+        ticker = exchange.fetch_ticker_stats(bot["symbol"])
     except Exception as e:
         raise HTTPException(502, f"falha ao consultar a exchange: {e}")
-    return [
-        {"time": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4]}
-        for c in candles
-    ]
+    return {
+        "ticker": ticker,
+        "candles": [
+            {"time": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4]}
+            for c in candles
+        ],
+    }
 
 
 @app.post("/api/bots/{bot_id}/pause")
