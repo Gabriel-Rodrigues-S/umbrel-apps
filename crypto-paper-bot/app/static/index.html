@@ -162,8 +162,15 @@ const TIMEFRAME_MS = { '1m': 60e3, '5m': 300e3, '15m': 900e3, '1h': 3600e3, '4h'
 
 function formatPrice(p) {
   if (p == null) return '—';
-  if (p >= 1) return p.toFixed(2);
+  if (Math.abs(p) >= 1) {
+    return p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
   return p.toPrecision(4);
+}
+
+function formatUsd(v) {
+  if (v == null) return '—';
+  return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 async function loadStrategies() {
@@ -257,8 +264,8 @@ async function loadBots() {
       </td>
       <td class="adx-tag ${adxClass}" title="${adxHint}">${adxText}</td>
       <td><span class="badge ${b.status}">${b.status}</span></td>
-      <td>$${b.equity.toFixed(2)}</td>
-      <td class="${b.pnl >= 0 ? 'pos' : 'neg'}">${b.pnl >= 0 ? '+' : ''}${b.pnl.toFixed(2)} (${b.pnl_pct.toFixed(2)}%)</td>
+      <td>$${formatUsd(b.equity)}</td>
+      <td class="${b.pnl >= 0 ? 'pos' : 'neg'}">${b.pnl >= 0 ? '+' : ''}${formatUsd(b.pnl)} (${b.pnl_pct.toFixed(2)}%)</td>
       <td onclick="event.stopPropagation()">
         ${b.status === 'running'
           ? `<button class="secondary" onclick="toggleBot(${b.id}, false)">pausar</button>`
