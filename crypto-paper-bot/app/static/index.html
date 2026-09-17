@@ -329,7 +329,7 @@ function closeDetail() {
   await loadStrategies();
   await loadSymbols();
   await loadBots();
-  setInterval(() => { loadBots(); if (currentDetailId) openDetail(currentDetailId); }, 15000);
+  setInterval(() => { loadBots(); if (currentDetailId) openDetail(currentDetailId); }, 2000);
 })();
 </script>
 </body>
