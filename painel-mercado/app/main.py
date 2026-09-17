@@ -48,6 +48,7 @@ def api_news(category: Optional[str] = None):
         "sources": cache.get("sources", []),
         "categories": feeds.CATEGORY_LABELS,
         "items": items,
+        "by_category": cache.get("by_cat", {}),
     }
 
 
