@@ -71,6 +71,14 @@ async def tick_all_bots():
             logger.exception("erro processando bot %s", bot["id"])
 
 
+def equity_for(cash: float, qty: float, entry_price: float | None, price: float) -> float:
+    if qty > 0:
+        return cash + qty * price
+    if qty < 0:
+        return cash + (entry_price - price) * abs(qty)
+    return cash
+
+
 async def tick_bot(bot: dict):
     candles = await asyncio.to_thread(
         exchange.fetch_ohlcv, bot["symbol"], bot["timeframe"], required_candles(bot)
@@ -85,13 +93,26 @@ async def tick_bot(bot: dict):
     signal = compute_signal(bot, closes)
     adx_value = adx(highs, lows, closes, bot["adx_period"])
     regime = STRATEGY_REGIME[bot["strategy"]]
+    trading_mode = bot["trading_mode"]  # 'long', 'short' ou 'long_short'
+    qty_snapshot = bot["position_qty"]
+
+    # descarta sinais de entrada que o modo do bot não permite: 'buy' com
+    # posição zerada só abre LONG se o modo permitir; 'sell' com posição
+    # zerada só abre SHORT se o modo permitir. Sinais de SAÍDA (fechar uma
+    # posição já aberta) nunca são afetados por isso.
+    if signal == "buy" and qty_snapshot == 0 and trading_mode not in ("long", "long_short"):
+        signal = None
+    if signal == "sell" and qty_snapshot == 0 and trading_mode not in ("short", "long_short"):
+        signal = None
+
+    is_new_entry = (signal == "buy" and qty_snapshot == 0) or (signal == "sell" and qty_snapshot == 0)
 
     # filtro de ADX: só bloqueia NOVAS ENTRADAS fora do regime certo pra cada
     # estratégia (tendência precisa de ADX alto, reversão precisa de ADX baixo).
-    # Nunca bloqueia uma venda que fecharia uma posição já aberta — senão o bot
+    # Nunca bloqueia uma saída que fecharia uma posição já aberta — senão o bot
     # pode ficar preso numa posição perdedora se o regime de mercado mudar
     # antes do sinal de saída aparecer.
-    if signal == "buy":
+    if is_new_entry:
         if adx_value is None:
             signal = None
         elif regime == "trend" and adx_value < bot["adx_threshold"]:
@@ -100,18 +121,24 @@ async def tick_bot(bot: dict):
             signal = None
 
     # confirmação multi-timeframe: só entra se um timeframe maior concordar
-    # com a direção do sinal — filtro mais forte que a persistência, mas o
-    # bot vai operar com bem menos frequência. Só se aplica a novas entradas
-    # de estratégias de tendência, nunca a saídas.
-    if bot["confirmation_mode"] == "higher_timeframe" and signal == "buy" and regime == "trend":
+    # com a direção do sinal (alta pra long, baixa pra short) — filtro mais
+    # forte que a persistência, mas o bot vai operar com bem menos frequência.
+    # Só se aplica a novas entradas de estratégias de tendência.
+    if is_new_entry and signal is not None and bot["confirmation_mode"] == "higher_timeframe" and regime == "trend":
         higher_candles = await asyncio.to_thread(
             exchange.fetch_ohlcv, bot["symbol"], bot["higher_timeframe"], required_candles(bot)
         )
         higher_closes = [c[4] for c in higher_candles]
-        if trend_direction(bot["strategy"], higher_closes, bot) != "up":
+        wanted_direction = "up" if signal == "buy" else "down"
+        if trend_direction(bot["strategy"], higher_closes, bot) != wanted_direction:
             signal = None
 
-    if bot["confirmation_mode"] == "higher_timeframe":
+    if not is_new_entry:
+        # saída (ou nenhum sinal de entrada): passa direto, sem gate nem
+        # persistência, e não mexe no estado de confirmação pendente
+        confirmed_signal = signal
+        pending_signal, pending_count = bot["pending_signal"], bot["pending_signal_count"]
+    elif bot["confirmation_mode"] == "higher_timeframe":
         confirmed_signal = signal
         pending_signal, pending_count = None, 0
     else:
@@ -145,6 +172,7 @@ async def tick_bot(bot: dict):
         signal = confirmed_signal
 
         if signal == "buy" and qty == 0:
+            # abre LONG: gasta todo o caixa disponível
             spend = cash
             fee = spend * FEE_RATE
             buy_qty = (spend - fee) / price
@@ -159,6 +187,7 @@ async def tick_bot(bot: dict):
             qty, cash = buy_qty, 0
 
         elif signal == "sell" and qty > 0:
+            # fecha LONG
             proceeds = qty * price
             fee = proceeds * FEE_RATE
             proceeds -= fee
@@ -173,7 +202,41 @@ async def tick_bot(bot: dict):
             )
             qty, cash = 0, proceeds
 
-        equity = cash + qty * price
+        elif signal == "sell" and qty == 0:
+            # abre SHORT: "vende" uma quantidade emprestada equivalente a todo
+            # o caixa disponível, recebendo o valor da venda. Fica devendo
+            # essa quantidade (position_qty negativo) até recomprar.
+            qty_abs = cash / price
+            fee = (qty_abs * price) * FEE_RATE
+            new_cash = cash - fee
+            conn.execute(
+                "UPDATE bots SET cash = ?, position_qty = ?, position_entry_price = ? WHERE id = ?",
+                (new_cash, -qty_abs, price, bot["id"]),
+            )
+            conn.execute(
+                "INSERT INTO trades (bot_id, side, price, qty, reason) VALUES (?,?,?,?,?)",
+                (bot["id"], "sell", price, qty_abs, bot["strategy"]),
+            )
+            qty, cash = -qty_abs, new_cash
+
+        elif signal == "buy" and qty < 0:
+            # fecha SHORT: recompra a quantidade devida; lucra se o preço
+            # de recompra for menor que o preço de entrada da venda
+            qty_abs = abs(qty)
+            fee = (qty_abs * price) * FEE_RATE
+            pnl = (entry_price - price) * qty_abs - fee
+            new_cash = cash + pnl
+            conn.execute(
+                "UPDATE bots SET cash = ?, position_qty = 0, position_entry_price = NULL WHERE id = ?",
+                (new_cash, bot["id"]),
+            )
+            conn.execute(
+                "INSERT INTO trades (bot_id, side, price, qty, pnl, reason) VALUES (?,?,?,?,?,?)",
+                (bot["id"], "buy", price, qty_abs, pnl, bot["strategy"]),
+            )
+            qty, cash = 0, new_cash
+
+        equity = equity_for(cash, qty, entry_price, price)
         conn.execute(
             "INSERT INTO equity_snapshots (bot_id, equity, price) VALUES (?,?,?)",
             (bot["id"], equity, price),

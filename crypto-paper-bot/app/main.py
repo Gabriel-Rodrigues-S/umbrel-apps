@@ -57,6 +57,8 @@ class BotCreate(BaseModel):
     confirm_ticks: int = 2
     confirmation_mode: Literal["ticks", "higher_timeframe"] = "ticks"
     higher_timeframe: str = "1h"
+    trading_mode: Literal["long", "short", "long_short"] = "long"
+    nickname: str | None = None
 
 
 @app.get("/api/strategies")
@@ -90,8 +92,9 @@ def create_bot(payload: BotCreate):
                    fast_period, slow_period, adx_period, adx_threshold,
                    rsi_period, rsi_oversold, rsi_overbought,
                    bb_period, bb_std, macd_fast, macd_slow, macd_signal,
-                   confirm_ticks, confirmation_mode, higher_timeframe
-               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   confirm_ticks, confirmation_mode, higher_timeframe,
+                   trading_mode, nickname
+               ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 payload.symbol,
                 payload.timeframe,
@@ -113,6 +116,8 @@ def create_bot(payload: BotCreate):
                 payload.confirm_ticks,
                 payload.confirmation_mode,
                 payload.higher_timeframe,
+                payload.trading_mode,
+                payload.nickname,
             ),
         )
         return {"id": cur.lastrowid}
@@ -145,7 +150,10 @@ def list_bots():
                 bot["trading_active"] = current_adx >= bot["adx_threshold"]
             else:
                 bot["trading_active"] = current_adx < bot["adx_threshold"]
-            bot["equity"] = bot["cash"] + bot["position_qty"] * (last_price or bot.get("position_entry_price") or 0)
+            bot["equity"] = engine.equity_for(
+                bot["cash"], bot["position_qty"], bot.get("position_entry_price"),
+                last_price if last_price is not None else (bot.get("position_entry_price") or 0),
+            )
             bot["pnl"] = bot["equity"] - bot["starting_balance"]
             bot["pnl_pct"] = (bot["pnl"] / bot["starting_balance"] * 100) if bot["starting_balance"] else 0
         return bots

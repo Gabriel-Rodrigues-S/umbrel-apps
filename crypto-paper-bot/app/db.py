@@ -22,6 +22,8 @@ BOT_COLUMN_MIGRATIONS = [
     ("pending_signal_count", "INTEGER NOT NULL DEFAULT 0"),
     ("confirmation_mode", "TEXT NOT NULL DEFAULT 'ticks'"),
     ("higher_timeframe", "TEXT NOT NULL DEFAULT '1h'"),
+    ("trading_mode", "TEXT NOT NULL DEFAULT 'long'"),
+    ("nickname", "TEXT"),
 ]
 
 

@@ -43,6 +43,11 @@
   .regime-tag { font-size: 10px; padding: 1px 7px; border-radius: 999px; margin-left: 6px; }
   .regime-tag.trend { background: #1e2f47; color: #6fa8ff; }
   .regime-tag.range { background: #3a2f1e; color: #e0a952; }
+  .mode-tag { font-size: 10px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+  .mode-tag.long { background: #1e3a2a; color: var(--green); }
+  .mode-tag.short { background: #3a1e24; color: var(--red); }
+  .mode-tag.long_short { background: #2a1e3a; color: #b08cff; }
+  .bot-nickname { font-weight: 600; }
   .adx-tag { font-size: 11px; color: var(--muted); }
   .adx-tag.active { color: var(--green); }
   .ticker { display: flex; align-items: baseline; gap: 12px; margin: 8px 0 14px; }
@@ -88,6 +93,20 @@
         <input id="f-balance" type="number" value="1000" style="width:110px" />
       </div>
       <button onclick="createBot()">Criar bot</button>
+    </div>
+    <div class="form-row" style="margin-top:10px">
+      <div class="field">
+        <label>Apelido (opcional)</label>
+        <input id="f-nickname" placeholder="ex: BTC Long Agressivo" style="width:200px" />
+      </div>
+      <div class="field">
+        <label>Modo de operação</label>
+        <select id="f-trading-mode">
+          <option value="long">Long (só compra)</option>
+          <option value="short">Short (só venda a descoberto)</option>
+          <option value="long_short">Long + Short</option>
+        </select>
+      </div>
     </div>
 
     <div class="form-row strategy-params active" id="params-sma_crossover" style="margin-top:10px">
@@ -239,6 +258,8 @@ async function createBot() {
     confirm_ticks: parseInt(document.getElementById('f-confirm-ticks').value),
     confirmation_mode: document.getElementById('f-confirmation-mode').value,
     higher_timeframe: document.getElementById('f-higher-timeframe').value,
+    trading_mode: document.getElementById('f-trading-mode').value,
+    nickname: document.getElementById('f-nickname').value.trim() || null,
   };
   const res = await fetch('/api/bots', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
   if (!res.ok) { alert('Erro ao criar bot: ' + await res.text()); return; }
@@ -258,7 +279,7 @@ async function loadBots() {
     const regimeClass = info && info.regime === 'tendência' ? 'trend' : 'range';
     const adxText = b.current_adx != null ? b.current_adx.toFixed(1) : '—';
     const adxClass = b.trading_active ? 'active' : '';
-    const hasPosition = b.position_qty > 0;
+    const hasPosition = b.position_qty !== 0;
     const adxHint = b.trading_active == null
       ? 'aguardando dados'
       : b.trading_active
@@ -266,9 +287,15 @@ async function loadBots() {
         : hasPosition
           ? 'filtro bloqueia novas entradas (saída da posição atual continua livre)'
           : 'filtro bloqueando novas entradas';
+    const modeLabel = { long: 'Long', short: 'Short', long_short: 'Long+Short' }[b.trading_mode] || b.trading_mode;
+    const positionLabel = b.position_qty > 0 ? ' (comprado)' : b.position_qty < 0 ? ' (vendido/short)' : '';
     return `
     <tr class="bot-row" onclick="openDetail(${b.id})">
-      <td>${b.symbol} <span style="color:var(--muted);font-size:11px">${b.timeframe}</span></td>
+      <td>
+        ${b.nickname ? `<div class="bot-nickname">${b.nickname}</div>` : ''}
+        <span class="mode-tag ${b.trading_mode}">${modeLabel}</span>
+        <div style="color:var(--muted);font-size:11px">${b.symbol} ${b.timeframe}${positionLabel}</div>
+      </td>
       <td>${strategyLabel(b.strategy)}<span class="regime-tag ${regimeClass}">${info ? info.regime : ''}</span>
         <div style="color:var(--muted);font-size:11px">${b.confirmation_mode === 'higher_timeframe' ? `confirma em ${b.higher_timeframe}` : `persistência ${b.confirm_ticks}x`}</div>
       </td>
@@ -304,7 +331,8 @@ async function openDetail(id) {
   currentDetailId = id;
   const data = await fetch(`/api/bots/${id}`).then(r => r.json());
   document.getElementById('detail').style.display = 'block';
-  document.getElementById('detail-title').textContent = `${data.bot.symbol} — histórico`;
+  const titlePrefix = data.bot.nickname ? `${data.bot.nickname} (${data.bot.symbol})` : data.bot.symbol;
+  document.getElementById('detail-title').textContent = `${titlePrefix} — histórico`;
 
   const labels = data.equity.map(e => new Date(e.created_at + 'Z').toLocaleString());
   const values = data.equity.map(e => e.equity);
@@ -317,14 +345,22 @@ async function openDetail(id) {
 
   await renderPriceChart(data.bot, data.trades);
 
-  document.getElementById('trades-body').innerHTML = data.trades.map(t => `
+  document.getElementById('trades-body').innerHTML = data.trades.map(t => {
+    // opening trades têm pnl null; fechamento sempre traz o pnl realizado
+    let label, cls;
+    if (t.side === 'buy' && t.pnl == null) { label = 'abre long'; cls = 'pos'; }
+    else if (t.side === 'sell' && t.pnl != null) { label = 'fecha long'; cls = 'neg'; }
+    else if (t.side === 'sell' && t.pnl == null) { label = 'abre short'; cls = 'neg'; }
+    else { label = 'fecha short'; cls = 'pos'; }
+    return `
     <tr>
       <td>${new Date(t.created_at + 'Z').toLocaleString()}</td>
-      <td class="${t.side === 'buy' ? 'pos' : 'neg'}">${t.side} <span style="color:var(--muted);font-size:11px">${t.reason || ''}</span></td>
+      <td class="${cls}">${label} <span style="color:var(--muted);font-size:11px">${t.reason || ''}</span></td>
       <td>$${formatPrice(t.price)}</td>
       <td>${t.qty.toFixed(6)}</td>
       <td class="${t.pnl >= 0 ? 'pos' : 'neg'}">${t.pnl != null ? t.pnl.toFixed(2) : '—'}</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 async function renderPriceChart(bot, trades) {
