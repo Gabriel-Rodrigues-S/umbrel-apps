@@ -1,0 +1,13 @@
+version: '3.7'
+
+services:
+  app_proxy:
+    environment:
+      APP_HOST: garod004-apps-crypto-paper-bot_server_1
+      APP_PORT: 3458
+
+  server:
+    image: ghcr.io/garod004/crypto-paper-bot:latest
+    restart: on-failure
+    volumes:
+      - ${APP_DATA_DIR}/data:/app/data

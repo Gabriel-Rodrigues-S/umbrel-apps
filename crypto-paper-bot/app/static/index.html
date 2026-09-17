@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Crypto Paper Bot</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --border: #262b36; --text: #e6e8ec;
+    --muted: #8b93a3; --green: #2ecc71; --red: #ff5c5c; --accent: #4f8cff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, Segoe UI, Roboto, sans-serif; }
+  header { padding: 20px 24px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  h1 { font-size: 18px; margin: 0; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  main { padding: 24px; max-width: 1100px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 18px; }
+  .form-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  label { font-size: 12px; color: var(--muted); }
+  input, select { background: #10131a; border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 6px; font-size: 13px; }
+  button { background: var(--accent); color: white; border: none; padding: 9px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+  button.secondary { background: #262b36; }
+  button.danger { background: var(--red); }
+  button:hover { opacity: 0.9; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; }
+  .bot-row { cursor: pointer; }
+  .bot-row:hover { background: #1c202a; }
+  .pos { color: var(--green); } .neg { color: var(--red); }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+  .badge.running { background: #1e3a2a; color: var(--green); }
+  .badge.paused { background: #3a3320; color: #e0c452; }
+  #detail { display: none; }
+  canvas { max-height: 260px; }
+  .close-btn { float: right; cursor: pointer; color: var(--muted); }
+  .warn { font-size: 12px; color: var(--muted); margin-top: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Crypto Paper Bot</h1>
+    <div class="sub">Simulação de trading — nenhuma ordem real é enviada</div>
+  </div>
+</header>
+<main>
+  <div class="card">
+    <strong>Novo bot</strong>
+    <div class="form-row" style="margin-top:10px">
+      <div class="field">
+        <label>Par</label>
+        <input id="f-symbol" value="BTC/USDT" list="symbol-list" />
+        <datalist id="symbol-list"></datalist>
+      </div>
+      <div class="field">
+        <label>Timeframe</label>
+        <select id="f-timeframe">
+          <option>1m</option><option selected>5m</option><option>15m</option><option>1h</option><option>4h</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>SMA rápida</label>
+        <input id="f-fast" type="number" value="9" style="width:70px" />
+      </div>
+      <div class="field">
+        <label>SMA lenta</label>
+        <input id="f-slow" type="number" value="21" style="width:70px" />
+      </div>
+      <div class="field">
+        <label>Saldo inicial (USDT)</label>
+        <input id="f-balance" type="number" value="1000" style="width:110px" />
+      </div>
+      <button onclick="createBot()">Criar bot</button>
+    </div>
+    <div class="warn">Estratégia: cruzamento de médias móveis simples (SMA). Dados reais da Binance, execução simulada.</div>
+  </div>
+
+  <div class="card">
+    <strong>Bots ativos</strong>
+    <table style="margin-top:10px">
+      <thead><tr><th>Par</th><th>Status</th><th>Equity</th><th>P&L</th><th></th></tr></thead>
+      <tbody id="bots-body"></tbody>
+    </table>
+  </div>
+
+  <div class="card" id="detail">
+    <span class="close-btn" onclick="closeDetail()">fechar ✕</span>
+    <strong id="detail-title"></strong>
+    <canvas id="equity-chart"></canvas>
+    <table style="margin-top:14px">
+      <thead><tr><th>Data</th><th>Lado</th><th>Preço</th><th>Qtd</th><th>PnL</th></tr></thead>
+      <tbody id="trades-body"></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+let chart = null;
+
+async function loadSymbols() {
+  try {
+    const list = await fetch('/api/symbols').then(r => r.json());
+    document.getElementById('symbol-list').innerHTML = list.map(s => `<option value="${s}">`).join('');
+  } catch (e) {}
+}
+
+async function createBot() {
+  const payload = {
+    symbol: document.getElementById('f-symbol').value.trim(),
+    timeframe: document.getElementById('f-timeframe').value,
+    fast_period: parseInt(document.getElementById('f-fast').value),
+    slow_period: parseInt(document.getElementById('f-slow').value),
+    starting_balance: parseFloat(document.getElementById('f-balance').value),
+  };
+  const res = await fetch('/api/bots', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+  if (!res.ok) { alert('Erro ao criar bot'); return; }
+  loadBots();
+}
+
+async function loadBots() {
+  const bots = await fetch('/api/bots').then(r => r.json());
+  const body = document.getElementById('bots-body');
+  body.innerHTML = bots.map(b => `
+    <tr class="bot-row" onclick="openDetail(${b.id})">
+      <td>${b.symbol} <span style="color:var(--muted);font-size:11px">${b.timeframe}</span></td>
+      <td><span class="badge ${b.status}">${b.status}</span></td>
+      <td>$${b.equity.toFixed(2)}</td>
+      <td class="${b.pnl >= 0 ? 'pos' : 'neg'}">${b.pnl >= 0 ? '+' : ''}${b.pnl.toFixed(2)} (${b.pnl_pct.toFixed(2)}%)</td>
+      <td onclick="event.stopPropagation()">
+        ${b.status === 'running'
+          ? `<button class="secondary" onclick="toggleBot(${b.id}, false)">pausar</button>`
+          : `<button class="secondary" onclick="toggleBot(${b.id}, true)">retomar</button>`}
+        <button class="danger" onclick="removeBot(${b.id})">excluir</button>
+      </td>
+    </tr>`).join('');
+}
+
+async function toggleBot(id, resume) {
+  await fetch(`/api/bots/${id}/${resume ? 'resume' : 'pause'}`, { method: 'POST' });
+  loadBots();
+}
+
+async function removeBot(id) {
+  if (!confirm('Excluir este bot e seu histórico?')) return;
+  await fetch(`/api/bots/${id}`, { method: 'DELETE' });
+  closeDetail();
+  loadBots();
+}
+
+let currentDetailId = null;
+
+async function openDetail(id) {
+  currentDetailId = id;
+  const data = await fetch(`/api/bots/${id}`).then(r => r.json());
+  document.getElementById('detail').style.display = 'block';
+  document.getElementById('detail-title').textContent = `${data.bot.symbol} — histórico`;
+
+  const labels = data.equity.map(e => new Date(e.created_at + 'Z').toLocaleString());
+  const values = data.equity.map(e => e.equity);
+  if (chart) chart.destroy();
+  chart = new Chart(document.getElementById('equity-chart'), {
+    type: 'line',
+    data: { labels, datasets: [{ label: 'Equity (USDT)', data: values, borderColor: '#4f8cff', tension: 0.2, pointRadius: 0 }] },
+    options: { plugins: { legend: { display: false } }, scales: { x: { display: false } } }
+  });
+
+  document.getElementById('trades-body').innerHTML = data.trades.map(t => `
+    <tr>
+      <td>${new Date(t.created_at + 'Z').toLocaleString()}</td>
+      <td class="${t.side === 'buy' ? 'pos' : 'neg'}">${t.side}</td>
+      <td>$${t.price.toFixed(2)}</td>
+      <td>${t.qty.toFixed(6)}</td>
+      <td class="${t.pnl >= 0 ? 'pos' : 'neg'}">${t.pnl != null ? t.pnl.toFixed(2) : '—'}</td>
+    </tr>`).join('');
+}
+
+function closeDetail() {
+  document.getElementById('detail').style.display = 'none';
+  currentDetailId = null;
+}
+
+loadSymbols();
+loadBots();
+setInterval(() => { loadBots(); if (currentDetailId) openDetail(currentDetailId); }, 15000);
+</script>
+</body>
+</html>
