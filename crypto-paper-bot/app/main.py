@@ -150,6 +150,22 @@ def get_bot(bot_id: int):
         return {"bot": dict(bot), "trades": trades, "equity": list(reversed(equity))}
 
 
+@app.get("/api/bots/{bot_id}/candles")
+def get_bot_candles(bot_id: int):
+    with get_conn() as conn:
+        bot = conn.execute("SELECT * FROM bots WHERE id = ?", (bot_id,)).fetchone()
+        if not bot:
+            raise HTTPException(404, "bot não encontrado")
+    try:
+        candles = exchange.fetch_ohlcv(bot["symbol"], bot["timeframe"], 150)
+    except Exception as e:
+        raise HTTPException(502, f"falha ao consultar a exchange: {e}")
+    return [
+        {"time": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4]}
+        for c in candles
+    ]
+
+
 @app.post("/api/bots/{bot_id}/pause")
 def pause_bot(bot_id: int):
     with get_conn() as conn:
