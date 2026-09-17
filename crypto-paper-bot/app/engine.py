@@ -85,14 +85,18 @@ async def tick_bot(bot: dict):
     adx_value = adx(highs, lows, closes, bot["adx_period"])
     regime = STRATEGY_REGIME[bot["strategy"]]
 
-    # filtro de ADX: estratégias de tendência só operam com tendência forte,
-    # estratégias de reversão só operam em mercado lateral (sem tendência)
-    if adx_value is None:
-        signal = None
-    elif regime == "trend" and adx_value < bot["adx_threshold"]:
-        signal = None
-    elif regime == "range" and adx_value >= bot["adx_threshold"]:
-        signal = None
+    # filtro de ADX: só bloqueia NOVAS ENTRADAS fora do regime certo pra cada
+    # estratégia (tendência precisa de ADX alto, reversão precisa de ADX baixo).
+    # Nunca bloqueia uma venda que fecharia uma posição já aberta — senão o bot
+    # pode ficar preso numa posição perdedora se o regime de mercado mudar
+    # antes do sinal de saída aparecer.
+    if signal == "buy":
+        if adx_value is None:
+            signal = None
+        elif regime == "trend" and adx_value < bot["adx_threshold"]:
+            signal = None
+        elif regime == "range" and adx_value >= bot["adx_threshold"]:
+            signal = None
 
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM bots WHERE id = ?", (bot["id"],)).fetchone()
