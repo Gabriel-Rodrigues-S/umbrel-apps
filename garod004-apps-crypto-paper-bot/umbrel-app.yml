@@ -4,13 +4,15 @@ name: Crypto Paper Bot
 tagline: Bot de trading de criptomoedas em modo simulado (paper trading)
 icon: https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-crypto-paper-bot/icon.svg
 category: finance
-version: '1.0.0'
+version: '1.1.0'
 port: 3458
 description: >-
   Bot de trading automático que opera com dinheiro simulado usando preços reais
-  da Binance. Crie bots com estratégia de cruzamento de médias móveis (SMA),
-  acompanhe saldo, posições e histórico de trades em um dashboard.
-  Nenhuma ordem real é enviada — é uma ferramenta de estudo e teste de estratégias.
+  da Binance. Crie bots com 4 estratégias (SMA crossover, MACD crossover, RSI
+  reversão, Bandas de Bollinger), cada uma filtrada por ADX pra só operar no
+  regime de mercado certo (tendência ou lateral). Acompanhe saldo, posições e
+  histórico de trades em um dashboard. Nenhuma ordem real é enviada — é uma
+  ferramenta de estudo e teste de estratégias.
 developer: garod004
 website: https://github.com/garod004/umbrel-apps
 dependencies: []
@@ -24,7 +26,9 @@ path: ''
 defaultUsername: ''
 defaultPassword: ''
 releaseNotes: >-
-  Primeira versão. Paper trading de cripto com estratégia SMA crossover, dashboard
-  com equity curve e histórico de trades.
+  v1.1.0: adiciona 3 novas estratégias (MACD crossover, RSI reversão, Bandas de
+  Bollinger) e filtro de ADX que só deixa cada estratégia operar no regime de
+  mercado em que ela funciona (tendência ou lateral), reduzindo overtrading em
+  mercado sem direção clara.
 submitter: garod004
 submission: https://github.com/garod004/umbrel-apps

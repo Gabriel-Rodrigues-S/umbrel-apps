@@ -4,6 +4,21 @@ from pathlib import Path
 
 DB_PATH = Path("/app/data/bot.db")
 
+# colunas adicionadas depois da v1 (nome, definição SQL para ALTER TABLE)
+BOT_COLUMN_MIGRATIONS = [
+    ("strategy", "TEXT NOT NULL DEFAULT 'sma_crossover'"),
+    ("adx_period", "INTEGER NOT NULL DEFAULT 14"),
+    ("adx_threshold", "REAL NOT NULL DEFAULT 25"),
+    ("rsi_period", "INTEGER NOT NULL DEFAULT 14"),
+    ("rsi_oversold", "REAL NOT NULL DEFAULT 30"),
+    ("rsi_overbought", "REAL NOT NULL DEFAULT 70"),
+    ("bb_period", "INTEGER NOT NULL DEFAULT 20"),
+    ("bb_std", "REAL NOT NULL DEFAULT 2.0"),
+    ("macd_fast", "INTEGER NOT NULL DEFAULT 12"),
+    ("macd_slow", "INTEGER NOT NULL DEFAULT 26"),
+    ("macd_signal", "INTEGER NOT NULL DEFAULT 9"),
+]
+
 
 def init_db():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -44,6 +59,11 @@ def init_db():
             );
             """
         )
+
+        existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(bots)")}
+        for name, definition in BOT_COLUMN_MIGRATIONS:
+            if name not in existing_columns:
+                conn.execute(f"ALTER TABLE bots ADD COLUMN {name} {definition}")
 
 
 @contextmanager
