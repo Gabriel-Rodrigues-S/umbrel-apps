@@ -157,8 +157,18 @@
 let chart = null;
 let priceChart = null;
 let strategies = [];
+let lastTickerFetchMs = null;
 
 const TIMEFRAME_MS = { '1m': 60e3, '5m': 300e3, '15m': 900e3, '1h': 3600e3, '4h': 14400e3 };
+
+function updateTickerAge() {
+  const el = document.getElementById('ticker-age');
+  if (!el || lastTickerFetchMs == null) return;
+  const secs = Math.round((Date.now() - lastTickerFetchMs) / 1000);
+  el.textContent = secs <= 1 ? 'atualizado agora' : `atualizado há ${secs}s`;
+  el.style.color = secs > 10 ? 'var(--red)' : 'var(--muted)';
+}
+setInterval(updateTickerAge, 1000);
 
 function formatPrice(p) {
   if (p == null) return '—';
@@ -320,7 +330,7 @@ async function openDetail(id) {
 async function renderPriceChart(bot, trades) {
   let data;
   try {
-    data = await fetch(`/api/bots/${bot.id}/candles`).then(r => r.json());
+    data = await fetch(`/api/bots/${bot.id}/candles`, { cache: 'no-store' }).then(r => r.json());
   } catch (e) {
     data = null;
   }
@@ -332,6 +342,7 @@ async function renderPriceChart(bot, trades) {
   }
   const candles = data.candles;
   const ticker = data.ticker || {};
+  lastTickerFetchMs = Date.now();
 
   if (ticker.last != null) {
     const change = ticker.change ?? 0;
@@ -342,7 +353,9 @@ async function renderPriceChart(bot, trades) {
       <span class="price">$${formatPrice(ticker.last)}</span>
       <span class="change ${cls}">${sign}${formatPrice(change)} (${sign}${pct.toFixed(2)}%)</span>
       <span class="sub" style="align-self:center">24h</span>
+      <span class="sub" id="ticker-age" style="align-self:center"></span>
     `;
+    updateTickerAge();
   } else {
     tickerEl.innerHTML = '';
   }

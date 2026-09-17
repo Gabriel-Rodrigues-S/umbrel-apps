@@ -1,9 +1,10 @@
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -24,6 +25,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Crypto Paper Bot", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def no_cache_api(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 STRATEGIES = ["sma_crossover", "macd_crossover", "rsi_reversion", "bollinger_reversion"]
 
@@ -170,6 +179,7 @@ def get_bot_candles(bot_id: int):
         raise HTTPException(502, f"falha ao consultar a exchange: {e}")
     return {
         "ticker": ticker,
+        "fetched_at": time.time() * 1000,
         "candles": [
             {"time": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4]}
             for c in candles
