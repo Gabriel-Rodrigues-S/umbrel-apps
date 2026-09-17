@@ -336,12 +336,17 @@ async function openDetail(id) {
 
   const labels = data.equity.map(e => new Date(e.created_at + 'Z').toLocaleString());
   const values = data.equity.map(e => e.equity);
-  if (chart) chart.destroy();
-  chart = new Chart(document.getElementById('equity-chart'), {
-    type: 'line',
-    data: { labels, datasets: [{ label: 'Equity (USDT)', data: values, borderColor: '#4f8cff', tension: 0.2, pointRadius: 0 }] },
-    options: { animation: false, plugins: { legend: { display: false } }, scales: { x: { display: false } } }
-  });
+  if (chart) {
+    chart.data.labels = labels;
+    chart.data.datasets[0].data = values;
+    chart.update('none');
+  } else {
+    chart = new Chart(document.getElementById('equity-chart'), {
+      type: 'line',
+      data: { labels, datasets: [{ label: 'Equity (USDT)', data: values, borderColor: '#4f8cff', tension: 0.2, pointRadius: 0 }] },
+      options: { animation: false, plugins: { legend: { display: false } }, scales: { x: { display: false } } }
+    });
+  }
 
   await renderPriceChart(data.bot, data.trades);
 
@@ -396,8 +401,6 @@ async function renderPriceChart(bot, trades) {
     tickerEl.innerHTML = '';
   }
 
-  if (priceChart) { priceChart.destroy(); priceChart = null; }
-
   const halfCandle = (TIMEFRAME_MS[bot.timeframe] || 300e3) / 2;
   const labels = candles.map(c => new Date(c.time).toLocaleString());
   const closes = candles.map(c => c.close);
@@ -417,33 +420,44 @@ async function renderPriceChart(bot, trades) {
     }
   }
 
-  priceChart = new Chart(document.getElementById('price-chart'), {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [
-        { label: 'Preço', data: closes, borderColor: '#8b93a3', borderWidth: 1.5, tension: 0.15, pointRadius: 0 },
-        { label: 'Compra', data: buyPoints, borderColor: 'transparent', backgroundColor: '#2ecc71',
-          pointStyle: 'triangle', pointRadius: buyPoints.map(v => v != null ? 7 : 0), showLine: false },
-        { label: 'Venda', data: sellPoints, borderColor: 'transparent', backgroundColor: '#ff5c5c',
-          pointStyle: 'rectRot', pointRadius: sellPoints.map(v => v != null ? 7 : 0), showLine: false },
-      ],
-    },
-    options: {
-      animation: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { display: false },
-        y: { ticks: { callback: (v) => formatPrice(v) } },
+  if (priceChart) {
+    priceChart.data.labels = labels;
+    priceChart.data.datasets[0].data = closes;
+    priceChart.data.datasets[1].data = buyPoints;
+    priceChart.data.datasets[1].pointRadius = buyPoints.map(v => v != null ? 7 : 0);
+    priceChart.data.datasets[2].data = sellPoints;
+    priceChart.data.datasets[2].pointRadius = sellPoints.map(v => v != null ? 7 : 0);
+    priceChart.update('none');
+  } else {
+    priceChart = new Chart(document.getElementById('price-chart'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Preço', data: closes, borderColor: '#8b93a3', borderWidth: 1.5, tension: 0.15, pointRadius: 0 },
+          { label: 'Compra', data: buyPoints, borderColor: 'transparent', backgroundColor: '#2ecc71',
+            pointStyle: 'triangle', pointRadius: buyPoints.map(v => v != null ? 7 : 0), showLine: false },
+          { label: 'Venda', data: sellPoints, borderColor: 'transparent', backgroundColor: '#ff5c5c',
+            pointStyle: 'rectRot', pointRadius: sellPoints.map(v => v != null ? 7 : 0), showLine: false },
+        ],
       },
-    },
-  });
+      options: {
+        animation: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { display: false },
+          y: { ticks: { callback: (v) => formatPrice(v) } },
+        },
+      },
+    });
+  }
 }
 
 function closeDetail() {
   document.getElementById('detail').style.display = 'none';
   currentDetailId = null;
   if (priceChart) { priceChart.destroy(); priceChart = null; }
+  if (chart) { chart.destroy(); chart = null; }
 }
 
 (async function init() {
