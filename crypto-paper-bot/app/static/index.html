@@ -208,7 +208,14 @@ async function loadBots() {
     const regimeClass = info && info.regime === 'tendência' ? 'trend' : 'range';
     const adxText = b.current_adx != null ? b.current_adx.toFixed(1) : '—';
     const adxClass = b.trading_active ? 'active' : '';
-    const adxHint = b.trading_active == null ? 'aguardando dados' : (b.trading_active ? 'filtro liberado' : 'filtro bloqueando');
+    const hasPosition = b.position_qty > 0;
+    const adxHint = b.trading_active == null
+      ? 'aguardando dados'
+      : b.trading_active
+        ? 'filtro liberado pra novas entradas'
+        : hasPosition
+          ? 'filtro bloqueia novas entradas (saída da posição atual continua livre)'
+          : 'filtro bloqueando novas entradas';
     return `
     <tr class="bot-row" onclick="openDetail(${b.id})">
       <td>${b.symbol} <span style="color:var(--muted);font-size:11px">${b.timeframe}</span></td>
