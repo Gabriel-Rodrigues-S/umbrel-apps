@@ -1,19 +1,65 @@
 name: Publicar imagens Docker
 
+# Reconstrói e publica no GHCR apenas os apps cujo código mudou no push.
+#  - :latest é sempre atualizado.
+#  - :<versão do umbrel-app.yml> só é criado se ainda não existir: tags de versão
+#    nunca são sobrescritas (o compose de cada app aponta para uma delas).
+#  - Mudanças só em manifests (garod004-apps-*/), README ou neste workflow não
+#    geram build. Para forçar: Actions > Publicar imagens Docker > Run workflow
+#    (apps: "todos" ou uma lista, ex.: file-converter,tts-reader).
+# O mapeamento app -> pasta -> imagem fica em .github/scripts/detectar-apps.py.
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      apps:
+        description: "Apps a publicar: 'todos' ou lista separada por vírgula"
+        required: false
+        default: todos
 
 # O ghcr.io exige o nome do repositório em minúsculas; github.repository_owner
 # vem com a capitalização da conta (Gabriel-Rodrigues-S) e quebra o build.
 env:
   IMAGE_OWNER: gabriel-rodrigues-s
 
+# Um publicador por vez, para duas execuções não disputarem as mesmas tags.
+concurrency:
+  group: publicar-imagens
+  cancel-in-progress: false
+
 jobs:
-  # ── Video Downloader (código na raiz) ──────────────────────────────────────
-  video-downloader:
+  detectar:
+    name: Detectar apps alterados
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matriz: ${{ steps.calc.outputs.matriz }}
+      tem: ${{ steps.calc.outputs.tem }}
+    steps:
+      - name: Checkout (histórico completo, para comparar commits)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Escolher apps
+        id: calc
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          INPUT_APPS: ${{ inputs.apps }}
+        run: python3 .github/scripts/detectar-apps.py
+
+  publicar:
+    name: Build e push — ${{ matrix.app }}
+    needs: detectar
+    if: needs.detectar.outputs.tem == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.detectar.outputs.matriz) }}
     permissions:
       contents: read
       packages: write
@@ -31,185 +77,30 @@ jobs:
       - name: Configurar Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build e push — video-downloader
+      - name: Definir tags (a de versão nunca é sobrescrita)
+        id: tags
+        env:
+          IMG: ghcr.io/${{ env.IMAGE_OWNER }}/${{ matrix.image }}
+          VERSAO: ${{ matrix.version }}
+        run: |
+          tags="$IMG:latest"
+          if docker buildx imagetools inspect "$IMG:$VERSAO" >/dev/null 2>&1; then
+            echo "A tag $IMG:$VERSAO já existe e será mantida; só a :latest é atualizada."
+          else
+            tags="$tags"$'\n'"$IMG:$VERSAO"
+            echo "Será criada também a tag $IMG:$VERSAO."
+          fi
+          {
+            echo 'lista<<EOF'
+            echo "$tags"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build e push — ${{ matrix.app }}
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ${{ matrix.context }}
           push: true
-          tags: ghcr.io/${{ env.IMAGE_OWNER }}/yt-downloader:latest
-          cache-from: type=gha,scope=video-downloader
-          cache-to: type=gha,scope=video-downloader,mode=max
-
-  # ── Real Assessoria (código em realassessoria/) ───────────────────────────
-  realassessoria:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout do código
-        uses: actions/checkout@v4
-
-      - name: Login no GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configurar Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build e push — realassessoria
-        uses: docker/build-push-action@v5
-        with:
-          context: ./realassessoria
-          push: true
-          tags: ghcr.io/${{ env.IMAGE_OWNER }}/real-assessoria:latest
-          cache-from: type=gha,scope=realassessoria
-          cache-to: type=gha,scope=realassessoria,mode=max
-
-  # ── File Converter (código em file-converter/) ─────────────────────────────
-  file-converter:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout do código
-        uses: actions/checkout@v4
-
-      - name: Login no GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configurar Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build e push — file-converter
-        uses: docker/build-push-action@v5
-        with:
-          context: ./file-converter
-          push: true
-          tags: ghcr.io/${{ env.IMAGE_OWNER }}/file-converter:latest
-          cache-from: type=gha,scope=file-converter
-          cache-to: type=gha,scope=file-converter,mode=max
-
-  # ── TTS Reader (código em tts-reader/) ───────────────────────────────────
-  tts-reader:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout do código
-        uses: actions/checkout@v4
-
-      - name: Login no GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configurar Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build e push — tts-reader
-        uses: docker/build-push-action@v5
-        with:
-          context: ./tts-reader
-          push: true
-          tags: ghcr.io/${{ env.IMAGE_OWNER }}/tts-reader:latest
-          cache-from: type=gha,scope=tts-reader
-          cache-to: type=gha,scope=tts-reader,mode=max
-
-  # ── Sistema EDAH (código em sistema-edah/) ────────────────────────────────
-  sistema-edah:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout do código
-        uses: actions/checkout@v4
-
-      - name: Login no GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configurar Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build e push — sistema-edah
-        uses: docker/build-push-action@v5
-        with:
-          context: ./sistema-edah
-          push: true
-          tags: ghcr.io/${{ env.IMAGE_OWNER }}/sistema-edah:latest
-          cache-from: type=gha,scope=sistema-edah
-          cache-to: type=gha,scope=sistema-edah,mode=max
-
-  # ── Crypto Paper Bot (código em crypto-paper-bot/) ─────────────────────────
-  crypto-paper-bot:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout do código
-        uses: actions/checkout@v4
-
-      - name: Login no GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configurar Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build e push — crypto-paper-bot
-        uses: docker/build-push-action@v5
-        with:
-          context: ./crypto-paper-bot
-          push: true
-          tags: ghcr.io/${{ env.IMAGE_OWNER }}/crypto-paper-bot:latest
-          cache-from: type=gha,scope=crypto-paper-bot
-          cache-to: type=gha,scope=crypto-paper-bot,mode=max
-
-  # ── Painel Mercado (código em painel-mercado/) ─────────────────────────────
-  painel-mercado:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout do código
-        uses: actions/checkout@v4
-
-      - name: Login no GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Configurar Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build e push — painel-mercado
-        uses: docker/build-push-action@v5
-        with:
-          context: ./painel-mercado
-          push: true
-          tags: ghcr.io/${{ env.IMAGE_OWNER }}/painel-mercado:latest
-          cache-from: type=gha,scope=painel-mercado
-          cache-to: type=gha,scope=painel-mercado,mode=max
+          tags: ${{ steps.tags.outputs.lista }}
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,scope=${{ matrix.app }},mode=max
