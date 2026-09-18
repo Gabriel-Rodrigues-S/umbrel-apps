@@ -4,7 +4,7 @@ name: Video Downloader
 tagline: Baixe vídeos e músicas de qualquer plataforma
 icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-video-downloader/icon.svg
 category: media
-version: '1.1.0'
+version: '1.1.1'
 port: 8090
 description: >-
   Interface web para baixar vídeos e músicas diretamente no seu servidor.
@@ -24,6 +24,7 @@ path: ''
 defaultUsername: ''
 defaultPassword: ''
 releaseNotes: >-
+  v1.1.1: imagem do app migrada para o novo registro (ghcr.io/gabriel-rodrigues-s), fixada na mesma versão já instalada (1.1.0); sem mudanças de funcionamento.
   v1.1.0: suporte multi-plataforma (YouTube, Twitter/X, Instagram, TikTok e mais via yt-dlp).
 submitter: garod004
 submission: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
