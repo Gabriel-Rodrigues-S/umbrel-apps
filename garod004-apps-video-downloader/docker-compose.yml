@@ -7,7 +7,7 @@ services:
       APP_PORT: 8090
 
   server:
-    image: ghcr.io/garod004/yt-downloader:latest
+    image: ghcr.io/gabriel-rodrigues-s/yt-downloader:latest
     restart: on-failure
     volumes:
       - ${APP_DATA_DIR}/data:/app/data

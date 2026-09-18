@@ -2,7 +2,7 @@ manifestVersion: 1
 id: garod004-apps-painel-mercado
 name: Painel Mercado
 tagline: Agregador de notícias e cotações do mercado financeiro
-icon: https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-painel-mercado/icon.svg
+icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-painel-mercado/icon.svg
 category: finance
 version: '1.0.0'
 port: 8420
@@ -14,14 +14,14 @@ description: >-
   (Ações & B3, Câmbio, Juros & BC, Cripto, Commodities, Mercados globais) e as
   cotações são atualizadas automaticamente em segundo plano.
 developer: garod004
-website: https://github.com/garod004/umbrel-apps
+website: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
 dependencies: []
-repo: https://github.com/garod004/umbrel-apps
-support: https://github.com/garod004/umbrel-apps/issues
+repo: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
+support: https://github.com/Gabriel-Rodrigues-S/umbrel-apps/issues
 gallery:
-  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-painel-mercado/icon.svg
-  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-painel-mercado/icon.svg
-  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-painel-mercado/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-painel-mercado/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-painel-mercado/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-painel-mercado/icon.svg
 path: ''
 defaultUsername: ''
 defaultPassword: ''
@@ -30,4 +30,4 @@ releaseNotes: >-
   com filtros por categoria e cache em disco para manter os últimos dados bons
   caso alguma fonte fique indisponível.
 submitter: garod004
-submission: https://github.com/garod004/umbrel-apps
+submission: https://github.com/Gabriel-Rodrigues-S/umbrel-apps

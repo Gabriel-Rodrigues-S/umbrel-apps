@@ -7,7 +7,7 @@ services:
       APP_PORT: 8420
 
   server:
-    image: ghcr.io/garod004/painel-mercado:latest
+    image: ghcr.io/gabriel-rodrigues-s/painel-mercado:latest
     restart: on-failure
     volumes:
       - ${APP_DATA_DIR}/data:/app/data

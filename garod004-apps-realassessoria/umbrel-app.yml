@@ -2,7 +2,7 @@ manifestVersion: 1
 id: garod004-apps-realassessoria
 name: Real Assessoria
 tagline: Sistema de gestão jurídica para assessorias
-icon: https://raw.githubusercontent.com/garod004/yt-downloader/main/garod004-apps-realassessoria/icon.svg
+icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-realassessoria/icon.svg
 category: productivity
 version: '1.2.1'
 port: 8180
@@ -11,18 +11,18 @@ description: >-
   Cadastro de clientes, controle de processos e prazos, geração de documentos PDF
   com modelos personalizáveis, gestão de advogados e relatórios financeiros.
 developer: garod004
-website: https://github.com/garod004/realassessoria_1
+website: https://github.com/Gabriel-Rodrigues-S/realassessoria_1
 dependencies: []
-repo: https://github.com/garod004/realassessoria_1
-support: https://github.com/garod004/realassessoria_1/issues
+repo: https://github.com/Gabriel-Rodrigues-S/realassessoria_1
+support: https://github.com/Gabriel-Rodrigues-S/realassessoria_1/issues
 gallery:
-  - https://raw.githubusercontent.com/garod004/yt-downloader/main/garod004-apps-realassessoria/icon.svg
-  - https://raw.githubusercontent.com/garod004/yt-downloader/main/garod004-apps-realassessoria/icon.svg
-  - https://raw.githubusercontent.com/garod004/yt-downloader/main/garod004-apps-realassessoria/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-realassessoria/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-realassessoria/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-realassessoria/icon.svg
 path: ''
 defaultUsername: 'admin@realassessoria.local'
 defaultPassword: 'admin123'
 releaseNotes: >-
   22 modelos cobrindo todos os 24 documentos originais: adicionados Contrato 30% Filho Menor (RA) e Procuração Judicial A Rogo (Edson Santiago).
 submitter: garod004
-submission: https://github.com/garod004/realassessoria_1
+submission: https://github.com/Gabriel-Rodrigues-S/realassessoria_1

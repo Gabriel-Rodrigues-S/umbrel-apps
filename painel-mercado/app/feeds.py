@@ -119,7 +119,7 @@ def fetch_all():
     items = []
     seen_titles = set()
     ok_sources = set()
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; PainelMercadoBot/1.0; +https://github.com/garod004/umbrel-apps)"}
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; PainelMercadoBot/1.0; +https://github.com/Gabriel-Rodrigues-S/umbrel-apps)"}
     with httpx.Client(timeout=FETCH_TIMEOUT, headers=headers, follow_redirects=True) as client:
         for feed in FEEDS:
             try:

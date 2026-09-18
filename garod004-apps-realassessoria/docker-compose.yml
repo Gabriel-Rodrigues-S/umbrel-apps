@@ -7,7 +7,7 @@ services:
       APP_PORT: 80
 
   server:
-    image: ghcr.io/garod004/real-assessoria:latest
+    image: ghcr.io/gabriel-rodrigues-s/real-assessoria:latest
     restart: on-failure
     environment:
       DB_HOST: db
