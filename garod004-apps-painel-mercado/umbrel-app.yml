@@ -4,7 +4,7 @@ name: Painel Mercado
 tagline: Agregador de notícias e cotações do mercado financeiro
 icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-painel-mercado/icon.svg
 category: finance
-version: '1.0.1'
+version: '1.0.2'
 port: 8420
 description: >-
   Painel que reúne, em um só lugar, notícias reais de mercado financeiro (InfoMoney,
@@ -26,6 +26,7 @@ path: ''
 defaultUsername: ''
 defaultPassword: ''
 releaseNotes: >-
+  v1.0.2: imagem fixada na tag 1.0.1 (o mesmo build que já está instalado); mudanças na :latest não afetam mais este app. Sem mudanças de funcionamento.
   v1.0.1: imagem do app migrada para o novo registro (ghcr.io/gabriel-rodrigues-s); sem mudanças de funcionamento.
   Primeira versão. Agregação de notícias via RSS e cotações via Yahoo Finance/BCB,
   com filtros por categoria e cache em disco para manter os últimos dados bons
