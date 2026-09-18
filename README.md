@@ -15,7 +15,7 @@ Interface web para baixar vídeos e músicas de qualquer plataforma.
 - Suporte a playlists completas
 - Progresso em tempo real e histórico de downloads
 
-**Imagem Docker:** `ghcr.io/garod004/yt-downloader:latest`
+**Imagem Docker:** `ghcr.io/gabriel-rodrigues-s/yt-downloader:latest`
 **Porta:** 8090
 
 ---
@@ -29,7 +29,7 @@ Conversor de arquivos local para toda a família usar sem depender de serviços 
 - **Documento:** PDF → DOCX, DOCX/PPTX/XLSX → PDF, PDF → PNG por página (ZIP)
 - Progresso em tempo real e histórico de conversões
 
-**Imagem Docker:** `ghcr.io/garod004/file-converter:latest`
+**Imagem Docker:** `ghcr.io/gabriel-rodrigues-s/file-converter:latest`
 **Porta:** 9191
 
 ---
@@ -43,7 +43,7 @@ Agregador de notícias e cotações do mercado financeiro, atualizado em segundo
 - Selic e PTAX via API pública do Banco Central do Brasil
 - Cache em disco: se uma fonte cair, o painel mantém o último dado bom em vez de ficar vazio
 
-**Imagem Docker:** `ghcr.io/garod004/painel-mercado:latest`
+**Imagem Docker:** `ghcr.io/gabriel-rodrigues-s/painel-mercado:latest`
 **Porta:** 8420
 
 ---

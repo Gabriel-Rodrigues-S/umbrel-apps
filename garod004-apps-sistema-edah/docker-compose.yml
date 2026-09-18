@@ -7,7 +7,7 @@ services:
       APP_PORT: 8270
 
   server:
-    image: ghcr.io/garod004/sistema-edah:latest
+    image: ghcr.io/gabriel-rodrigues-s/sistema-edah:latest
     restart: on-failure
     volumes:
       - ${APP_DATA_DIR}/data:/app/data

@@ -2,7 +2,7 @@ manifestVersion: 1
 id: garod004-apps-video-downloader
 name: Video Downloader
 tagline: Baixe vídeos e músicas de qualquer plataforma
-icon: https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-video-downloader/icon.svg
+icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-video-downloader/icon.svg
 category: media
 version: '1.1.0'
 port: 8090
@@ -12,18 +12,18 @@ description: >-
   Downloads em 1080p, 720p e 480p (MP4), áudio em MP3 e playlists completas.
   Progresso em tempo real, histórico de downloads e interface simples para toda a família usar.
 developer: garod004
-website: https://github.com/garod004/umbrel-apps
+website: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
 dependencies: []
-repo: https://github.com/garod004/umbrel-apps
-support: https://github.com/garod004/umbrel-apps/issues
+repo: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
+support: https://github.com/Gabriel-Rodrigues-S/umbrel-apps/issues
 gallery:
-  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-video-downloader/icon.svg
-  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-video-downloader/icon.svg
-  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-video-downloader/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-video-downloader/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-video-downloader/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-video-downloader/icon.svg
 path: ''
 defaultUsername: ''
 defaultPassword: ''
 releaseNotes: >-
   v1.1.0: suporte multi-plataforma (YouTube, Twitter/X, Instagram, TikTok e mais via yt-dlp).
 submitter: garod004
-submission: https://github.com/garod004/umbrel-apps
+submission: https://github.com/Gabriel-Rodrigues-S/umbrel-apps

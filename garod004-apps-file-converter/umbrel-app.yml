@@ -2,7 +2,7 @@ manifestVersion: 1
 id: garod004-apps-file-converter
 name: File Converter
 tagline: Converta vídeos, áudios, imagens e documentos sem depender de serviços externos
-icon: https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-file-converter/icon.svg
+icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-file-converter/icon.svg
 category: utilities
 version: '1.1.0'
 port: 9191
@@ -14,18 +14,18 @@ description: >-
   Documento: PDF → DOCX, DOCX/PPTX/XLSX → PDF, PDF → PNG/JPG por página (ZIP, ou imagem direta se 1 página).
   Progresso em tempo real, histórico de conversões. Tudo offline, sem nuvem.
 developer: garod004
-website: https://github.com/garod004/umbrel-apps
+website: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
 dependencies: []
-repo: https://github.com/garod004/umbrel-apps
-support: https://github.com/garod004/umbrel-apps/issues
+repo: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
+support: https://github.com/Gabriel-Rodrigues-S/umbrel-apps/issues
 gallery:
-  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-file-converter/icon.svg
-  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-file-converter/icon.svg
-  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-file-converter/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-file-converter/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-file-converter/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-file-converter/icon.svg
 path: ''
 defaultUsername: ''
 defaultPassword: ''
 releaseNotes: >-
   v1.1.0: adicionado PDF → JPG por página; PDFs de 1 página geram imagem direta (sem ZIP).
 submitter: garod004
-submission: https://github.com/garod004/umbrel-apps
+submission: https://github.com/Gabriel-Rodrigues-S/umbrel-apps

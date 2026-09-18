@@ -2,7 +2,7 @@ manifestVersion: 1
 id: garod004-apps-crypto-paper-bot
 name: Crypto Paper Bot
 tagline: Bot de trading de criptomoedas em modo simulado (paper trading)
-icon: https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-crypto-paper-bot/icon.svg
+icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-crypto-paper-bot/icon.svg
 category: finance
 version: '1.4.2'
 port: 3458
@@ -14,14 +14,14 @@ description: >-
   histórico de trades em um dashboard. Nenhuma ordem real é enviada — é uma
   ferramenta de estudo e teste de estratégias.
 developer: garod004
-website: https://github.com/garod004/umbrel-apps
+website: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
 dependencies: []
-repo: https://github.com/garod004/umbrel-apps
-support: https://github.com/garod004/umbrel-apps/issues
+repo: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
+support: https://github.com/Gabriel-Rodrigues-S/umbrel-apps/issues
 gallery:
-  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-crypto-paper-bot/icon.svg
-  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-crypto-paper-bot/icon.svg
-  - https://raw.githubusercontent.com/garod004/umbrel-apps/main/garod004-apps-crypto-paper-bot/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-crypto-paper-bot/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-crypto-paper-bot/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-crypto-paper-bot/icon.svg
 path: ''
 defaultUsername: ''
 defaultPassword: ''
@@ -31,4 +31,4 @@ releaseNotes: >-
   os bots Short e Long+Short nunca operavam. Agora abrem, fecham e alternam
   entre long e short normalmente.
 submitter: garod004
-submission: https://github.com/garod004/umbrel-apps
+submission: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
