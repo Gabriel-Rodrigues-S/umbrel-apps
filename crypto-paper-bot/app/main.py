@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import engine, exchange
-from .db import get_conn, init_db
+from .db import backfill_net_pnl, get_conn, init_db
 from .strategy import adx as compute_adx
 
 logging.basicConfig(level=logging.INFO)
@@ -19,6 +19,9 @@ logging.basicConfig(level=logging.INFO)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    adjusted = backfill_net_pnl(engine.FEE_RATE)
+    if adjusted:
+        logging.getLogger("engine").info("pnl líquido de taxa de entrada aplicado a %d trades antigos", adjusted)
     task = asyncio.create_task(engine.run_forever())
     yield
     task.cancel()

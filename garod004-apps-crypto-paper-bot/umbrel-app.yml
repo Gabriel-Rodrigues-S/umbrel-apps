@@ -4,7 +4,7 @@ name: Crypto Paper Bot
 tagline: Bot de trading de criptomoedas em modo simulado (paper trading)
 icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-crypto-paper-bot/icon.svg
 category: finance
-version: '1.4.4'
+version: '1.4.5'
 port: 3458
 description: >-
   Bot de trading automático que opera com dinheiro simulado usando preços reais
@@ -26,6 +26,7 @@ path: ''
 defaultUsername: ''
 defaultPassword: ''
 releaseNotes: >-
+  v1.4.5: o PnL de cada trade agora é líquido das DUAS taxas (antes descontava só a de saída, então a soma dos PnL dos trades superestimava o resultado pela soma das taxas de entrada, e a taxa de acerto aparecia inflada). O saldo/equity dos bots não muda — ele já era correto. Os trades antigos são corrigidos automaticamente na primeira subida, uma única vez.
   v1.4.4: imagem fixada na tag 1.4.3 (o mesmo build que já está instalado); mudanças na :latest não afetam mais este app. Sem mudanças de funcionamento.
   v1.4.3: imagem do app migrada para o novo registro (ghcr.io/gabriel-rodrigues-s); sem mudanças de funcionamento.
   v1.4.2: corrige bug que impedia qualquer operação de short — ao abrir um

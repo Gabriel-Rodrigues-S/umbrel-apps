@@ -191,7 +191,9 @@ async def tick_bot(bot: dict):
             proceeds = qty * price
             fee = proceeds * FEE_RATE
             proceeds -= fee
-            pnl = proceeds - (qty * entry_price)
+            # pnl do ciclo líquido das duas taxas: a compra gastou
+            # qty*entrada/(1-FEE) do caixa (a taxa de entrada saiu ali)
+            pnl = proceeds - qty * entry_price / (1 - FEE_RATE)
             conn.execute(
                 "UPDATE bots SET cash = ?, position_qty = 0, position_entry_price = NULL WHERE id = ?",
                 (proceeds, bot["id"]),
@@ -224,8 +226,9 @@ async def tick_bot(bot: dict):
             # de recompra for menor que o preço de entrada da venda
             qty_abs = abs(qty)
             fee = (qty_abs * price) * FEE_RATE
-            pnl = (entry_price - price) * qty_abs - fee
-            new_cash = cash + pnl
+            exit_pnl = (entry_price - price) * qty_abs - fee
+            new_cash = cash + exit_pnl  # a taxa de entrada já saiu do caixa ao abrir
+            pnl = exit_pnl - qty_abs * entry_price * FEE_RATE  # pnl do ciclo, líquido das duas taxas
             conn.execute(
                 "UPDATE bots SET cash = ?, position_qty = 0, position_entry_price = NULL WHERE id = ?",
                 (new_cash, bot["id"]),
