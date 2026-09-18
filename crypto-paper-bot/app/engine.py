@@ -184,7 +184,7 @@ async def tick_bot(bot: dict):
                 "INSERT INTO trades (bot_id, side, price, qty, reason) VALUES (?,?,?,?,?)",
                 (bot["id"], "buy", price, buy_qty, bot["strategy"]),
             )
-            qty, cash = buy_qty, 0
+            qty, cash, entry_price = buy_qty, 0, price
 
         elif signal == "sell" and qty > 0:
             # fecha LONG
@@ -217,7 +217,7 @@ async def tick_bot(bot: dict):
                 "INSERT INTO trades (bot_id, side, price, qty, reason) VALUES (?,?,?,?,?)",
                 (bot["id"], "sell", price, qty_abs, bot["strategy"]),
             )
-            qty, cash = -qty_abs, new_cash
+            qty, cash, entry_price = -qty_abs, new_cash, price
 
         elif signal == "buy" and qty < 0:
             # fecha SHORT: recompra a quantidade devida; lucra se o preço
