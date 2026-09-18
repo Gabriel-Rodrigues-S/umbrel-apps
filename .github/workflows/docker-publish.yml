@@ -5,6 +5,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# O ghcr.io exige o nome do repositório em minúsculas; github.repository_owner
+# vem com a capitalização da conta (Gabriel-Rodrigues-S) e quebra o build.
+env:
+  IMAGE_OWNER: gabriel-rodrigues-s
+
 jobs:
   # ── Video Downloader (código na raiz) ──────────────────────────────────────
   video-downloader:
@@ -31,7 +36,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/yt-downloader:latest
+          tags: ghcr.io/${{ env.IMAGE_OWNER }}/yt-downloader:latest
           cache-from: type=gha,scope=video-downloader
           cache-to: type=gha,scope=video-downloader,mode=max
 
@@ -60,7 +65,7 @@ jobs:
         with:
           context: ./realassessoria
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/real-assessoria:latest
+          tags: ghcr.io/${{ env.IMAGE_OWNER }}/real-assessoria:latest
           cache-from: type=gha,scope=realassessoria
           cache-to: type=gha,scope=realassessoria,mode=max
 
@@ -89,7 +94,7 @@ jobs:
         with:
           context: ./file-converter
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/file-converter:latest
+          tags: ghcr.io/${{ env.IMAGE_OWNER }}/file-converter:latest
           cache-from: type=gha,scope=file-converter
           cache-to: type=gha,scope=file-converter,mode=max
 
@@ -118,7 +123,7 @@ jobs:
         with:
           context: ./tts-reader
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/tts-reader:latest
+          tags: ghcr.io/${{ env.IMAGE_OWNER }}/tts-reader:latest
           cache-from: type=gha,scope=tts-reader
           cache-to: type=gha,scope=tts-reader,mode=max
 
@@ -147,7 +152,7 @@ jobs:
         with:
           context: ./sistema-edah
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/sistema-edah:latest
+          tags: ghcr.io/${{ env.IMAGE_OWNER }}/sistema-edah:latest
           cache-from: type=gha,scope=sistema-edah
           cache-to: type=gha,scope=sistema-edah,mode=max
 
@@ -176,7 +181,7 @@ jobs:
         with:
           context: ./crypto-paper-bot
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/crypto-paper-bot:latest
+          tags: ghcr.io/${{ env.IMAGE_OWNER }}/crypto-paper-bot:latest
           cache-from: type=gha,scope=crypto-paper-bot
           cache-to: type=gha,scope=crypto-paper-bot,mode=max
 
@@ -205,6 +210,6 @@ jobs:
         with:
           context: ./painel-mercado
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/painel-mercado:latest
+          tags: ghcr.io/${{ env.IMAGE_OWNER }}/painel-mercado:latest
           cache-from: type=gha,scope=painel-mercado
           cache-to: type=gha,scope=painel-mercado,mode=max
