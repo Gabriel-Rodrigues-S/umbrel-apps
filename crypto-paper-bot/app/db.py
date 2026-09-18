@@ -73,6 +73,32 @@ def init_db():
                 conn.execute(f"ALTER TABLE bots ADD COLUMN {name} {definition}")
 
 
+def backfill_net_pnl(fee_rate: float) -> int:
+    """Trades gravados antes da v1.4.5 têm o pnl SEM a taxa de entrada. Desconta-a
+    uma única vez do pnl de cada fechamento (marcado em PRAGMA user_version) e
+    devolve quantos trades ajustou. Tudo ou nada: uma falha no meio desfaz tudo."""
+    with get_conn() as conn:
+        if conn.execute("PRAGMA user_version").fetchone()[0] >= 1:
+            return 0
+        opening = {}
+        adjusted = 0
+        rows = conn.execute("SELECT id, bot_id, side, price, qty, pnl FROM trades ORDER BY bot_id, id").fetchall()
+        for t in rows:
+            if t["pnl"] is None:
+                opening[t["bot_id"]] = t
+                continue
+            o = opening.pop(t["bot_id"], None)
+            if o is None:
+                continue
+            notional = o["price"] * o["qty"]
+            # long: a compra gastou notional/(1-fee); short: a taxa incide direto sobre o notional
+            entry_fee = notional * fee_rate / (1 - fee_rate) if o["side"] == "buy" else notional * fee_rate
+            conn.execute("UPDATE trades SET pnl = ? WHERE id = ?", (t["pnl"] - entry_fee, t["id"]))
+            adjusted += 1
+        conn.execute("PRAGMA user_version = 1")
+    return adjusted
+
+
 @contextmanager
 def get_conn():
     conn = sqlite3.connect(DB_PATH, timeout=30)
