@@ -4,7 +4,7 @@ name: Crypto Paper Bot
 tagline: Bot de trading de criptomoedas em modo simulado (paper trading)
 icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-crypto-paper-bot/icon.svg
 category: finance
-version: '1.4.6'
+version: '1.4.7'
 port: 3458
 description: >-
   Bot de trading automático que opera com dinheiro simulado usando preços reais
@@ -26,6 +26,7 @@ path: ''
 defaultUsername: ''
 defaultPassword: ''
 releaseNotes: >-
+  v1.4.7: a lista de bots ficou praticamente instantânea (antes a tela consultava a exchange uma vez por bot a cada atualização; com 24 bots isso levava ~22s — agora lê o preço e o ADX que o motor já calcula a cada ciclo). Novo modo de confirmação "sem confirmação", que entra no primeiro sinal e serve de grupo de controle. A confirmação por timeframe maior passa a ser recusada em RSI e Bandas de Bollinger, onde ela nunca teve efeito.
   v1.4.6: a lista de bots agora pode ser reordenada arrastando pela alça à esquerda de cada linha. A ordem escolhida fica salva e vale para os próximos acessos. Nenhuma mudança na lógica de operação dos bots.
   v1.4.5: o PnL de cada trade agora é líquido das DUAS taxas (antes descontava só a de saída, então a soma dos PnL dos trades superestimava o resultado pela soma das taxas de entrada, e a taxa de acerto aparecia inflada). O saldo/equity dos bots não muda — ele já era correto. Os trades antigos são corrigidos automaticamente na primeira subida, uma única vez.
   v1.4.4: imagem fixada na tag 1.4.3 (o mesmo build que já está instalado); mudanças na :latest não afetam mais este app. Sem mudanças de funcionamento.

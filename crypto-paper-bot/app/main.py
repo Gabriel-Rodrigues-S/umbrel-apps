@@ -11,7 +11,6 @@ from pydantic import BaseModel
 
 from . import engine, exchange
 from .db import backfill_net_pnl, get_conn, init_db
-from .strategy import adx as compute_adx
 
 logging.basicConfig(level=logging.INFO)
 
@@ -58,7 +57,7 @@ class BotCreate(BaseModel):
     macd_slow: int = 26
     macd_signal: int = 9
     confirm_ticks: int = 2
-    confirmation_mode: Literal["ticks", "higher_timeframe"] = "ticks"
+    confirmation_mode: Literal["ticks", "higher_timeframe", "none"] = "ticks"
     higher_timeframe: str = "1h"
     trading_mode: Literal["long", "short", "long_short"] = "long"
     nickname: str | None = None
@@ -88,6 +87,16 @@ def api_symbols():
 
 @app.post("/api/bots")
 def create_bot(payload: BotCreate):
+    # O filtro de timeframe maior so roda em estrategia de TENDENCIA (o engine
+    # exige regime == "trend"), e trend_direction() nem sabe calcular direcao
+    # para RSI/Bollinger. Aceitar essa combinacao criaria um bot cujo apelido
+    # promete confirmacao em 1h mas que na pratica entra sem filtro algum.
+    if payload.confirmation_mode == "higher_timeframe" and engine.STRATEGY_REGIME[payload.strategy] != "trend":
+        raise HTTPException(
+            422,
+            "confirmação por timeframe maior só funciona em estratégias de tendência "
+            f"(SMA e MACD). Para {payload.strategy}, use 'ticks' ou 'none'.",
+        )
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO bots (
@@ -131,21 +140,13 @@ def list_bots():
     with get_conn() as conn:
         bots = [dict(r) for r in conn.execute("SELECT * FROM bots ORDER BY sort_order ASC, id DESC").fetchall()]
         for bot in bots:
-            last_price = None
-            current_adx = None
-            try:
-                last_price = exchange.fetch_last_price(bot["symbol"])
-                candles = exchange.fetch_ohlcv(
-                    bot["symbol"], bot["timeframe"], engine.required_candles(bot)
-                )
-                highs = [c[2] for c in candles]
-                lows = [c[3] for c in candles]
-                closes = [c[4] for c in candles]
-                current_adx = compute_adx(highs, lows, closes, bot["adx_period"])
-            except Exception:
-                pass
-            bot["last_price"] = last_price
-            bot["current_adx"] = current_adx
+            # preco e ADX vem do cache que o motor grava a cada tick. Antes esta
+            # rota consultava a exchange 2x por bot a cada request: com 24 bots
+            # eram ~48 chamadas sequenciais (~22s), e a tela pede a cada 2s.
+            # Um bot pausado nao roda tick, entao o valor fica congelado no
+            # ultimo tick - por isso `quote_updated_at` vai junto na resposta.
+            last_price = bot.get("last_price")
+            current_adx = bot.get("current_adx")
             regime = engine.STRATEGY_REGIME[bot["strategy"]]
             if current_adx is None:
                 bot["trading_active"] = None
