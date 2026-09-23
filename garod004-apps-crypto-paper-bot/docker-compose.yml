@@ -7,7 +7,7 @@ services:
       APP_PORT: 3458
 
   server:
-    image: ghcr.io/gabriel-rodrigues-s/crypto-paper-bot:1.4.5
+    image: ghcr.io/gabriel-rodrigues-s/crypto-paper-bot:1.4.6
     restart: on-failure
     volumes:
       - ${APP_DATA_DIR}/data:/app/data

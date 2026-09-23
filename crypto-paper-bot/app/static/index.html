@@ -16,6 +16,10 @@
   h1 { font-size: 18px; margin: 0; }
   .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
   main { padding: 24px; max-width: 1100px; margin: 0 auto; }
+  .drag-handle { cursor: grab; color: var(--muted); text-align: center; user-select: none; font-size: 14px; line-height: 1; }
+  .drag-handle:active { cursor: grabbing; }
+  tr.bot-row.dragging { opacity: .4; }
+  tr.bot-row.drop-target td { border-top: 2px solid var(--accent, #3b82f6); }
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-bottom: 18px; }
   .form-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
   .field { display: flex; flex-direction: column; gap: 4px; }
@@ -152,7 +156,7 @@
   <div class="card">
     <strong>Bots ativos</strong>
     <table style="margin-top:10px">
-      <thead><tr><th>Par</th><th>Estratégia</th><th>ADX</th><th>Status</th><th>Equity</th><th>P&L</th><th></th></tr></thead>
+      <thead><tr><th style="width:28px"></th><th>Par</th><th>Estratégia</th><th>ADX</th><th>Status</th><th>Equity</th><th>P&L</th><th></th></tr></thead>
       <tbody id="bots-body"></tbody>
     </table>
   </div>
@@ -272,6 +276,9 @@ function strategyLabel(id) {
 }
 
 async function loadBots() {
+  // enquanto o usuario arrasta, nao reescreve a tabela: o refresh de 2s
+  // destruiria as linhas no meio do arrasto e cancelaria o gesto.
+  if (arrastando) return;
   const bots = await fetch('/api/bots').then(r => r.json());
   const body = document.getElementById('bots-body');
   body.innerHTML = bots.map(b => {
@@ -290,7 +297,8 @@ async function loadBots() {
     const modeLabel = { long: 'Long', short: 'Short', long_short: 'Long+Short' }[b.trading_mode] || b.trading_mode;
     const positionLabel = b.position_qty > 0 ? ' (comprado)' : b.position_qty < 0 ? ' (vendido/short)' : '';
     return `
-    <tr class="bot-row" onclick="openDetail(${b.id})">
+    <tr class="bot-row" draggable="true" data-id="${b.id}" onclick="openDetail(${b.id})">
+      <td class="drag-handle" title="arraste para reordenar" onclick="event.stopPropagation()">⠿</td>
       <td>
         ${b.nickname ? `<div class="bot-nickname">${b.nickname}</div>` : ''}
         <span class="mode-tag ${b.trading_mode}">${modeLabel}</span>
@@ -311,6 +319,61 @@ async function loadBots() {
       </td>
     </tr>`;
   }).join('');
+  ligarArrasto(body);
+}
+
+// ---- reordenacao por arrasto ----
+let arrastando = false;
+let linhaArrastada = null;
+let houveArrasto = false;
+let arrastouAgora = false;
+
+function ligarArrasto(body) {
+  body.querySelectorAll('tr.bot-row').forEach(tr => {
+    tr.addEventListener('dragstart', e => {
+      arrastando = true; houveArrasto = false;
+      linhaArrastada = tr;
+      tr.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      // exigido pelo Firefox para o arrasto iniciar
+      e.dataTransfer.setData('text/plain', tr.dataset.id);
+    });
+
+    tr.addEventListener('dragover', e => {
+      e.preventDefault();
+      if (!linhaArrastada || tr === linhaArrastada) return;
+      e.dataTransfer.dropEffect = 'move';
+      const r = tr.getBoundingClientRect();
+      const depois = e.clientY > r.top + r.height / 2;
+      body.querySelectorAll('.drop-target').forEach(x => x.classList.remove('drop-target'));
+      tr.classList.add('drop-target');
+      // move a linha ao vivo, para o usuario ver onde vai cair
+      tr.parentNode.insertBefore(linhaArrastada, depois ? tr.nextSibling : tr);
+      houveArrasto = true;
+    });
+
+    tr.addEventListener('dragend', async () => {
+      tr.classList.remove('dragging');
+      body.querySelectorAll('.drop-target').forEach(x => x.classList.remove('drop-target'));
+      linhaArrastada = null;
+      arrastando = false;
+      if (!houveArrasto) return;
+      // impede que o clique sintetizado no fim do arrasto abra os detalhes
+      arrastouAgora = true;
+      setTimeout(() => { arrastouAgora = false; }, 300);
+      const ids = [...body.querySelectorAll('tr.bot-row')].map(x => Number(x.dataset.id));
+      try {
+        await fetch('/api/bots/reorder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids }),
+        });
+      } catch (err) {
+        console.error('falha ao salvar a ordem', err);
+      }
+      loadBots();
+    });
+  });
 }
 
 async function toggleBot(id, resume) {
@@ -328,6 +391,7 @@ async function removeBot(id) {
 let currentDetailId = null;
 
 async function openDetail(id) {
+  if (arrastouAgora) return;
   currentDetailId = id;
   const data = await fetch(`/api/bots/${id}`).then(r => r.json());
   document.getElementById('detail').style.display = 'block';

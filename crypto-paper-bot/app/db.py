@@ -24,6 +24,7 @@ BOT_COLUMN_MIGRATIONS = [
     ("higher_timeframe", "TEXT NOT NULL DEFAULT '1h'"),
     ("trading_mode", "TEXT NOT NULL DEFAULT 'long'"),
     ("nickname", "TEXT"),
+    ("sort_order", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

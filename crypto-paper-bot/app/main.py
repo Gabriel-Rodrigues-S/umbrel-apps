@@ -129,7 +129,7 @@ def create_bot(payload: BotCreate):
 @app.get("/api/bots")
 def list_bots():
     with get_conn() as conn:
-        bots = [dict(r) for r in conn.execute("SELECT * FROM bots ORDER BY id DESC").fetchall()]
+        bots = [dict(r) for r in conn.execute("SELECT * FROM bots ORDER BY sort_order ASC, id DESC").fetchall()]
         for bot in bots:
             last_price = None
             current_adx = None
@@ -160,6 +160,23 @@ def list_bots():
             bot["pnl"] = bot["equity"] - bot["starting_balance"]
             bot["pnl_pct"] = (bot["pnl"] / bot["starting_balance"] * 100) if bot["starting_balance"] else 0
         return bots
+
+
+class BotOrder(BaseModel):
+    ids: list[int]
+
+
+@app.post("/api/bots/reorder")
+def reorder_bots(payload: BotOrder):
+    """Grava a ordem escolhida pelo usuario: a posicao de cada id na lista
+    recebida vira o sort_order do bot. Ids desconhecidos sao ignorados; bots
+    que nao vierem na lista ficam com o sort_order que ja tinham."""
+    with get_conn() as conn:
+        conhecidos = {r["id"] for r in conn.execute("SELECT id FROM bots")}
+        for posicao, bot_id in enumerate(payload.ids):
+            if bot_id in conhecidos:
+                conn.execute("UPDATE bots SET sort_order = ? WHERE id = ?", (posicao, bot_id))
+    return {"ok": True}
 
 
 @app.get("/api/bots/{bot_id}")
