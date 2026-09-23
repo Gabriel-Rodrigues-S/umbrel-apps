@@ -138,7 +138,8 @@
         <label>Modo de confirmação</label>
         <select id="f-confirmation-mode" onchange="onConfirmationModeChange()">
           <option value="ticks">Persistência (checagens seguidas)</option>
-          <option value="higher_timeframe">Timeframe maior</option>
+          <option value="higher_timeframe">Timeframe maior (só SMA e MACD)</option>
+          <option value="none">Sem confirmação (controle)</option>
         </select>
       </div>
       <div class="field" id="field-confirm-ticks"><label>Checagens seguidas</label><input id="f-confirm-ticks" type="number" value="2" min="1" style="width:70px" /></div>
@@ -229,9 +230,12 @@ function onConfirmationModeChange() {
   const mode = document.getElementById('f-confirmation-mode').value;
   document.getElementById('field-confirm-ticks').style.display = mode === 'ticks' ? 'flex' : 'none';
   document.getElementById('field-higher-timeframe').style.display = mode === 'higher_timeframe' ? 'flex' : 'none';
-  document.getElementById('confirmation-hint').textContent = mode === 'ticks'
-    ? 'Persistência: só executa quando o sinal se repete por N checagens seguidas (a cada 10s), evitando reversões relâmpago (whipsaw).'
-    : 'Timeframe maior: só entra se a tendência do timeframe de confirmação concordar com o sinal do timeframe do bot. Filtro mais forte, opera com menos frequência.';
+  document.getElementById('confirmation-hint').textContent =
+    mode === 'ticks'
+      ? 'Persistência: só executa quando o sinal se repete por N checagens seguidas (a cada 10s), evitando reversões relâmpago (whipsaw).'
+      : mode === 'none'
+        ? 'Sem confirmação: entra no primeiro sinal, sem nenhum filtro de confirmação (o filtro de ADX continua valendo). Serve de grupo de controle para medir o que a confirmação agrega.'
+        : 'Timeframe maior: só entra se a tendência do timeframe de confirmação concordar com o sinal do timeframe do bot. Filtro mais forte, opera com menos frequência. Só funciona em estratégias de tendência (SMA e MACD).';
 }
 
 async function loadSymbols() {
@@ -305,7 +309,7 @@ async function loadBots() {
         <div style="color:var(--muted);font-size:11px">${b.symbol} ${b.timeframe}${positionLabel}</div>
       </td>
       <td>${strategyLabel(b.strategy)}<span class="regime-tag ${regimeClass}">${info ? info.regime : ''}</span>
-        <div style="color:var(--muted);font-size:11px">${b.confirmation_mode === 'higher_timeframe' ? `confirma em ${b.higher_timeframe}` : `persistência ${b.confirm_ticks}x`}</div>
+        <div style="color:var(--muted);font-size:11px">${b.confirmation_mode === 'higher_timeframe' ? `confirma em ${b.higher_timeframe}` : b.confirmation_mode === 'none' ? 'sem confirmação' : `persistência ${b.confirm_ticks}x`}</div>
       </td>
       <td class="adx-tag ${adxClass}" title="${adxHint}">${adxText}</td>
       <td><span class="badge ${b.status}">${b.status}</span></td>

@@ -138,7 +138,10 @@ async def tick_bot(bot: dict):
         # persistência, e não mexe no estado de confirmação pendente
         confirmed_signal = signal
         pending_signal, pending_count = bot["pending_signal"], bot["pending_signal_count"]
-    elif bot["confirmation_mode"] == "higher_timeframe":
+    elif bot["confirmation_mode"] in ("higher_timeframe", "none"):
+        # 'higher_timeframe': o filtro de 1h ja rodou no gate acima, entao aqui
+        # o sinal passa direto. 'none': entra no primeiro sinal, sem filtro
+        # nenhum - e o braco de controle, para medir o que a confirmacao agrega.
         confirmed_signal = signal
         pending_signal, pending_count = None, 0
     else:
@@ -162,8 +165,10 @@ async def tick_bot(bot: dict):
 
     with get_conn() as conn:
         conn.execute(
-            "UPDATE bots SET pending_signal = ?, pending_signal_count = ? WHERE id = ?",
-            (pending_signal, pending_count, bot["id"]),
+            "UPDATE bots SET pending_signal = ?, pending_signal_count = ?, "
+            "last_price = ?, current_adx = ?, quote_updated_at = datetime('now') "
+            "WHERE id = ?",
+            (pending_signal, pending_count, price, adx_value, bot["id"]),
         )
         row = conn.execute("SELECT * FROM bots WHERE id = ?", (bot["id"],)).fetchone()
         cash = row["cash"]

@@ -25,6 +25,11 @@ BOT_COLUMN_MIGRATIONS = [
     ("trading_mode", "TEXT NOT NULL DEFAULT 'long'"),
     ("nickname", "TEXT"),
     ("sort_order", "INTEGER NOT NULL DEFAULT 0"),
+    # cache do ultimo tick do motor: evita que a listagem consulte a exchange
+    # uma vez por bot a cada request (era 2 chamadas x N bots por chamada de tela)
+    ("last_price", "REAL"),
+    ("current_adx", "REAL"),
+    ("quote_updated_at", "TEXT"),
 ]
 
 
