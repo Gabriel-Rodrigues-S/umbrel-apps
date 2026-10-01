@@ -4,7 +4,7 @@ name: Terraria
 tagline: Servidor dedicado do Terraria sempre ligado, com backup automático do mundo
 icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-terraria/icon.svg
 category: gaming
-version: '1.0.0'
+version: '1.0.1'
 port: 7878
 description: >-
   Servidor dedicado oficial do Terraria (vanilla, baixado de terraria.org) rodando no Umbrel,
@@ -27,6 +27,7 @@ path: ''
 defaultUsername: ''
 defaultPassword: ''
 releaseNotes: >-
+  v1.0.1: o mundo é salvo automaticamente a cada 10 minutos (SALVAR_MINUTOS), para limitar perdas se o servidor oficial cair e for religado pelo painel.
   v1.0.0: primeira versão, com o servidor oficial do Terraria 1.4.5.8.
 submitter: garod004
 submission: https://github.com/Gabriel-Rodrigues-S/umbrel-apps

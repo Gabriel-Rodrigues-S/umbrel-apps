@@ -36,6 +36,7 @@ MAX_JOGADORES = int(os.environ.get("MAX_JOGADORES", "8"))
 SENHA = os.environ.get("SENHA_MUNDO", "")
 BACKUP_HORAS = float(os.environ.get("BACKUP_HORAS", "6"))
 BACKUPS_MANTER = int(os.environ.get("BACKUPS_MANTER", "30"))
+SALVAR_MINUTOS = float(os.environ.get("SALVAR_MINUTOS", "10"))
 ENDERECO = os.environ.get("ENDERECO_CONEXAO", "")
 UID = int(os.environ.get("PUID", "1000"))
 GID = int(os.environ.get("PGID", "1000"))
@@ -290,9 +291,19 @@ class Servidor:
             os.remove(os.path.join(BACKUPS, n))
 
     def backups_periodicos(self):
+        ultimo_save = time.time()
         while True:
             time.sleep(60)
-            if BACKUP_HORAS <= 0 or self.status != "online":
+            if self.status != "online":
+                ultimo_save = time.time()
+                continue
+            # O servidor oficial 1.4.5.8 às vezes cai com ObjectDisposedException quando
+            # uma conexão fecha no meio do loop de rede; o vigia religa, e salvar com
+            # frequência limita o que se perde nessa queda.
+            if SALVAR_MINUTOS > 0 and time.time() - ultimo_save >= SALVAR_MINUTOS * 60:
+                self.comando("save")
+                ultimo_save = time.time()
+            if BACKUP_HORAS <= 0:
                 continue
             ref = self.ultimo_backup or self.inicio or time.time()
             if time.time() - ref >= BACKUP_HORAS * 3600:
@@ -328,6 +339,7 @@ class Servidor:
                 "senha": bool(SENHA),
                 "online_desde": self.inicio if self.status == "online" else None,
                 "backup_horas": BACKUP_HORAS,
+                "salvar_minutos": SALVAR_MINUTOS,
                 "backups_manter": BACKUPS_MANTER,
                 "backups": listar_backups(),
                 "log": [f"{t}  {l}" for t, l in list(self.log)[-200:]],
