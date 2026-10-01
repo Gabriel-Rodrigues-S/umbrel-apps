@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Servidor Terraria</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2386553a'/%3E%3Crect width='16' height='5' fill='%234caf50'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --fundo: #f4f1ea; --cartao: #ffffff; --texto: #22201c; --suave: #6b665c;
+    --borda: #e2ddd2; --verde: #3f9b4b; --verde-fundo: #e5f3e6; --vermelho: #c0392b;
+    --vermelho-fundo: #fbe7e5; --ambar: #b7791f; --ambar-fundo: #fbf0dc; --botao: #2f6f3a;
+    --console: #1d1b18; --console-texto: #d9d4c7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fundo: #15140f; --cartao: #1f1d18; --texto: #ece7dc; --suave: #a29c8f;
+      --borda: #322f27; --verde: #5cc46a; --verde-fundo: #1d3121; --vermelho: #ef6f61;
+      --vermelho-fundo: #3a1f1c; --ambar: #e0a645; --ambar-fundo: #3a2e18; --botao: #3f8f4b;
+      --console: #0e0d0a; --console-texto: #d9d4c7;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fundo); color: var(--texto);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+  header svg { width: 44px; height: 44px; flex: none; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 15px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--suave); }
+  .sub { color: var(--suave); font-size: 13px; }
+  .grade { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .cartao { background: var(--cartao); border: 1px solid var(--borda); border-radius: 12px; padding: 18px; }
+  .larga { grid-column: 1 / -1; }
+  .status { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; padding: 4px 12px;
+            border-radius: 999px; font-size: 14px; }
+  .status::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+  .s-online { color: var(--verde); background: var(--verde-fundo); }
+  .s-iniciando, .s-parando { color: var(--ambar); background: var(--ambar-fundo); }
+  .s-parado, .s-erro, .s-sem_mundo { color: var(--vermelho); background: var(--vermelho-fundo); }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 14px 0 0; }
+  dt { color: var(--suave); } dd { margin: 0; font-weight: 500; word-break: break-all; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13.5px; }
+  .copiar { cursor: pointer; border-bottom: 1px dashed var(--suave); }
+  .botoes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  button, .botao { font: inherit; font-size: 14px; border: 1px solid var(--borda); background: var(--cartao);
+           color: var(--texto); padding: 7px 14px; border-radius: 8px; cursor: pointer; text-decoration: none; }
+  button:hover, .botao:hover { border-color: var(--suave); }
+  button.principal { background: var(--botao); border-color: var(--botao); color: #fff; }
+  button.perigo { color: var(--vermelho); }
+  button:disabled { opacity: .5; cursor: default; }
+  ul.jogadores { list-style: none; margin: 0; padding: 0; }
+  ul.jogadores li { padding: 6px 0; border-bottom: 1px solid var(--borda); }
+  ul.jogadores li:last-child { border: 0; }
+  .vazio { color: var(--suave); font-style: italic; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td { padding: 7px 4px; border-bottom: 1px solid var(--borda); vertical-align: middle; }
+  td.acoes { text-align: right; white-space: nowrap; }
+  td.acoes button, td.acoes .botao { padding: 3px 10px; font-size: 13px; }
+  .tabela { max-height: 320px; overflow: auto; }
+  pre#log { background: var(--console); color: var(--console-texto); border-radius: 8px; padding: 12px;
+            height: 300px; overflow: auto; margin: 0 0 10px; font-size: 12.5px; white-space: pre-wrap; }
+  form.cmd { display: flex; gap: 8px; }
+  input[type=text], select { flex: 1; font: inherit; font-size: 14px; padding: 7px 10px; border-radius: 8px;
+           border: 1px solid var(--borda); background: var(--fundo); color: var(--texto); min-width: 0; }
+  .aviso { margin-top: 10px; font-size: 13px; color: var(--suave); }
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--texto);
+           color: var(--fundo); padding: 9px 16px; border-radius: 8px; font-size: 14px; opacity: 0;
+           transition: opacity .2s; pointer-events: none; max-width: calc(100% - 32px); }
+  #toast.mostrar { opacity: 1; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <svg viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true">
+      <rect width="16" height="16" rx="2" fill="#86553a"/>
+      <rect y="0" width="16" height="5" fill="#4caf50"/>
+      <rect x="2" y="5" width="2" height="2" fill="#4caf50"/><rect x="9" y="5" width="3" height="1" fill="#4caf50"/>
+      <rect x="4" y="9" width="2" height="2" fill="#6b4029"/><rect x="11" y="11" width="2" height="2" fill="#6b4029"/>
+      <rect x="7" y="13" width="2" height="1" fill="#a0694b"/>
+    </svg>
+    <div>
+      <h1>Servidor Terraria</h1>
+      <div class="sub" id="versao">carregando…</div>
+    </div>
+  </header>
+
+  <div class="grade">
+    <section class="cartao">
+      <h2>Servidor</h2>
+      <span class="status" id="status">…</span>
+      <dl>
+        <dt>Mundo</dt><dd id="mundo">—</dd>
+        <dt>Conectar em</dt><dd><code id="endereco" class="copiar" title="Clique para copiar">—</code></dd>
+        <dt>Porta</dt><dd><code id="porta">—</code></dd>
+        <dt>Senha</dt><dd id="senha">—</dd>
+        <dt>Online há</dt><dd id="uptime">—</dd>
+      </dl>
+      <div class="botoes">
+        <button class="principal" id="b-salvar">Salvar agora</button>
+        <button id="b-reiniciar">Reiniciar</button>
+        <button class="perigo" id="b-parar">Desligar</button>
+        <button id="b-iniciar">Ligar</button>
+      </div>
+    </section>
+
+    <section class="cartao">
+      <h2>Jogadores <span id="contagem"></span></h2>
+      <ul class="jogadores" id="jogadores"></ul>
+    </section>
+
+    <section class="cartao larga">
+      <h2>Backups</h2>
+      <div class="sub" id="backup-info"></div>
+      <div class="botoes" style="margin: 10px 0 12px">
+        <button class="principal" id="b-backup">Fazer backup agora</button>
+        <a class="botao" id="b-baixar-mundo" href="#">Baixar mundo atual</a>
+      </div>
+      <div class="tabela"><table><tbody id="backups"></tbody></table></div>
+    </section>
+
+    <section class="cartao larga">
+      <h2>Mundos</h2>
+      <div class="botoes" style="margin-top:0">
+        <select id="sel-mundo"></select>
+        <button id="b-usar-mundo">Usar este mundo</button>
+      </div>
+      <div class="botoes">
+        <input type="file" id="arquivo" accept=".wld" hidden>
+        <button id="b-enviar">Enviar arquivo .wld…</button>
+      </div>
+      <p class="aviso">No PC (Linux), os mundos ficam em <code>~/.local/share/Terraria/Worlds/</code>.
+        Enviar um mundo com o mesmo nome do atual faz backup do atual antes de substituir.</p>
+    </section>
+
+    <section class="cartao larga">
+      <h2>Console</h2>
+      <pre id="log"></pre>
+      <form class="cmd" id="form-cmd">
+        <input type="text" id="cmd" placeholder="Comando do servidor (ex.: say Olá!, time noon, playing, help)" autocomplete="off">
+        <button class="principal">Enviar</button>
+      </form>
+    </section>
+  </div>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const NOMES = { online: "Online", iniciando: "Iniciando…", parando: "Desligando…", parado: "Desligado",
+                erro: "Caiu — religando", sem_mundo: "Sem mundo" };
+let estado = null, logNoFim = true;
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("mostrar");
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("mostrar"), 3000);
+}
+async function api(caminho, corpo, metodo = "POST") {
+  const r = await fetch(caminho, { method: metodo, headers: { "Content-Type": "application/json" },
+                                   body: corpo === undefined ? undefined : JSON.stringify(corpo) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j.erro || "falhou");
+  return j;
+}
+function tamanho(b) { return b > 1048576 ? (b / 1048576).toFixed(1) + " MB" : Math.round(b / 1024) + " KB"; }
+function duracao(seg) {
+  const h = Math.floor(seg / 3600), m = Math.floor(seg % 3600 / 60);
+  return h ? `${h} h ${m} min` : `${m} min`;
+}
+function el(tag, props = {}, ...filhos) {
+  const e = Object.assign(document.createElement(tag), props);
+  filhos.forEach(f => e.append(f)); return e;
+}
+
+function desenhar(s) {
+  estado = s;
+  $("versao").textContent = `Terraria ${s.versao} · servidor dedicado oficial`;
+  const st = $("status"); st.textContent = NOMES[s.status] || s.status; st.className = "status s-" + s.status;
+  $("mundo").textContent = s.mundo ? s.mundo.replace(/\.wld$/, "") : "—";
+  $("endereco").textContent = s.endereco || location.hostname;
+  $("porta").textContent = s.porta;
+  $("senha").textContent = s.senha ? "sim" : "não";
+  $("uptime").textContent = s.online_desde ? duracao(Date.now() / 1000 - s.online_desde) : "—";
+  const rodando = ["online", "iniciando"].includes(s.status);
+  $("b-salvar").disabled = s.status !== "online";
+  $("b-parar").disabled = !rodando;
+  $("b-iniciar").disabled = rodando || s.status === "parando";
+  $("b-iniciar").hidden = rodando;
+  $("b-parar").hidden = !rodando;
+
+  $("contagem").textContent = `(${s.jogadores.length}/${s.max_jogadores})`;
+  const lj = $("jogadores"); lj.replaceChildren();
+  if (!s.jogadores.length) lj.append(el("li", { className: "vazio", textContent: "Ninguém online agora." }));
+  s.jogadores.forEach(n => lj.append(el("li", { textContent: n })));
+
+  $("backup-info").textContent = s.backup_horas > 0
+    ? `Automático a cada ${s.backup_horas} h com o servidor online, e sempre que o app é desligado ou atualizado. Guarda os ${s.backups_manter} mais recentes.`
+    : "Backup automático desligado.";
+  $("b-baixar-mundo").href = s.mundo ? "api/mundo/baixar?nome=" + encodeURIComponent(s.mundo) : "#";
+  const tb = $("backups"); tb.replaceChildren();
+  if (!s.backups.length) tb.append(el("tr", {}, el("td", { className: "vazio", textContent: "Nenhum backup ainda." })));
+  s.backups.forEach(b => {
+    const baixar = el("a", { className: "botao", textContent: "Baixar",
+                             href: "api/backup/baixar?nome=" + encodeURIComponent(b.nome) });
+    const restaurar = el("button", { textContent: "Restaurar", onclick: () => restaurarBackup(b.nome) });
+    tb.append(el("tr", {}, el("td", {}, el("code", { textContent: b.nome })),
+                 el("td", { textContent: b.data }), el("td", { textContent: tamanho(b.tamanho) }),
+                 el("td", { className: "acoes" }, baixar, " ", restaurar)));
+  });
+
+  const sel = $("sel-mundo"), atual = sel.value;
+  if (sel.options.length !== s.mundos.length || [...sel.options].some((o, i) => o.value !== s.mundos[i])) {
+    sel.replaceChildren(...s.mundos.map(m => el("option", { value: m, textContent: m })));
+  }
+  sel.value = atual && s.mundos.includes(atual) ? atual : (s.mundo || "");
+
+  const log = $("log");
+  logNoFim = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
+  log.textContent = s.log.join("\n");
+  if (logNoFim) log.scrollTop = log.scrollHeight;
+}
+
+async function atualizar() {
+  try { desenhar(await (await fetch("api/estado")).json()); } catch (e) { /* tenta de novo */ }
+}
+async function acao(caminho, corpo, msg) {
+  try { await api(caminho, corpo); toast(msg); } catch (e) { toast("Erro: " + e.message); }
+  setTimeout(atualizar, 500);
+}
+async function restaurarBackup(nome) {
+  if (!confirm(`Restaurar ${nome}?\n\nO servidor reinicia e o mundo volta para esse ponto. ` +
+               `Antes disso é feito um backup do mundo atual.`)) return;
+  acao("api/backup/restaurar", { nome }, "Restaurando… o servidor vai reiniciar.");
+}
+
+$("b-salvar").onclick = () => acao("api/salvar", undefined, "Mundo salvo.");
+$("b-reiniciar").onclick = () => confirm("Reiniciar o servidor? Quem estiver jogando cai e reconecta depois.") &&
+  acao("api/reiniciar", undefined, "Reiniciando…");
+$("b-parar").onclick = () => confirm("Desligar o servidor? O mundo é salvo antes.") &&
+  acao("api/parar", undefined, "Desligando…");
+$("b-iniciar").onclick = () => acao("api/iniciar", undefined, "Ligando…");
+$("b-backup").onclick = async (ev) => {
+  ev.target.disabled = true; toast("Salvando e copiando o mundo…");
+  try { const j = await api("api/backup"); toast("Backup criado: " + j.nome); } catch (e) { toast("Erro: " + e.message); }
+  ev.target.disabled = false; atualizar();
+};
+$("b-usar-mundo").onclick = () => {
+  const nome = $("sel-mundo").value;
+  if (!nome || nome === estado?.mundo) return toast("Esse já é o mundo em uso.");
+  if (confirm(`Trocar para ${nome}? O servidor reinicia.`)) acao("api/mundo/selecionar", { nome }, "Trocando de mundo…");
+};
+$("b-enviar").onclick = () => $("arquivo").click();
+$("arquivo").onchange = async (ev) => {
+  const f = ev.target.files[0]; ev.target.value = "";
+  if (!f) return;
+  if (!f.name.endsWith(".wld")) return toast("Escolha um arquivo .wld");
+  const existe = estado?.mundos.includes(f.name);
+  if (existe && !confirm(`Já existe um mundo ${f.name} no servidor. Substituir? (o atual vira backup)`)) return;
+  toast(`Enviando ${f.name} (${tamanho(f.size)})…`);
+  try {
+    const r = await fetch("api/mundo/enviar?nome=" + encodeURIComponent(f.name), { method: "PUT", body: f });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.erro || "falhou");
+    toast("Mundo enviado: " + f.name);
+  } catch (e) { toast("Erro: " + e.message); }
+  atualizar();
+};
+$("form-cmd").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const comando = $("cmd").value.trim(); if (!comando) return;
+  try { await api("api/comando", { comando }); $("cmd").value = ""; } catch (e) { toast("Erro: " + e.message); }
+  setTimeout(atualizar, 400);
+};
+$("endereco").onclick = () => {
+  const txt = `${$("endereco").textContent}`;
+  navigator.clipboard?.writeText(txt).then(() => toast("Endereço copiado: " + txt));
+};
+
+atualizar();
+setInterval(atualizar, 3000);
+</script>
+</body>
+</html>
