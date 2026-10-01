@@ -48,6 +48,23 @@ Agregador de notícias e cotações do mercado financeiro, atualizado em segundo
 
 ---
 
+### ⛏️ Terraria
+Servidor dedicado oficial do Terraria (vanilla) sempre ligado, com painel de controle.
+
+- Servidor baixado de terraria.org no build da imagem (versão em `terraria/Dockerfile`, `ARG TERRARIA_VERSAO`)
+- Jogo na porta **7777** publicada direto no host (o app_proxy só serve HTTP); entrar pelo IP do Umbrel no Tailscale
+- Backup automático do mundo a cada 6 h e sempre que o app é desligado/atualizado; baixar e restaurar pelo painel
+- Enviar/trocar mundo (.wld), salvar na hora, console de comandos
+
+**Atualizar o Terraria:** trocar `TERRARIA_VERSAO` no `terraria/Dockerfile` → subir `version` em
+`garod004-apps-terraria/umbrel-app.yml` → push (o CI publica a tag) → apontar o `image:` do compose para a
+tag nova → push → clicar **Atualizar** uma vez no Umbrel. Os mundos ficam em `${APP_DATA_DIR}/data` e não são apagados.
+
+**Imagem Docker:** `ghcr.io/gabriel-rodrigues-s/terraria:latest`
+**Portas:** 7878 (painel) e 7777 (jogo)
+
+---
+
 ## Estrutura do repositório
 
 ```

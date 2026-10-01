@@ -1,0 +1,32 @@
+manifestVersion: 1
+id: garod004-apps-terraria
+name: Terraria
+tagline: Servidor dedicado do Terraria sempre ligado, com backup automático do mundo
+icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-terraria/icon.svg
+category: gaming
+version: '1.0.0'
+port: 7878
+description: >-
+  Servidor dedicado oficial do Terraria (vanilla, baixado de terraria.org) rodando no Umbrel,
+  para jogar com os amigos sem depender de um PC ligado. O jogo conecta na porta 7777
+  (por exemplo pelo IP do Umbrel no Tailscale).
+  O painel mostra status e jogadores online, salva o mundo na hora, faz backup automático
+  a cada 6 horas e sempre que o app é desligado ou atualizado, permite baixar/restaurar backups,
+  enviar ou trocar o mundo (.wld) e mandar comandos ao console do servidor.
+  Versão do Terraria: 1.4.5.8. O servidor e o jogo precisam estar na mesma versão.
+developer: garod004
+website: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
+dependencies: []
+repo: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
+support: https://github.com/Gabriel-Rodrigues-S/umbrel-apps/issues
+gallery:
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-terraria/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-terraria/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-terraria/icon.svg
+path: ''
+defaultUsername: ''
+defaultPassword: ''
+releaseNotes: >-
+  v1.0.0: primeira versão, com o servidor oficial do Terraria 1.4.5.8.
+submitter: garod004
+submission: https://github.com/Gabriel-Rodrigues-S/umbrel-apps

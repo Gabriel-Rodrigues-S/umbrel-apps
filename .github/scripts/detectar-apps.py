@@ -61,6 +61,12 @@ APPS = {
         "manifest": "garod004-apps-painel-mercado",
         "paths": ["painel-mercado/"],
     },
+    "terraria": {
+        "image": "terraria",
+        "context": "./terraria",
+        "manifest": "garod004-apps-terraria",
+        "paths": ["terraria/"],
+    },
 }
 
 VERSAO_RE = re.compile(r"^version:\s*['\"]?(\d+\.\d+\.\d+)['\"]?\s*$", re.MULTILINE)
