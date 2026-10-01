@@ -194,9 +194,10 @@ function desenhar(s) {
   if (!s.jogadores.length) lj.append(el("li", { className: "vazio", textContent: "Ninguém online agora." }));
   s.jogadores.forEach(n => lj.append(el("li", { textContent: n })));
 
-  $("backup-info").textContent = s.backup_horas > 0
-    ? `Automático a cada ${s.backup_horas} h com o servidor online, e sempre que o app é desligado ou atualizado. Guarda os ${s.backups_manter} mais recentes.`
-    : "Backup automático desligado.";
+  $("backup-info").textContent = (s.salvar_minutos > 0 ? `O mundo é salvo a cada ${s.salvar_minutos} min. ` : "") +
+    (s.backup_horas > 0
+      ? `Backup automático a cada ${s.backup_horas} h com o servidor online, e sempre que o app é desligado ou atualizado. Guarda os ${s.backups_manter} mais recentes.`
+      : "Backup automático desligado.");
   $("b-baixar-mundo").href = s.mundo ? "api/mundo/baixar?nome=" + encodeURIComponent(s.mundo) : "#";
   const tb = $("backups"); tb.replaceChildren();
   if (!s.backups.length) tb.append(el("tr", {}, el("td", { className: "vazio", textContent: "Nenhum backup ainda." })));

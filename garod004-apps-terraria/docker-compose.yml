@@ -7,7 +7,7 @@ services:
       APP_PORT: 7878
 
   server:
-    image: ghcr.io/gabriel-rodrigues-s/terraria:1.0.0
+    image: ghcr.io/gabriel-rodrigues-s/terraria:1.0.1
     restart: on-failure
     # Tempo para salvar o mundo e fazer o backup de desligamento antes do Docker matar o processo.
     stop_grace_period: 2m
@@ -22,5 +22,6 @@ services:
       MAX_JOGADORES: "8"
       BACKUP_HORAS: "6"
       BACKUPS_MANTER: "30"
+      SALVAR_MINUTOS: "10"
       SENHA_MUNDO: ""
       TZ: America/Manaus
