@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app import analysis, catalog, db, news, screener, service, universe
-from app.config import INDICES, INTERVALS, INTRADAY, MARKETS, get_settings, normalize_symbol
+from app.config import INTERVALS, INTRADAY, MARKETS, get_settings, normalize_symbol
 from app.providers.base import ProviderError, UnknownSymbol
 from app.stats.portfolio import PortfolioError
 
@@ -100,11 +100,9 @@ async def loop_universe(app: FastAPI) -> None:
     """Passada diária pelos papéis dos índices; nunca derruba o app nem gira em falso."""
     while True:
         try:
-            now = datetime.now(timezone.utc)
-            if universe.universe_due(app.state.conn, now):
-                async with app.state.universe_lock:
-                    await universe.refresh_universe(app.state.conn, app.state.settings)
-                    await universe.purge_async(app.state.conn, now)
+            if universe.universe_due(app.state.conn, datetime.now(timezone.utc)):
+                await universe.refresh_universe(app.state.conn, app.state.settings)
+                await universe.purge_async(app.state.conn, datetime.now(timezone.utc))  # agora, não o de antes da passada
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -118,7 +116,6 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.conn = db.connect(settings.data_dir / "radar.db")
     app.state.refresh_lock = asyncio.Lock()
-    app.state.universe_lock = asyncio.Lock()
     app.state.tasks = set()
     service.seed_watchlist(app.state.conn)
     if settings.provider == "synthetic" and db.catalog_count(app.state.conn) == 0:
@@ -167,10 +164,12 @@ def create_app() -> FastAPI:
         c = conn(request)
         assets = db.list_assets(c)
         refreshed = [a["last_refresh"] for a in assets if a["last_refresh"]]
-        progress = [screener.progress(c, i) for i in INDICES]
+        members = {(m["symbol"], m["market"]) for m in db.index_members(c)}
+        ready = {(a["symbol"], a["market"]) for a in db.list_assets(c, None)
+                 if a["last_refresh"] and not a["last_error"]} & members
         return {"status": "ok", "assets": len(assets), "last_refresh": max(refreshed, default=None),
                 "catalog": db.catalog_count(c),
-                "universe": {"total": sum(p["total"] for p in progress), "ready": sum(p["ready"] for p in progress)}}
+                "universe": {"total": len(members), "ready": len(ready)}}
 
     @app.get("/api/search")
     def search(request: Request, q: Annotated[str, Query(max_length=64)] = "",
@@ -181,11 +180,16 @@ def create_app() -> FastAPI:
     def list_assets(request: Request):
         return [analysis.asset_summary(conn(request), a) for a in db.list_assets(conn(request))]
 
-    async def open_or_fail(request: Request, body: NewAsset) -> dict:
-        """Abre o ativo (criando-o se preciso); erros da fonte viram 422/502 sem deixar nada gravado."""
+    async def open_or_fail(request: Request, body: NewAsset) -> tuple[dict, bool]:
+        """Abre o ativo (criando-o se preciso); erros da fonte viram 422/502 sem deixar nada gravado.
+
+        Devolve também se houve refresh de fato (ativo novo ou `last_refresh` mudou)."""
         _check_market(body.market)
+        c = conn(request)
         try:
-            return await service.open_asset(conn(request), body.symbol, body.market, request.app.state.settings)
+            before = db.find_asset(c, normalize_symbol(body.symbol, body.market), body.market)
+            asset = await service.open_asset(c, body.symbol, body.market, request.app.state.settings)
+            return asset, before is None or before["last_refresh"] != asset["last_refresh"]
         except UnknownSymbol:
             raise HTTPException(422, f"símbolo não encontrado em {body.market}")
         except ProviderError:
@@ -193,18 +197,20 @@ def create_app() -> FastAPI:
         except ValueError as e:
             raise HTTPException(422, str(e))
 
-    async def summary_after_refresh(request: Request, asset_id: int) -> dict:
-        """Invalida a análise, regrava a linha do screener e devolve o resumo do ativo."""
+    async def summary_after_open(request: Request, asset_id: int, refreshed: bool) -> dict:
+        """Resumo do ativo; só recalcula a análise e a linha do screener se houve refresh ou falta linha válida."""
         c = conn(request)
-        analysis.invalidate(asset_id)
         asset = db.get_asset(c, asset_id)
-        await run_in_threadpool(store_rows, c, [asset])
+        rows = db.load_screener(c, [asset_id])
+        if refreshed or not rows or rows[0]["payload"].get("status") == "insuficiente":
+            analysis.invalidate(asset_id)
+            await run_in_threadpool(store_rows, c, [asset])
         return await run_in_threadpool(analysis.asset_summary, c, asset)
 
     @app.post("/api/assets/open")
     async def open_asset(request: Request, body: NewAsset):
-        asset = await open_or_fail(request, body)
-        return await summary_after_refresh(request, asset["id"])
+        asset, refreshed = await open_or_fail(request, body)
+        return await summary_after_open(request, asset["id"], refreshed)
 
     @app.post("/api/assets", status_code=201)
     async def add_asset(request: Request, body: NewAsset):
@@ -215,9 +221,9 @@ def create_app() -> FastAPI:
             raise HTTPException(422, str(e))
         if existing and existing["watch"]:
             raise HTTPException(409, "ativo já está na watchlist")
-        asset = await open_or_fail(request, body)
+        asset, refreshed = await open_or_fail(request, body)
         db.set_watch(conn(request), asset["id"], True)
-        return await summary_after_refresh(request, asset["id"])
+        return await summary_after_open(request, asset["id"], refreshed)
 
     @app.delete("/api/assets/{asset_id}", status_code=204)
     def delete_asset(request: Request, asset_id: AssetId):

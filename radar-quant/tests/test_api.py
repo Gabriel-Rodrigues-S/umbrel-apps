@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app import analysis, db, main, news, service, universe
+from app import analysis, catalog, db, main, news, screener, service, universe
 from app.config import INTERVALS, get_settings
 from app.providers.base import ProviderError
 from app.main import create_app, next_sleep
@@ -135,10 +135,17 @@ def test_asset_without_data(client):
     r = client.post("/api/assets", json={"symbol": "FALHA1", "market": "US"})
     assert r.status_code == 502 and r.json()["detail"] == "fonte de dados indisponível agora"
     assert len(client.get("/api/assets").json()) == n and db.find_asset(client.app.state.conn, "FALHA1", "US") is None
-    # ativo já gravado e com erro de refresh continua legível
-    aid = db.add_asset(client.app.state.conn, "FALHA2", "US")
-    assert client.get(f"/api/assets/{aid}/candles").status_code == 200
-    assert client.get(f"/api/assets/{aid}/analysis").status_code == 200
+    # ativo já gravado e com erro de refresh (sem candles) continua legível
+    c = client.app.state.conn
+    aid = db.add_asset(c, "FALHA2", "US")
+    asyncio.run(service.refresh_asset(c, db.get_asset(c, aid), get_settings()))
+    assert db.get_asset(c, aid)["last_error"]
+    item = next(a for a in client.get("/api/assets").json() if a["id"] == aid)
+    assert item["status"] == "insuficiente" and item["last_error"] and item["price"] is None
+    r = client.get(f"/api/assets/{aid}/candles")
+    assert r.status_code == 200 and r.json()["candles"] == []
+    r = client.get(f"/api/assets/{aid}/analysis")
+    assert r.status_code == 200 and r.json()["status"] == "insuficiente"
 
 
 @pytest.mark.parametrize("symbol", ["AB\x00CD", "../../x", "A" * 100])
@@ -336,6 +343,8 @@ def test_news_nunca_derruba(client, monkeypatch):
 
 
 def test_screener(client):
+    # "total 0" depende de nenhuma linha da watchlist ter sido gravada ainda (AAPL, MSFT e NVDA são do SP500)
+    assert db.load_screener(client.app.state.conn) == []
     assert client.get("/api/screener?scope=SP500").json()["total"] == 0  # universo ainda não rodou
     r = client.get("/api/screener")
     assert r.status_code == 200 and r.json()["scope"] == "watchlist" and r.json()["total"] == 13
@@ -362,12 +371,95 @@ def test_screener_summary_e_progress(client):
 
 
 def test_health_catalogo_e_universo(client):
+    c = client.app.state.conn
     h = client.get("/api/health").json()
-    assert h["catalog"] > 0 and set(h["universe"]) == {"total", "ready"} and h["universe"]["ready"] == 0
-    asyncio.run(main.refresh_everything(client.app))  # linhas da watchlist (membros de índice incluídos)
-    asyncio.run(universe.refresh_universe(client.app.state.conn, get_settings(), pace=0))
+    total = len(db.index_members(c))
+    assert h["catalog"] > 0 and set(h["universe"]) == {"total", "ready"} and h["universe"]["total"] == total
+    assert 0 < h["universe"]["ready"] < total  # só os membros que já estão na watchlist têm dados
+    asyncio.run(universe.refresh_universe(c, get_settings(), pace=0))
     h = client.get("/api/health").json()
-    assert h["universe"]["total"] > 0 and h["universe"]["ready"] == h["universe"]["total"]
+    assert h["universe"]["ready"] == h["universe"]["total"] == total
+
+
+def test_health_nao_varre_o_screener(client, monkeypatch):
+    monkeypatch.setattr(db, "load_screener", lambda *a, **k: pytest.fail("health leu o screener"))
+    assert client.get("/api/health").status_code == 200
+
+
+def test_open_repetido_nao_recomputa(client, monkeypatch):
+    calls = []
+    real = screener.store_row
+    monkeypatch.setattr(screener, "store_row", lambda c, a: calls.append(a["symbol"]) or real(c, a))
+    assert _open(client).status_code == 200
+    assert calls == ["AMZN"]
+    computed = []
+    real_compute = analysis._compute
+    monkeypatch.setattr(analysis, "_compute", lambda *a: computed.append(1) or real_compute(*a))
+    for _ in range(3):
+        assert _open(client).status_code == 200
+    assert calls == ["AMZN"] and computed == []
+    # promover também não recalcula
+    assert client.post("/api/assets", json={"symbol": "AMZN", "market": "US"}).status_code == 201
+    assert calls == ["AMZN"] and computed == []
+
+
+def test_open_regrava_se_refresh_novo_ou_sem_linha(client, monkeypatch):
+    aid = _open(client).json()["id"]
+    c = client.app.state.conn
+    calls = []
+    real = screener.store_row
+    monkeypatch.setattr(screener, "store_row", lambda c_, a: calls.append(1) or real(c_, a))
+    c.execute("DELETE FROM screener WHERE asset_id = ?", (aid,))  # sem linha válida
+    c.commit()
+    assert _open(client).status_code == 200 and len(calls) == 1
+    c.execute("UPDATE assets SET last_refresh = '2000-01-01T00:00:00+00:00' WHERE id = ?", (aid,))  # velho: refresh
+    c.commit()
+    assert _open(client).status_code == 200 and len(calls) == 2
+
+
+def test_rotas_novas_sem_cache(client):
+    aid = _id(client, "AAPL")
+    for url in ("/api/search?q=a", f"/api/assets/{aid}/news", "/api/screener", "/api/screener/summary",
+                "/api/screener/progress", f"/api/assets/{aid}/candles?interval=5m"):
+        assert client.get(url).headers["cache-control"] == "no-store", url
+    assert _open(client).headers["cache-control"] == "no-store"
+
+
+def test_falha_do_catalogo_nao_derruba_o_laco(client, monkeypatch):
+    async def boom(*a, **k):
+        raise RuntimeError("fonte do catálogo caiu")
+
+    esperas = []
+
+    async def fake_sleep(s):
+        esperas.append(s)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(catalog, "catalog_is_stale", lambda conn: True)
+    monkeypatch.setattr(catalog, "refresh_catalog", boom)
+    monkeypatch.setattr(main.asyncio, "sleep", fake_sleep)
+    client.app.state.refresh_lock = asyncio.Lock()
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(main.loop_refresh(client.app))
+    assert esperas  # chegou ao sleep: a falha do catálogo foi engolida
+
+
+def test_loop_universo_sem_passada_devida(client, monkeypatch):
+    chamadas = []
+
+    async def fake_refresh(*a, **k):
+        chamadas.append("refresh")
+
+    async def fake_sleep(s):
+        chamadas.append(s)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(universe, "universe_due", lambda conn, now: False)
+    monkeypatch.setattr(universe, "refresh_universe", fake_refresh)
+    monkeypatch.setattr(main.asyncio, "sleep", fake_sleep)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(main.loop_universe(client.app))
+    assert chamadas == [600]
 
 
 def test_refresh_everything_grava_screener_da_watchlist(client):
@@ -391,7 +483,6 @@ def test_loop_universo(client, monkeypatch):
 
     monkeypatch.setattr(universe, "refresh_universe", fake_refresh)
     monkeypatch.setattr(main.asyncio, "sleep", fake_sleep)
-    client.app.state.universe_lock = asyncio.Lock()
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(main.loop_universe(client.app))
     assert chamadas == ["refresh", 600, "refresh", 600]  # nunca rodou nesse banco: sempre devido
