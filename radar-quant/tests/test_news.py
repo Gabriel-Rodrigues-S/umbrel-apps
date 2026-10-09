@@ -295,5 +295,21 @@ def test_busca_vazia_nao_apaga_cache_bom(conn, tmp_path):
     db.set_meta(conn, db._news_key(aid), old)
     vazio = httpx.MockTransport(lambda r: httpx.Response(200, text=rss()))
     out = run(news.get_news(conn, asset, settings(tmp_path), vazio))
-    assert out["stale"] is True and len(out["items"]) == 2 and out["fetched_at"] == old
+    assert out["stale"] is True and len(out["items"]) == 2 and out["fetched_at"] > old
     assert len(db.load_news(conn, aid)[0]) == 2
+    assert news._fresh(db.load_news(conn, aid)[1])  # carimbo renovado: respeita o TTL
+    calls = []
+    out = run(news.get_news(conn, asset, settings(tmp_path),
+                            httpx.MockTransport(lambda r: calls.append(r) or httpx.Response(200, text=rss()))))
+    assert calls == [] and out["stale"] is False and len(out["items"]) == 2
+
+
+def test_falhas_vao_para_o_log(conn, tmp_path, caplog):
+    caplog.set_level("WARNING", logger="radar.news")
+    run(news.fetch_news("AAPL", "US", None, httpx.MockTransport(handler_for([], google=500))))
+    assert any("NewsError" in r.getMessage() for r in caplog.records)
+    aid = db.add_asset(conn, "PETR4", "B3")
+    caplog.clear()
+    run(news.get_news(conn, db.get_asset(conn, aid), settings(tmp_path),
+                      httpx.MockTransport(handler_for([], 500))))
+    assert any(r.levelname == "ERROR" and "PETR4" in r.getMessage() for r in caplog.records)
