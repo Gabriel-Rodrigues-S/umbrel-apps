@@ -1,0 +1,33 @@
+manifestVersion: 1
+id: garod004-apps-radar-quant
+name: Radar Quant
+tagline: Gráficos e recomendações estatísticas para ações e cripto
+icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-radar-quant/icon.svg
+category: finance
+version: '1.0.0'
+port: 8430
+description: >-
+  Radar estatístico de mercados: acompanhe ações da B3 e dos EUA e criptomoedas em
+  gráficos interativos, com um score por ativo calculado a partir de indicadores
+  estatísticos e acompanhado da evidência que o sustenta. Inclui ranking dos ativos
+  monitorados e acompanhamento de carteira. Os dados vêm de fontes públicas e as
+  análises são apenas informativas: o Radar Quant não é recomendação profissional de
+  investimento, e as decisões são sempre de responsabilidade de quem investe.
+developer: garod004
+website: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
+dependencies: []
+repo: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
+support: https://github.com/Gabriel-Rodrigues-S/umbrel-apps/issues
+gallery:
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-radar-quant/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-radar-quant/icon.svg
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-radar-quant/icon.svg
+path: ''
+defaultUsername: ''
+defaultPassword: ''
+releaseNotes: >-
+  Primeira versão. Gráficos de ações e cripto, score estatístico com evidência,
+  ranking de ativos e acompanhamento de carteira. Não é recomendação profissional
+  de investimento.
+submitter: garod004
+submission: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
