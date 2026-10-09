@@ -8,6 +8,7 @@
   // Roda antes do <body> existir para não piscar o tema errado.
   var THEME_KEY = "radar-quant:theme";
   var SELECTED_KEY = "radar-quant:selected";
+  var OPENED_KEY = "radar-quant:opened";   // {symbol, market} do ativo aberto fora da watchlist
 
   function storageGet(key) {
     try { return window.localStorage.getItem(key); } catch (e) { return null; }
@@ -26,16 +27,26 @@
     tab: "chart",
     assets: [],
     assetsLoaded: false,
+    opened: null,     // resumo do ativo aberto pela busca/screener que não está na watchlist
+    opening: null,    // { symbol, market } enquanto POST /api/assets/open está em curso
     selectedId: null,
     interval: "1d",
     candleCount: 0,
+    markerCount: 0,
     overlays: { sma20: true, sma50: true, sma200: true, bb: false },
-    ranking: { rows: [], sortKey: "score", sortDir: "desc" },
+    recTab: "position",
+    swingSetup: null,
+    screener: { rows: [], total: 0, page: 1, pageSize: 50, sort: "score", order: "desc" },
   };
   window.__radar = { state: state };
 
   var MIN_CANDLES = 300;
-  var INTERVALS = ["1d", "1wk", "1mo"];
+  var INTERVALS = ["1m", "3m", "5m", "10m", "30m", "1h", "1d", "1wk", "1mo", "3mo", "6mo", "1y"];
+  var INTRADAY = { "1m": 1, "3m": 1, "5m": 1, "10m": 1, "30m": 1, "1h": 1 };
+  var VIEW_SPAN = { "1d": 180, "1wk": 156, "1mo": 120, "3mo": 80, "6mo": 60, "1y": 40 };
+  var INTRADAY_SPAN = 200;
+  var INTRADAY_RELOAD_MS = 60000;
+  var INDEX_LABEL = { IBOV: "Ibovespa", IBRA: "IBrA", SP500: "S&P 500", NDX: "Nasdaq-100" };
   var MARKET_ORDER = ["B3", "US", "CRYPTO"];
   var MARKET_LABEL = { B3: "B3", US: "EUA", CRYPTO: "Cripto" };
   var VERDICT_LABEL = { comprar: "Comprar", manter: "Manter", vender: "Vender", insuficiente: "Dados insuficientes" };
@@ -46,6 +57,19 @@
     sem_evidencia: "sem evidência estatística",
   };
   var EVIDENCE_SHORT = { favoravel: "favorável", contraria: "contrária", sem_evidencia: "sem evid." };
+  // Setups de curto prazo têm um rótulo a mais: poucas operações para concluir algo.
+  var SWING_EVIDENCE_LABEL = {
+    favoravel: "evidência favorável",
+    contraria: "evidência contrária",
+    sem_evidencia: "sem evidência estatística",
+    amostra_insuficiente: "amostra insuficiente",
+  };
+  var SWING_EVIDENCE_LEGEND = {
+    favoravel: "favorável", contraria: "contrária", sem_evidencia: "sem evidência", amostra_insuficiente: "amostra insuficiente",
+  };
+  var SWING_EVIDENCE_ORDER = ["favoravel", "contraria", "sem_evidencia", "amostra_insuficiente"];
+  var SETUP_SHORT = { reversao: "Reversão", queda: "Queda", rompimento: "Rompimento" };
+  var SETUP_STATE_SHORT = { sinal: "sinal", posicao: "posição" };
   var EVIDENCE_EXPLAIN = {
     favoravel: "O intervalo inteiro fica acima de zero: no histórico, a estratégia superou segurar o ativo.",
     contraria: "O intervalo inteiro fica abaixo de zero: no histórico, a estratégia foi pior que segurar o ativo.",
@@ -148,6 +172,39 @@
     }).format(d);
   }
 
+  // Barra intraday já deslocada para a hora local (ver drawCandles): lê-se em UTC.
+  function fmtBarTime(shifted) {
+    var d = new Date(shifted * 1000);
+    if (isNaN(d.getTime())) return DASH;
+    var two = function (n) { return String(n).padStart(2, "0"); };
+    return two(d.getUTCDate()) + "/" + two(d.getUTCMonth() + 1) + " " + two(d.getUTCHours()) + ":" + two(d.getUTCMinutes());
+  }
+
+  // Segundos epoch reais -> "HH:MM" na hora local; inclui o dia quando não é hoje.
+  function fmtClock(epoch) {
+    var d = new Date(epoch * 1000);
+    if (isNaN(d.getTime())) return DASH;
+    var clock = new Intl.DateTimeFormat(LOCALE, { hour: "2-digit", minute: "2-digit" }).format(d);
+    var now = new Date();
+    var today = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    if (today) return clock;
+    return clock + " de " + new Intl.DateTimeFormat(LOCALE, { day: "2-digit", month: "2-digit" }).format(d);
+  }
+
+  // "há 3 h" — tempo relativo curto para as notícias.
+  function fmtAgo(iso) {
+    var t = Date.parse(iso);
+    if (isNaN(t)) return "";
+    var s = (Date.now() - t) / 1000;
+    if (s < 60) return "agora";
+    if (s < 3600) return "há " + Math.floor(s / 60) + " min";
+    if (s < 86400) return "há " + Math.floor(s / 3600) + " h";
+    if (s < 30 * 86400) return "há " + Math.floor(s / 86400) + " d";
+    return new Intl.DateTimeFormat(LOCALE, { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(t));
+  }
+
+  function isIntraday(interval) { return INTRADAY[interval] === 1; }
+
   function signClass(v) {
     if (!isNum(v) || v === 0) return "";
     return v > 0 ? "pos" : "neg";
@@ -217,6 +274,11 @@
   var loadedKey = "";     // "id|intervalo" do que está desenhado
   var chartDigits = 2;
   var syncPaused = 0;     // > 0 enquanto um intervalo visível é aplicado por código
+  // Intervalo escolhido pelo usuário. state.interval é o do que está desenhado:
+  // só muda quando a resposta chega, para candleCount e interval andarem juntos.
+  var selInterval = "1d";
+  var drawnIntraday = false;  // tipo de tempo do que está nas séries (segundos x datas)
+  var swingData = null;   // analysis.swing do ativo em exibição (setups com marcações)
 
   // A biblioteca aplica o intervalo no próximo quadro; sem pausar a
   // sincronização, os eventos intermediários de setData de um painel
@@ -257,7 +319,7 @@
 
   function timeKey(t) {
     if (typeof t === "string") return t;
-    if (typeof t === "number") return new Date(t * 1000).toISOString().slice(0, 10);
+    if (typeof t === "number") return String(t);  // intraday: segundos já deslocados
     if (t && typeof t === "object" && "year" in t) {
       return t.year + "-" + String(t.month).padStart(2, "0") + "-" + String(t.day).padStart(2, "0");
     }
@@ -458,9 +520,11 @@
     renderLegends(null);
   }
 
-  function toMap(points) {
+  function toMap(points, shift) {
     var map = Object.create(null);
-    (points || []).forEach(function (pt) { if (pt && isNum(pt.value)) map[pt.time] = pt.value; });
+    (points || []).forEach(function (pt) {
+      if (pt && isNum(pt.value)) map[shift && isNum(pt.time) ? pt.time + shift : pt.time] = pt.value;
+    });
     return map;
   }
 
@@ -483,16 +547,24 @@
   }
 
   function drawCandles(payload, resetView) {
+    var intraday = !!(payload && payload.intraday);
+    // Intraday chega em segundos epoch UTC e a biblioteca desenha em UTC: soma-se
+    // o deslocamento do fuso do navegador para o eixo mostrar a hora local. Um
+    // único deslocamento para a série inteira mantém os tempos estritamente crescentes.
+    var shift = intraday ? -new Date().getTimezoneOffset() * 60 : 0;
     var rows = (payload && Array.isArray(payload.candles) ? payload.candles : []).filter(function (c) {
-      return c && typeof c.time === "string" && isNum(c.open) && isNum(c.high) && isNum(c.low) && isNum(c.close);
+      return c && (intraday ? isNum(c.time) : typeof c.time === "string")
+        && isNum(c.open) && isNum(c.high) && isNum(c.low) && isNum(c.close);
+    }).map(function (c) {
+      return { time: intraday ? c.time + shift : c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume };
     });
     var ind = (payload && payload.indicators) || {};
     var times = rows.map(function (c) { return c.time; });
 
-    chartData = { times: times, candle: Object.create(null), ind: {} };
+    chartData = { times: times, candle: Object.create(null), ind: {}, intraday: intraday };
     rows.forEach(function (c) { chartData.candle[c.time] = c; });
     ["sma20", "sma50", "sma200", "bb_upper", "bb_lower", "rsi14", "macd", "macd_signal", "macd_hist"].forEach(function (k) {
-      chartData.ind[k] = toMap(ind[k]);
+      chartData.ind[k] = toMap(ind[k], shift);
     });
 
     state.candleCount = rows.length;
@@ -501,6 +573,16 @@
     var last = rows.length ? rows[rows.length - 1].close : NaN;
     chartDigits = priceDigits(last);
     var s = charts.series;
+    if (intraday !== drawnIntraday) {
+      // Datas e segundos não convivem na mesma escala: esvazia tudo antes de trocar.
+      s.candles.setMarkers([]);
+      [s.candles, s.volume, s.sma20, s.sma50, s.sma200, s.bbUpper, s.bbLower, s.rsi, s.macd, s.macdSignal, s.macdHist]
+        .forEach(function (series) { series.setData([]); });
+      [charts.price, charts.rsi, charts.macd].forEach(function (c) {
+        c.chart.timeScale().applyOptions({ timeVisible: intraday, secondsVisible: false });
+      });
+      drawnIntraday = intraday;
+    }
     s.candles.applyOptions({
       priceFormat: { type: "price", precision: chartDigits, minMove: Math.pow(10, -chartDigits) },
     });
@@ -527,11 +609,52 @@
     }));
 
     if (resetView && rows.length) {
-      var span = { "1d": 180, "1wk": 156, "1mo": 120 }[state.interval] || 180;
+      var span = intraday ? INTRADAY_SPAN : (VIEW_SPAN[state.interval] || 180);
       showRange({ from: Math.max(rows.length - span, 0) - 0.5, to: rows.length + 2.5 });
     }
     setOverlay(rows.length ? "" : "Sem dados de preço para este ativo.");
     renderLegends(null);
+    applyMarkers();
+  }
+
+  function currentSetup() {
+    if (!swingData || !state.swingSetup) return null;
+    for (var i = 0; i < swingData.setups.length; i++) {
+      if (swingData.setups[i] && swingData.setups[i].key === state.swingSetup) return swingData.setups[i];
+    }
+    return null;
+  }
+
+  // Marcações de entrada/saída do setup selecionado. Só existem no diário: os
+  // setups são calculados em candles diários, então em qualquer outro intervalo
+  // (e sem setup selecionado) a lista fica vazia.
+  function applyMarkers() {
+    var list = [];
+    var setup = currentSetup();
+    if (setup && selInterval === "1d" && state.interval === "1d" && chartData && !chartData.intraday) {
+      (Array.isArray(setup.markers) ? setup.markers : []).forEach(function (m) {
+        if (!m || typeof m.time !== "string" || (m.type !== "entry" && m.type !== "exit")) return;
+        var t = m.time.slice(0, 10);
+        if (!chartData.candle[t]) return;
+        var entry = m.type === "entry";
+        list.push({
+          time: t, position: entry ? "belowBar" : "aboveBar", color: entry ? UP : DOWN,
+          shape: entry ? "arrowUp" : "arrowDown",
+        });
+      });
+      list.sort(function (a, b) { return a.time < b.time ? -1 : a.time > b.time ? 1 : 0; });
+    }
+    state.markerCount = list.length;
+    if (charts) charts.series.candles.setMarkers(list);
+
+    var note = $("swing-markers-note");
+    if (!setup) { note.hidden = true; note.textContent = ""; return; }
+    note.textContent = selInterval !== "1d"
+      ? "As marcações de entrada e saída de “" + setup.label + "” só aparecem no intervalo diário (D)."
+      : list.length
+        ? "No gráfico: " + list.length + " marcações de “" + setup.label + "” — ▲ entrada (abaixo da barra), ▼ saída (acima da barra)."
+        : "“" + setup.label + "” ainda não teve operações neste histórico: nada a marcar no gráfico.";
+    note.hidden = false;
   }
 
   function legendItem(parent, label, value, color) {
@@ -555,7 +678,7 @@
     var p = palette();
     var tone = c.close >= c.open ? cssVar("--up-text") : cssVar("--down-text");
 
-    priceLg.appendChild(el("b", "", fmtDate(key)));
+    priceLg.appendChild(el("b", "", chartData.intraday ? fmtBarTime(Number(key)) : fmtDate(key)));
     legendItem(priceLg, "A", fmtNum(c.open, chartDigits), tone);
     legendItem(priceLg, "Máx", fmtNum(c.high, chartDigits), tone);
     legendItem(priceLg, "Mín", fmtNum(c.low, chartDigits), tone);
@@ -589,9 +712,36 @@
   }
 
   // ------------------------------------------------------------- watchlist
-  function findAsset(id) {
+  function watchAsset(id) {
     for (var i = 0; i < state.assets.length; i++) if (state.assets[i].id === id) return state.assets[i];
     return null;
+  }
+
+  // Watchlist ou o ativo aberto sob demanda (que só existe na seleção atual).
+  function findAsset(id) {
+    var a = watchAsset(id);
+    if (a) return a;
+    return state.opened && state.opened.id === id ? state.opened : null;
+  }
+
+  function readOpened() {
+    try {
+      var v = JSON.parse(storageGet(OPENED_KEY) || "null");
+      return v && typeof v.symbol === "string" && typeof v.market === "string" ? { symbol: v.symbol, market: v.market } : null;
+    } catch (e) { return null; }
+  }
+
+  function persistSelection() {
+    if (state.selectedId === null) return;
+    storageSet(SELECTED_KEY, String(state.selectedId));
+    var o = state.opened && state.opened.id === state.selectedId ? state.opened : null;
+    storageSet(OPENED_KEY, o ? JSON.stringify({ symbol: o.symbol, market: o.market }) : "");
+  }
+
+  function pickDefault() {
+    if (!state.assets.length) return;
+    var stored = Number(storageGet(SELECTED_KEY));
+    state.selectedId = watchAsset(stored) ? stored : state.assets[0].id;
   }
 
   function assetVerdict(a) {
@@ -712,11 +862,9 @@
       state.assets = Array.isArray(list) ? list : [];
       state.assetsLoaded = true;
       hideNetError();
+      if (state.opened && watchAsset(state.opened.id)) state.opened = null;  // foi promovido à watchlist
       if (state.selectedId !== null && !findAsset(state.selectedId)) state.selectedId = null;
-      if (state.selectedId === null && state.assets.length) {
-        var stored = Number(storageGet(SELECTED_KEY));
-        state.selectedId = findAsset(stored) ? stored : state.assets[0].id;
-      }
+      if (state.selectedId === null && !state.opening) pickDefault();
       renderWatchlist();
       renderDataStatus();
       return state.assets;
@@ -738,6 +886,26 @@
     var alert = $("chart-alert");
     alert.hidden = !(a && a.last_error);
     alert.title = a && a.last_error ? "Falha na fonte de dados: " + a.last_error : "";
+
+    var name = $("chart-name");
+    name.textContent = a && a.name ? a.name : "";
+    name.title = name.textContent;
+    var indices = $("chart-indices");
+    clear(indices);
+    (a && Array.isArray(a.indices) ? a.indices : []).forEach(function (code) {
+      var tag = el("span", "tag", INDEX_LABEL[code] || code);
+      tag.title = "Compõe o índice " + (INDEX_LABEL[code] || code);
+      indices.appendChild(tag);
+    });
+    var toggle = $("watch-toggle");
+    toggle.hidden = !a;
+    if (a) {
+      var watching = a.watch !== false;
+      toggle.dataset.watch = String(watching);
+      toggle.setAttribute("aria-pressed", String(watching));
+      toggle.textContent = watching ? "Na watchlist" : "Adicionar à watchlist";
+      toggle.title = watching ? "Clique para tirar " + a.symbol + " da watchlist" : "Acompanhar " + a.symbol + " na watchlist";
+    }
   }
 
   function setRecLoading(on) {
@@ -825,6 +993,7 @@
     var message = $("rec-message"), sourceErr = $("rec-source-error");
     var marker = $("rec-score-marker");
     var ok = !!analysis && analysis.status === "ok";
+    renderSwing(analysis);
 
     var lastError = summary && summary.last_error;
     sourceErr.hidden = !lastError;
@@ -888,15 +1057,278 @@
     drawEquity(analysis.equity);
   }
 
+  // ------------------------------------------------- curto prazo (swing)
+  function setRecTab(tab) {
+    state.recTab = tab === "swing" ? "swing" : "position";
+    var swing = state.recTab === "swing";
+    $("rec-tab-position").setAttribute("aria-selected", String(!swing));
+    $("rec-tab-swing").setAttribute("aria-selected", String(swing));
+    $("rec-position").hidden = swing;
+    $("swing-card").hidden = !swing;
+  }
+
+  function evidenceDot(evidence) {
+    var dot = el("i", "ev-dot");
+    dot.dataset.evidence = evidence || "";
+    dot.setAttribute("aria-hidden", "true");
+    return dot;
+  }
+
+  function swingStateText(s) {
+    if (s.state === "sinal") return "Sinal hoje — compra na próxima abertura";
+    if (s.state === "posicao") {
+      var p = s.position || {};
+      var days = isNum(p.days) ? fmtNum(p.days, 0) + (p.days === 1 ? " pregão" : " pregões") : "alguns pregões";
+      if (p.exit_pending) return "Em posição há " + days + " — saída na próxima abertura";
+      return "Em posição há " + days + (isNum(p.ret) ? " (" + fmtPct(p.ret, 1) + ")" : "");
+    }
+    return "Sem sinal";
+  }
+
+  function swingStat(parent, label, value, cls) {
+    var box = el("span");
+    box.appendChild(el("small", "", label));
+    box.appendChild(el("b", cls || "", value));
+    parent.appendChild(box);
+  }
+
+  // Um bloco por setup. É um <button>: clicar seleciona o setup e desenha as
+  // marcações no gráfico diário. Estado e evidência têm o mesmo peso visual.
+  function swingBlock(s, currency) {
+    var stats = s.stats || {};
+    var block = el("button", "swing-setup");
+    block.type = "button";
+    block.dataset.setup = s.key || "";
+    block.dataset.state = s.state === "sinal" || s.state === "posicao" ? s.state : "nenhum";
+    var picked = state.swingSetup === s.key;
+    block.setAttribute("aria-pressed", String(picked));
+
+    var top = el("span", "swing-top");
+    var label = el("span", "swing-label", s.label || s.key || "");
+    label.appendChild(el("span", "swing-pick", picked ? "marcado no gráfico" : "ver no gráfico"));
+    top.appendChild(label);
+    if (s.description) top.appendChild(el("span", "swing-desc", s.description));
+    block.appendChild(top);
+
+    block.appendChild(el("span", "swing-state", swingStateText(s)));
+    if (block.dataset.state === "posicao" && s.position) {
+      var p = s.position, bits = [];
+      if (p.entry_date) bits.push("entrada em " + fmtDate(String(p.entry_date)) + (isNum(p.entry_price) ? " a " + fmtMoney(p.entry_price, currency) : ""));
+      if (isNum(p.ret)) bits.push("retorno até agora " + fmtPct(p.ret, 1));
+      if (bits.length) block.appendChild(el("span", "swing-pos", bits.join(" · ")));
+    }
+
+    var known = !!SWING_EVIDENCE_LABEL[stats.evidence];
+    var ev = el("span", "swing-ev");
+    ev.dataset.evidence = known ? stats.evidence : "";
+    ev.appendChild(evidenceDot(known ? stats.evidence : ""));
+    ev.appendChild(el("span", "", known ? SWING_EVIDENCE_LABEL[stats.evidence] : "evidência não informada"));
+    block.appendChild(ev);
+
+    var ci = el("span", "swing-ci");
+    ci.appendChild(document.createTextNode("Excesso médio por operação sobre segurar: "));
+    ci.appendChild(el("b", signClass(stats.mean_excess), fmtPct(stats.mean_excess, 2)));
+    ci.appendChild(document.createTextNode(" · IC 95%: "));
+    ci.appendChild(el("b", "", isNum(stats.ci_low) && isNum(stats.ci_high)
+      ? fmtPct(stats.ci_low, 2) + " a " + fmtPct(stats.ci_high, 2) : DASH));
+    if (stats.evidence === "amostra_insuficiente") ci.appendChild(document.createTextNode(" (menos de 20 operações)"));
+    block.appendChild(ci);
+
+    var grid = el("span", "swing-stats");
+    swingStat(grid, "Operações", isNum(stats.trades) ? fmtNum(stats.trades, 0) : DASH);
+    swingStat(grid, "Taxa de acerto", fmtShare(stats.win_rate, 0));
+    swingStat(grid, "Retorno médio líquido", fmtPct(stats.mean_net, 2), signClass(stats.mean_net));
+    swingStat(grid, "Duração média", isNum(stats.avg_days) ? fmtNum(stats.avg_days, 1) + " pregões" : DASH);
+    block.appendChild(grid);
+    return block;
+  }
+
+  function contextItem(parent, label, value, hint, cls) {
+    var box = el("div");
+    box.appendChild(el("dt", "", label));
+    var dd = el("dd", cls || "", value);
+    if (hint && value !== DASH) dd.appendChild(el("small", "", " " + hint));
+    box.appendChild(dd);
+    parent.appendChild(box);
+  }
+
+  function renderSwing(analysis) {
+    var root = $("swing-setups"), msg = $("swing-message"), ctxBlock = $("swing-context-block"), ctx = $("swing-context");
+    clear(root); clear(ctx);
+    var swing = analysis && analysis.status === "ok" && analysis.swing && Array.isArray(analysis.swing.setups) ? analysis.swing : null;
+    swingData = swing;
+    if (!swing) {
+      state.swingSetup = null;
+      msg.textContent = !analysis
+        ? "Análise de curto prazo indisponível no momento."
+        : "Curto prazo indisponível: o histórico diário deste ativo é insuficiente (mínimo de 300 candles) para avaliar os setups.";
+      msg.hidden = false;
+      ctxBlock.hidden = true;
+      applyMarkers();
+      return;
+    }
+    msg.hidden = true;
+    if (state.swingSetup && !currentSetup()) state.swingSetup = null;
+    swing.setups.forEach(function (s) { if (s) root.appendChild(swingBlock(s, analysis.currency)); });
+
+    var c = swing.context || {};
+    contextItem(ctx, "ATR (14)", fmtShare(c.atr_pct, 1), "do preço");
+    contextItem(ctx, "Faixa esperada, 5 pregões", isNum(c.range_5d) ? "±" + fmtShare(c.range_5d, 1) : DASH);
+    contextItem(ctx, "Volume relativo", isNum(c.rel_volume) ? fmtNum(c.rel_volume, 2) + "×" : DASH, "a média de 20");
+    contextItem(ctx, "Da máxima de 20 pregões", fmtPct(c.dist_high20, 1), "", signClass(c.dist_high20));
+    contextItem(ctx, "Da mínima de 20 pregões", fmtPct(c.dist_low20, 1), "", signClass(c.dist_low20));
+    ctxBlock.hidden = false;
+    applyMarkers();
+  }
+
+  function pickSetup(key) {
+    state.swingSetup = state.swingSetup === key ? null : key;  // clicar de novo tira as marcações
+    $("swing-setups").querySelectorAll(".swing-setup").forEach(function (node) {
+      var on = node.dataset.setup === state.swingSetup;
+      node.setAttribute("aria-pressed", String(on));
+      var pick = node.querySelector(".swing-pick");
+      if (pick) pick.textContent = on ? "marcado no gráfico" : "ver no gráfico";
+    });
+    applyMarkers();
+  }
+
+  // ---------------------------------------------------------------- notícias
+  var newsToken = 0;
+  var NEWS_EMPTY = "Nenhuma notícia encontrada para este ativo.";
+
+  function renderNews(data) {
+    var list = $("news-list"), empty = $("news-empty");
+    clear(list);
+    var items = (data && Array.isArray(data.items) ? data.items : []).filter(function (n) {
+      return n && typeof n.title === "string" && n.title;
+    });
+    $("news-stale").hidden = !(data && data.stale);
+    empty.textContent = NEWS_EMPTY;
+    empty.hidden = items.length > 0;
+    items.forEach(function (n, i) {
+      var li = el("li", "news-item");
+      var a = el("a", "", n.title);
+      a.dataset.news = String(i);
+      // Só http(s): nada de javascript:, data: ou caminho relativo vindo da fonte.
+      if (typeof n.url === "string" && /^https?:\/\//i.test(n.url)) a.href = n.url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      li.appendChild(a);
+      var ago = fmtAgo(n.published_at);
+      var meta = el("span", "news-meta", [n.source, ago].filter(function (x) { return !!x; }).join(" · "));
+      var when = fmtDateTime(n.published_at);
+      if (when) meta.title = "Publicada em " + when;
+      li.appendChild(meta);
+      list.appendChild(li);
+    });
+  }
+
+  function loadNews(id) {
+    var token = ++newsToken;
+    var panel = $("news-panel"), loading = $("news-loading"), empty = $("news-empty");
+    clear($("news-list"));
+    $("news-stale").hidden = true;
+    empty.hidden = true;
+    if (id === null) { panel.hidden = true; loading.hidden = true; return Promise.resolve(); }
+    var a = findAsset(id);
+    $("news-symbol").textContent = a ? "· " + a.symbol : "";
+    panel.hidden = false;
+    panel.setAttribute("aria-busy", "true");
+    loading.hidden = false;
+    return api("/api/assets/" + id + "/news").then(function (data) {
+      if (token !== newsToken) return;
+      loading.hidden = true;
+      panel.setAttribute("aria-busy", "false");
+      renderNews(data);
+    }, function (err) {
+      if (token !== newsToken) return;
+      loading.hidden = true;
+      panel.setAttribute("aria-busy", "false");
+      empty.textContent = "Não foi possível carregar as notícias agora.";
+      empty.hidden = false;
+      if (window.console && !(err instanceof ApiError)) console.error(err);
+    });
+  }
+
+  // ---------------------------------------------------------------- intraday
+  var intradayTimer = 0;
+  var candlesAt = 0;  // quando os candles em exibição foram pedidos
+
+  function renderIntradayNote(payload, asset, errorText) {
+    var note = $("intraday-note");
+    if (!isIntraday(selInterval)) { note.hidden = true; note.textContent = ""; return; }
+    note.hidden = false;
+    if (errorText) { note.textContent = errorText; note.dataset.kind = "error"; return; }
+    if (!payload) { note.textContent = "Carregando intraday…"; note.dataset.kind = "plain"; return; }
+    var parts = [];
+    if (isNum(payload.last_bar_time)) parts.push("último candle " + fmtClock(payload.last_bar_time));
+    var crypto = !!asset && asset.market === "CRYPTO";
+    if (!crypto) {
+      var delay = isNum(payload.delay_minutes) && payload.delay_minutes > 0
+        ? " (atraso informado: " + fmtNum(payload.delay_minutes, 0) + " min)" : "";
+      parts.push("Cotação pode vir com atraso" + delay);
+      parts.push("Preços intraday sem ajuste por proventos");
+    }
+    parts.push("atualiza a cada 60 s");
+    note.textContent = parts.join(" · ");
+    note.dataset.kind = crypto ? "plain" : "warn";
+  }
+
+  function intradayUnavailable(err) {
+    return err instanceof ApiError && err.status === 422;
+  }
+
+  // Recarga silenciosa só dos candles (o cartão de recomendação é diário).
+  function reloadCandles() {
+    var id = state.selectedId, interval = selInterval, token = detailToken;
+    if (id === null || !isIntraday(interval)) return Promise.resolve();
+    var same = function () { return token === detailToken && state.selectedId === id && selInterval === interval; };
+    candlesAt = Date.now();
+    return api("/api/assets/" + id + "/candles?interval=" + encodeURIComponent(interval)).then(function (payload) {
+      if (!same()) return;
+      state.interval = interval;
+      drawCandles(payload, state.candleCount === 0);
+      loadedKey = id + "|" + interval;
+      renderIntradayNote(payload, findAsset(id));
+    }, function (err) {
+      if (!same()) return;
+      if (intradayUnavailable(err)) {
+        renderIntradayNote(null, null, state.candleCount > 0
+          ? err.message + " — o gráfico mostra os últimos dados carregados" : err.message);
+      }
+    });
+  }
+
+  function intradayTick() {
+    if (document.hidden || state.tab !== "chart") return;
+    reloadCandles();
+  }
+
+  function armIntraday() {
+    window.clearInterval(intradayTimer);
+    intradayTimer = isIntraday(selInterval) ? window.setInterval(intradayTick, INTRADAY_RELOAD_MS) : 0;
+  }
+
+  // Ao voltar para a aba (do navegador ou do app), não espera o próximo ciclo.
+  function catchUpIntraday() {
+    if (document.hidden || state.tab !== "chart" || !isIntraday(selInterval)) return;
+    if (Date.now() - candlesAt >= INTRADAY_RELOAD_MS) reloadCandles();
+  }
+
   function clearDetail() {
     detailToken++;
     loadedKey = "";
     detailStamp = "";
     renderChartHeader(null);
     $("chart-asof").textContent = "";
+    state.swingSetup = null;
+    state.interval = selInterval;
     drawCandles({ candles: [], indicators: {} }, false);
-    setOverlay(state.assetsLoaded ? "Adicione um ativo à watchlist para ver o gráfico." : "");
+    setOverlay(state.opening ? "Buscando dados de " + state.opening.symbol + "…"
+      : state.assetsLoaded ? "Busque um ativo ou adicione um à watchlist para ver o gráfico." : "");
     renderRec(null, null);
+    renderIntradayNote(null, null, isIntraday(selInterval) ? "Nenhum ativo selecionado." : "");
+    loadNews(null);
     setRecLoading(false);
   }
 
@@ -904,7 +1336,7 @@
     var id = state.selectedId;
     if (id === null) { clearDetail(); return Promise.resolve(); }
     var token = ++detailToken;
-    var interval = state.interval;
+    var interval = selInterval;
     var key = id + "|" + interval;
     var fresh = key !== loadedKey;
     var newAsset = String(loadedKey).split("|")[0] !== String(id);
@@ -914,7 +1346,13 @@
     if (newAsset) {
       setRecLoading(true);
       setOverlay("Carregando…");
+      state.swingSetup = null;   // marcações são do ativo anterior
+      swingData = null;
+      applyMarkers();
+      loadNews(id);
     }
+    if (fresh && isIntraday(interval)) renderIntradayNote(null, summary);
+    candlesAt = Date.now();
 
     var candlesReq = api("/api/assets/" + id + "/candles?interval=" + encodeURIComponent(interval));
     var analysisReq = api("/api/assets/" + id + "/analysis");
@@ -928,20 +1366,30 @@
       var gone = [c, a].some(function (r) { return !r.ok && r.error && r.error.status === 404; });
       if (gone) {
         state.selectedId = null;
+        if (state.opened && state.opened.id === id) state.opened = null;
         return loadAssets().then(loadDetail);
       }
       var now = findAsset(id) || summary;
+      state.interval = interval;
       detailStamp = now && now.last_refresh ? now.last_refresh : "";
 
       if (c.ok) {
         drawCandles(c.value, fresh);
         loadedKey = key;
+        renderIntradayNote(c.value, now);
+      } else if (isIntraday(interval) && intradayUnavailable(c.error)) {
+        // Intraday indisponível para este ativo: gráfico vazio com a mensagem, sem faixa de erro.
+        drawCandles({ candles: [], indicators: {} }, false);
+        loadedKey = key;
+        setOverlay(c.error.message);
+        renderIntradayNote(null, now, c.error.message);
       } else {
         report(c.error);
         if (fresh) {
           loadedKey = "";
           drawCandles({ candles: [], indicators: {} }, false);
           setOverlay("Não foi possível carregar os candles.");
+          renderIntradayNote(null, now, isIntraday(interval) ? "Não foi possível carregar os candles intraday." : "");
         }
       }
 
@@ -956,74 +1404,149 @@
     });
   }
 
-  function selectAsset(id) {
+  function selectAsset(id, force) {
     if (!findAsset(id)) return;
     var changed = state.selectedId !== id;
     state.selectedId = id;
-    storageSet(SELECTED_KEY, String(id));
+    if (state.opened && state.opened.id !== id) state.opened = null;  // o aberto só vive enquanto selecionado
+    persistSelection();
     renderWatchlist();
-    if (changed || loadedKey.split("|")[0] !== String(id)) loadDetail().catch(report);
+    if (force || changed || loadedKey.split("|")[0] !== String(id)) loadDetail().catch(report);
   }
 
   function setInterval_(interval) {
     if (INTERVALS.indexOf(interval) < 0) return;
-    var changed = state.interval !== interval;
-    state.interval = interval;
+    var changed = selInterval !== interval;
+    selInterval = interval;
     INTERVALS.forEach(function (i) { $("interval-" + i).setAttribute("aria-pressed", String(i === interval)); });
-    if (changed) loadDetail().catch(report);
+    armIntraday();
+    if (!changed) return;
+    applyMarkers();            // fora do diário as marcações somem na hora
+    renderIntradayNote(null, null);
+    loadDetail().catch(report);
   }
 
-  // --------------------------------------------------------------- ranking
-  var rankingToken = 0;
-  var TEXT_SORT = { symbol: 1, market: 1, verdict: 1, evidence: 1 };
+  // ---------------------------------------------- abrir ativo sob demanda
+  var openToken = 0;
 
-  function sortedRanking() {
-    var key = state.ranking.sortKey, dir = state.ranking.sortDir === "asc" ? 1 : -1;
-    return state.ranking.rows.slice().sort(function (a, b) {
-      var x = a[key], y = b[key];
-      if (TEXT_SORT[key]) return dir * String(x || "").localeCompare(String(y || ""), LOCALE);
-      var xn = isNum(x), yn = isNum(y);
-      if (!xn && !yn) return 0;
-      if (!xn) return 1;
-      if (!yn) return -1;
-      return dir * (x - y);
+  // Abre (criando no servidor se preciso) um papel do catálogo sem pôr na
+  // watchlist. quiet = restauração na carga da página: falha não vira aviso.
+  function openAsset(symbol, market, quiet) {
+    var token = ++openToken;
+    state.opening = { symbol: symbol, market: market };
+    if (!quiet) showAddError("");
+    setOverlay("Buscando dados de " + symbol + "…");
+    return api("/api/assets/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol: symbol, market: market }),
+    }).then(function (summary) {
+      if (token !== openToken) return null;
+      state.opening = null;
+      if (!summary || !isNum(summary.id)) throw new ApiError(500, "resposta inesperada do servidor");
+      if (summary.watch) {
+        var ready = watchAsset(summary.id) ? Promise.resolve() : loadAssets();
+        return ready.then(function () { selectAsset(summary.id, true); });
+      }
+      state.opened = summary;
+      selectAsset(summary.id, true);
+      return null;
+    }).catch(function (err) {
+      if (token !== openToken) return null;
+      state.opening = null;
+      if (quiet) storageSet(OPENED_KEY, "");
+      else if (err instanceof ApiError) showAddError("Não foi possível abrir " + symbol + ": " + err.message);
+      else { showAddError("Não foi possível abrir " + symbol + " agora."); report(err); }
+      // Nada mudou no estado: volta a mostrar o que estava selecionado.
+      if (state.selectedId === null) { pickDefault(); renderWatchlist(); }
+      return loadDetail().catch(report);
     });
+  }
+
+  // -------------------------------------------------------------- screener
+  // Ordenação, filtros e paginação são do servidor; aqui só se desenha a página.
+  var screenerToken = 0;
+  var screenerTimer = 0;
+  var screenerReady = null;   // "ready" do último progresso visto (índice sendo montado)
+  var SCREENER_COLS = 16;
+  var SCREENER_POLL_MS = 5000;
+
+  function screenerScope() { return $("screener-scope").value || "watchlist"; }
+
+  function settle(promise) {
+    return promise.then(function (v) { return { ok: true, value: v }; }, function (e) { return { ok: false, error: e }; });
   }
 
   function numCell(tr, value, text, colored) {
     tr.appendChild(el("td", "num" + (colored ? " " + signClass(value) : ""), text));
   }
 
-  function renderRanking() {
+  function setupChips(td, setups) {
+    var any = false;
+    Object.keys(SETUP_SHORT).concat(Object.keys(setups || {}).filter(function (k) { return !SETUP_SHORT[k]; })).forEach(function (key) {
+      var info = setups && setups[key];
+      if (!info || !SETUP_STATE_SHORT[info.state]) return;
+      any = true;
+      var evidence = SWING_EVIDENCE_LABEL[info.evidence] ? info.evidence : "";
+      var evText = evidence ? SWING_EVIDENCE_LABEL[evidence] : "evidência não informada";
+      var chip = el("span", "setup-chip");
+      chip.dataset.setup = key;
+      chip.dataset.state = info.state;
+      chip.dataset.evidence = evidence;
+      chip.title = (SETUP_SHORT[key] || key) + ": " + (info.state === "sinal" ? "sinal hoje" : "em posição") + " — " + evText + " neste ativo";
+      chip.appendChild(evidenceDot(evidence));
+      chip.appendChild(el("span", "", SETUP_SHORT[key] || key));
+      chip.appendChild(el("small", "", SETUP_STATE_SHORT[info.state]));
+      chip.appendChild(el("span", "sr-only", evText));
+      td.appendChild(chip);
+    });
+    if (!any) td.appendChild(el("span", "muted", DASH));
+  }
+
+  function renderScreener(emptyText) {
+    var sc = state.screener;
     var table = $("ranking-table");
     var body = table.tBodies[0];
     clear(body);
     table.querySelectorAll("thead th").forEach(function (th) {
       var btn = th.querySelector("[data-sort]");
-      if (btn && btn.dataset.sort === state.ranking.sortKey) {
-        th.setAttribute("aria-sort", state.ranking.sortDir === "asc" ? "ascending" : "descending");
+      if (btn && btn.dataset.sort === sc.sort) {
+        th.setAttribute("aria-sort", sc.order === "asc" ? "ascending" : "descending");
       } else {
         th.removeAttribute("aria-sort");
       }
     });
-    var rows = sortedRanking();
-    if (!rows.length) {
+
+    var pages = Math.max(1, Math.ceil(sc.total / sc.pageSize));
+    $("screener-page").textContent = "página " + fmtNum(sc.page, 0) + " de " + fmtNum(pages, 0)
+      + " · " + fmtNum(sc.total, 0) + (sc.total === 1 ? " papel" : " papéis");
+    $("screener-prev").disabled = sc.page <= 1;
+    $("screener-next").disabled = sc.page >= pages;
+
+    if (!sc.rows.length) {
       var tr = el("tr");
-      var td = el("td", "empty", "Nenhum ativo com dados suficientes neste filtro.");
-      td.colSpan = 12;
+      var td = el("td", "empty", emptyText || "Nenhum papel com dados suficientes neste filtro.");
+      td.colSpan = SCREENER_COLS;
       tr.appendChild(td);
       body.appendChild(tr);
       return;
     }
-    rows.forEach(function (r, i) {
+    var first = (sc.page - 1) * sc.pageSize;
+    sc.rows.forEach(function (r, i) {
       var tr = el("tr");
       tr.dataset.assetId = String(r.id);
       tr.dataset.symbol = r.symbol;
+      tr.dataset.market = r.market;
       tr.tabIndex = 0;
       tr.title = "Abrir " + r.symbol + " no gráfico";
-      tr.appendChild(el("td", "num muted", i + 1));
+      tr.appendChild(el("td", "num muted", first + i + 1));
       tr.appendChild(el("td", "sym", r.symbol));
+      var nameTd = el("td", "name", r.name || DASH);
+      if (r.name) nameTd.title = r.name;
+      tr.appendChild(nameTd);
       tr.appendChild(el("td", "", marketLabel(r.market)));
+      numCell(tr, r.price, isNum(r.price) ? fmtNum(r.price, priceDigits(r.price)) : DASH, false);
+      numCell(tr, r.change_pct, fmtPct(r.change_pct), true);
       numCell(tr, r.score, fmtSigned(r.score, 1), true);
       var vTd = el("td");
       var verdict = VERDICT_LABEL[r.verdict] ? r.verdict : "insuficiente";
@@ -1034,6 +1557,9 @@
       var eTd = el("td", "ev", EVIDENCE_LABEL[r.evidence] || r.evidence || DASH);
       eTd.dataset.evidence = EVIDENCE_LABEL[r.evidence] ? r.evidence : "";
       tr.appendChild(eTd);
+      var sTd = el("td", "setups");
+      setupChips(sTd, r.setups);
+      tr.appendChild(sTd);
       numCell(tr, r.momentum, fmtSigned(r.momentum, 2), true);
       numCell(tr, r.trend, fmtSigned(r.trend, 2), true);
       numCell(tr, r.dist_sma200, fmtSigned(r.dist_sma200, 2), true);
@@ -1044,34 +1570,179 @@
     });
   }
 
-  function renderRankingNote(market) {
-    var ranked = Object.create(null);
-    state.ranking.rows.forEach(function (r) { ranked[r.id] = true; });
-    var out = state.assets.filter(function (a) { return (!market || a.market === market) && !ranked[a.id]; });
-    var base = "Fatores normalizados de −1 a +1. Clique numa linha para abrir o ativo no gráfico.";
-    $("ranking-note").textContent = out.length
-      ? base + " Fora do ranking por dados insuficientes: " + out.map(function (a) { return a.symbol; }).join(", ") + "."
-      : base;
+  function sumRow(card, label, value) {
+    var row = el("div", "sum-row");
+    row.appendChild(el("span", "", label));
+    row.appendChild(el("b", "", value));
+    card.appendChild(row);
   }
 
-  function loadRanking() {
-    var token = ++rankingToken;
-    var market = $("ranking-market").value;
-    var url = "/api/ranking" + (market ? "?market=" + encodeURIComponent(market) : "");
-    return api(url).then(function (rows) {
-      if (token !== rankingToken) return;
-      state.ranking.rows = Array.isArray(rows) ? rows : [];
-      renderRanking();
-      renderRankingNote(market);
-    }, function (err) {
-      if (token !== rankingToken) return;
-      report(err);
-      if (!isNetworkFailure(err)) {
-        state.ranking.rows = [];
-        renderRanking();
-        $("ranking-note").textContent = err.message;
-      }
+  // Faixa de resumo: amplitude do escopo e, por setup, quantos estão ativos hoje
+  // com a evidência agregada (todas as operações de todos os papéis) e o IC.
+  function renderScreenerSummary(sum) {
+    var root = $("screener-summary");
+    clear(root);
+    if (!sum) { root.hidden = true; return; }
+    root.hidden = false;
+
+    var breadth = el("div", "sum-card");
+    breadth.appendChild(el("div", "sum-title", "Amplitude"));
+    sumRow(breadth, "Papéis analisados", isNum(sum.count) ? fmtNum(sum.count, 0) : DASH);
+    sumRow(breadth, "Acima da média de 200", fmtShare(sum.pct_above_sma200, 1));
+    var verdicts = el("div", "sum-verdicts");
+    var v = sum.verdicts || {};
+    ["comprar", "manter", "vender"].forEach(function (key) {
+      var badge = el("span", "badge", VERDICT_SHORT[key] + " " + (isNum(v[key]) ? fmtNum(v[key], 0) : DASH));
+      badge.dataset.verdict = key;
+      verdicts.appendChild(badge);
     });
+    breadth.appendChild(verdicts);
+    root.appendChild(breadth);
+
+    (Array.isArray(sum.setups) ? sum.setups : []).forEach(function (s) {
+      if (!s) return;
+      var pooled = s.pooled || {};
+      var card = el("div", "sum-card sum-setup");
+      card.dataset.setup = s.key || "";
+      card.appendChild(el("div", "sum-title", s.label || s.key || ""));
+      sumRow(card, "Ativos hoje", isNum(s.active) ? fmtNum(s.active, 0) : DASH);
+      var known = !!SWING_EVIDENCE_LABEL[pooled.evidence];
+      var ev = el("div", "sum-ev");
+      ev.dataset.evidence = known ? pooled.evidence : "";
+      ev.appendChild(evidenceDot(known ? pooled.evidence : ""));
+      ev.appendChild(el("span", "", known ? SWING_EVIDENCE_LABEL[pooled.evidence] : "evidência não informada"));
+      card.appendChild(ev);
+      var ci = el("div", "sum-detail");
+      ci.appendChild(document.createTextNode("excesso médio "));
+      ci.appendChild(el("b", signClass(pooled.mean_excess), fmtPct(pooled.mean_excess, 2)));
+      ci.appendChild(document.createTextNode(" · IC 95% "));
+      ci.appendChild(el("b", "", isNum(pooled.ci_low) && isNum(pooled.ci_high)
+        ? fmtPct(pooled.ci_low, 2) + " a " + fmtPct(pooled.ci_high, 2) : DASH));
+      if (pooled.evidence === "amostra_insuficiente") ci.appendChild(document.createTextNode(" (menos de 100 operações)"));
+      card.appendChild(ci);
+      // No escopo, "acerto" é ficar acima de segurar o papel — não é retorno positivo.
+      card.appendChild(el("div", "sum-detail", (isNum(pooled.trades) ? fmtNum(pooled.trades, 0) : DASH)
+        + " operações no escopo · " + fmtShare(pooled.win_rate, 0) + " acima de segurar"));
+      root.appendChild(card);
+    });
+  }
+
+  function renderScreenerProgress(p) {
+    var node = $("screener-progress");
+    var building = !!p && isNum(p.total) && isNum(p.ready) && p.ready < p.total;
+    node.textContent = building
+      ? "montando o índice: " + fmtNum(p.ready, 0) + " de " + fmtNum(p.total, 0)
+        + " papéis — a tabela e o resumo crescem conforme os papéis são analisados."
+      : "";
+    node.hidden = !building;
+    return building;
+  }
+
+  function renderScreenerNote(scope, updatedAt, errorText) {
+    var note = $("ranking-note");
+    clear(note);
+    if (errorText) { note.textContent = errorText; return; }
+    note.appendChild(document.createTextNode(
+      "Fatores normalizados de −1 a +1. Clique numa linha para abrir o ativo no gráfico. Selos de setup trazem a evidência no histórico do próprio ativo:"));
+    var legend = el("span", "ev-legend");
+    SWING_EVIDENCE_ORDER.forEach(function (key) {
+      var item = el("span");
+      item.appendChild(evidenceDot(key));
+      item.appendChild(document.createTextNode(SWING_EVIDENCE_LEGEND[key]));
+      legend.appendChild(item);
+    });
+    note.appendChild(legend);
+    var tail = [];
+    var when = updatedAt ? fmtDateTime(updatedAt) : "";
+    if (when) tail.push("Análise de " + when + ".");
+    if (scope === "watchlist") {
+      var market = $("ranking-market").value;
+      var out = state.assets.filter(function (a) { return (!market || a.market === market) && a.status !== "ok"; });
+      if (out.length) tail.push("Fora do screener por dados insuficientes: " + out.map(function (a) { return a.symbol; }).join(", ") + ".");
+    }
+    if (tail.length) note.appendChild(document.createTextNode("· " + tail.join(" ")));
+  }
+
+  // Enquanto o índice é montado, consulta só o progresso; a tabela é recarregada
+  // quando o número de papéis prontos muda (não a cada ciclo, para não roubar o foco).
+  function pollScreener(token, scope) {
+    window.clearTimeout(screenerTimer);
+    screenerTimer = window.setTimeout(function () {
+      if (token !== screenerToken || state.tab !== "ranking") return;
+      if (document.hidden) { pollScreener(token, scope); return; }
+      api("/api/screener/progress?scope=" + encodeURIComponent(scope)).then(function (p) {
+        if (token !== screenerToken || state.tab !== "ranking") return;
+        if (p && p.ready !== screenerReady) { loadScreener(); return; }
+        if (renderScreenerProgress(p)) pollScreener(token, scope);
+      }, function () {
+        if (token === screenerToken) pollScreener(token, scope);
+      });
+    }, SCREENER_POLL_MS);
+  }
+
+  function loadScreener() {
+    var token = ++screenerToken;
+    window.clearTimeout(screenerTimer);
+    var sc = state.screener;
+    var scope = screenerScope();
+    var isIndex = scope !== "watchlist";
+    var q = ["scope=" + encodeURIComponent(scope), "sort=" + encodeURIComponent(sc.sort), "order=" + encodeURIComponent(sc.order),
+      "page=" + sc.page, "page_size=" + sc.pageSize];
+    var filtered = false;
+    [["market", "ranking-market"], ["verdict", "screener-verdict"], ["evidence", "screener-evidence"], ["setup", "screener-setup"]]
+      .forEach(function (f) {
+        var value = $(f[1]).value;
+        if (value) { q.push(f[0] + "=" + encodeURIComponent(value)); filtered = true; }
+      });
+
+    return Promise.all([
+      settle(api("/api/screener?" + q.join("&"))),
+      settle(api("/api/screener/summary?scope=" + encodeURIComponent(scope))),
+      isIndex ? settle(api("/api/screener/progress?scope=" + encodeURIComponent(scope))) : Promise.resolve({ ok: true, value: null }),
+    ]).then(function (res) {
+      if (token !== screenerToken) return null;
+      var rows = res[0], sum = res[1], prog = res[2];
+      var progress = prog.ok ? prog.value : null;
+      var building = renderScreenerProgress(progress);
+      screenerReady = progress ? progress.ready : null;
+      renderScreenerSummary(sum.ok ? sum.value : null);
+
+      if (rows.ok) {
+        var data = rows.value || {};
+        sc.rows = Array.isArray(data.rows) ? data.rows : [];
+        sc.total = isNum(data.total) ? data.total : sc.rows.length;
+        var pages = Math.max(1, Math.ceil(sc.total / sc.pageSize));
+        if (sc.page > pages) { sc.page = pages; return loadScreener(); }  // a lista encolheu
+        renderScreener(filtered ? "Nenhum papel neste filtro."
+          : building ? "Nenhum papel analisado ainda — o índice está sendo montado."
+          : isIndex ? "Nenhum papel analisado neste índice ainda. A composição é carregada em segundo plano."
+          : "Nenhum ativo da watchlist com dados suficientes.");
+        renderScreenerNote(scope, data.updated_at, "");
+      } else {
+        report(rows.error);
+        if (!isNetworkFailure(rows.error)) {
+          sc.rows = []; sc.total = 0;
+          renderScreener("Não foi possível montar o screener.");
+          renderScreenerNote(scope, null, rows.error.message);
+        }
+      }
+      if (building) pollScreener(token, scope);
+      return null;
+    });
+  }
+
+  function screenerFilterChanged() {
+    state.screener.page = 1;
+    loadScreener();
+  }
+
+  // Um índice é de um mercado só: o filtro de mercado só faz sentido na watchlist.
+  function screenerScopeChanged() {
+    var market = $("ranking-market");
+    market.value = "";
+    market.disabled = screenerScope() !== "watchlist";
+    market.title = market.disabled ? "Filtro de mercado vale só para a watchlist" : "";
+    screenerFilterChanged();
   }
 
   // -------------------------------------------------------------- carteira
@@ -1179,7 +1850,7 @@
   var TABS = ["chart", "ranking", "portfolio"];
 
   function loadTabData() {
-    if (state.tab === "ranking") return loadRanking();
+    if (state.tab === "ranking") return loadScreener();
     if (state.tab === "portfolio") return loadPortfolio();
     return Promise.resolve();
   }
@@ -1191,6 +1862,8 @@
       $("tab-" + t).setAttribute("aria-selected", String(t === tab));
       $("view-" + t).hidden = t !== tab;
     });
+    if (tab !== "ranking") window.clearTimeout(screenerTimer);
+    if (tab === "chart") catchUpIntraday();
     loadTabData();
   }
 
@@ -1241,6 +1914,7 @@
     var symbol = input.value.trim();
     if (!symbol) { showAddError("Informe um símbolo."); input.focus(); return; }
     if (btn.disabled) return;
+    cancelSearch();
     showAddError("");
     btn.disabled = true;
     btn.textContent = "Adicionando…";
@@ -1252,11 +1926,13 @@
       input.value = "";
       showAddError("");
       return loadAssets().then(function () {
-        if (created && findAsset(created.id)) selectAsset(created.id);
+        if (created && watchAsset(created.id)) selectAsset(created.id);
+        renderChartHeader(findAsset(state.selectedId));
         return loadTabData();
       });
     }).catch(function (err) {
-      if (err instanceof ApiError && err.status >= 400 && err.status < 500) showAddError(err.message);
+      // 422 (símbolo/mercado), 409 (já está) e 502 (fonte fora do ar) trazem o motivo em detail.
+      if (err instanceof ApiError && err.status >= 400) showAddError(err.message);
       else { showAddError("Não foi possível adicionar agora. Tente de novo."); report(err); }
     }).then(function () {
       btn.disabled = false;
@@ -1264,25 +1940,180 @@
     });
   }
 
-  function removeAsset(id, button) {
+  // keepView (botão do cabeçalho): o ativo sai da watchlist mas continua na tela.
+  function removeAsset(id, button, keepView) {
     if (button) button.disabled = true;
     showAddError("");
-    api("/api/assets/" + id, { method: "DELETE" }).catch(function (err) {
+    var before = findAsset(id);
+    // Papel de índice não é apagado no servidor, só sai da watchlist: pode seguir selecionado.
+    var survives = !!before && Array.isArray(before.indices) && before.indices.length > 0;
+    return api("/api/assets/" + id, { method: "DELETE" }).catch(function (err) {
       if (!(err instanceof ApiError && err.status === 404)) throw err;  // já não existe: só recarrega
+      survives = false;
     }).then(function () {
       var wasSelected = state.selectedId === id;
-      if (wasSelected) state.selectedId = null;
+      var reopen = null;
+      if (wasSelected && survives) {
+        var copy = {};
+        Object.keys(before).forEach(function (k) { copy[k] = before[k]; });
+        copy.watch = false;
+        state.opened = copy;
+        persistSelection();
+      } else if (wasSelected) {
+        state.selectedId = null;
+        // Apagado no servidor: para continuar na tela, abre de novo sob demanda.
+        if (keepView && before) reopen = openAsset(before.symbol, before.market);
+      }
       return loadAssets().then(function () {
-        if (wasSelected) {
-          if (state.selectedId !== null) storageSet(SELECTED_KEY, String(state.selectedId));
-          return loadDetail();
-        }
+        if (reopen) return reopen;
+        if (wasSelected && survives) { renderChartHeader(findAsset(id)); return null; }
+        if (wasSelected) { persistSelection(); return loadDetail(); }
         return null;
       }).then(loadTabData);
     }).catch(function (err) {
-      if (button) button.disabled = false;
+      if (button && !keepView) button.disabled = false;
       report(err);
+    }).then(function () {
+      if (button && keepView) button.disabled = false;
     });
+  }
+
+  function toggleWatch() {
+    var a = findAsset(state.selectedId), btn = $("watch-toggle");
+    if (!a || btn.disabled) return;
+    if (a.watch !== false) { removeAsset(a.id, btn, true); return; }
+    btn.disabled = true;
+    showAddError("");
+    api("/api/assets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol: a.symbol, market: a.market }),
+    }).catch(function (err) {
+      if (err instanceof ApiError && err.status === 409) return null;  // já estava: só recarrega
+      throw err;
+    }).then(function (created) {
+      return loadAssets().then(function () {
+        if (created && created.id !== a.id && state.selectedId === a.id && watchAsset(created.id)) selectAsset(created.id);
+        else persistSelection();
+        return loadTabData();
+      });
+    }).catch(function (err) {
+      if (err instanceof ApiError && err.status > 0) {
+        showNetError(err, "Não foi possível adicionar " + a.symbol + " à watchlist: " + err.message);
+      } else report(err);
+    }).then(function () {
+      btn.disabled = false;
+      renderChartHeader(findAsset(state.selectedId));
+    });
+  }
+
+  // ------------------------------------------------------ busca no catálogo
+  var search = { token: 0, timer: 0, items: [], active: -1, open: false };
+  var SEARCH_DEBOUNCE_MS = 200;
+
+  function closeSearch() {
+    search.open = false;
+    search.active = -1;
+    $("search-results").hidden = true;
+    var input = $("add-symbol");
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+  }
+
+  // Cancela busca pendente e respostas em trânsito (ex.: ao enviar o formulário).
+  function cancelSearch() {
+    window.clearTimeout(search.timer);
+    search.token++;
+    search.items = [];
+    closeSearch();
+  }
+
+  function setSearchActive(index) {
+    var nodes = $("search-results").querySelectorAll(".search-item");
+    search.active = index;
+    nodes.forEach(function (node, i) { node.setAttribute("aria-selected", String(i === index)); });
+    var input = $("add-symbol");
+    if (index >= 0 && nodes[index]) {
+      input.setAttribute("aria-activedescendant", nodes[index].id);
+      if (nodes[index].scrollIntoView) nodes[index].scrollIntoView({ block: "nearest" });
+    } else {
+      input.removeAttribute("aria-activedescendant");
+    }
+  }
+
+  function renderSearch(query) {
+    var root = $("search-results");
+    clear(root);
+    search.items.forEach(function (r, i) {
+      var li = el("li", "search-item");
+      li.id = "search-opt-" + i;
+      li.setAttribute("role", "option");
+      li.setAttribute("aria-selected", "false");
+      li.dataset.symbol = r.symbol;
+      li.dataset.market = r.market;
+      li.appendChild(el("span", "search-sym", r.symbol));
+      var kind = el("span", "search-kind");
+      kind.appendChild(el("span", "tag", marketLabel(r.market)));
+      if (r.kind) kind.appendChild(document.createTextNode(r.kind));
+      li.appendChild(kind);
+      li.appendChild(el("span", "search-name", r.name || ""));
+      var indices = (Array.isArray(r.indices) ? r.indices : []).map(function (c) { return INDEX_LABEL[c] || c; });
+      li.appendChild(el("span", "search-idx", indices.join(" · ")));
+      li.title = "Abrir " + r.symbol + " no gráfico (sem adicionar à watchlist)";
+      root.appendChild(li);
+    });
+    if (!search.items.length) {
+      root.appendChild(el("li", "search-empty",
+        "Nada no catálogo para “" + query + "”. Para tentar o símbolo direto na fonte, escolha o mercado e use Adicionar."));
+    }
+    root.hidden = false;
+    search.open = true;
+    search.active = -1;
+    var input = $("add-symbol");
+    input.setAttribute("aria-expanded", "true");
+    input.removeAttribute("aria-activedescendant");
+  }
+
+  function runSearch() {
+    var query = $("add-symbol").value.trim();
+    var token = ++search.token;
+    if (!query) { search.items = []; closeSearch(); return; }
+    api("/api/search?q=" + encodeURIComponent(query)).then(function (list) {
+      if (token !== search.token) return;
+      search.items = (Array.isArray(list) ? list : []).filter(function (r) {
+        return r && typeof r.symbol === "string" && typeof r.market === "string";
+      });
+      if (document.activeElement === $("add-symbol")) renderSearch(query);
+    }, function () {
+      if (token === search.token) { search.items = []; closeSearch(); }  // busca é acessória: falha fica calada
+    });
+  }
+
+  function chooseSearch(index) {
+    var item = search.items[index];
+    if (!item) return;
+    $("add-symbol").value = "";
+    cancelSearch();
+    setTab("chart");
+    openAsset(item.symbol, item.market);
+  }
+
+  function searchKeydown(event) {
+    var count = search.items.length;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (!count) return;
+      event.preventDefault();
+      if (!search.open) { renderSearch($("add-symbol").value.trim()); }
+      var step = event.key === "ArrowDown" ? 1 : -1;
+      var next = search.active < 0 ? (step > 0 ? 0 : count - 1) : (search.active + step + count) % count;
+      setSearchActive(next);
+    } else if (event.key === "Enter") {
+      // Com um resultado destacado, Enter abre o ativo; sem destaque, o formulário
+      // segue o caminho de sempre (adicionar o que foi digitado à watchlist).
+      if (search.open && search.active >= 0) { event.preventDefault(); chooseSearch(search.active); }
+    } else if (event.key === "Escape") {
+      if (search.open) { event.preventDefault(); closeSearch(); }
+    }
   }
 
   // ------------------------------------------------------------------ tema
@@ -1322,20 +2153,46 @@
     });
 
     $("add-form").addEventListener("submit", addAsset);
-    $("add-symbol").addEventListener("input", function () { showAddError(""); });
+    var searchInput = $("add-symbol"), searchList = $("search-results");
+    searchInput.addEventListener("input", function () {
+      showAddError("");
+      window.clearTimeout(search.timer);
+      search.timer = window.setTimeout(runSearch, SEARCH_DEBOUNCE_MS);
+    });
+    searchInput.addEventListener("keydown", searchKeydown);
+    searchInput.addEventListener("focus", function () {
+      if (search.items.length && searchInput.value.trim()) renderSearch(searchInput.value.trim());
+    });
+    searchInput.addEventListener("blur", function () { window.setTimeout(closeSearch, 120); });
+    // mousedown não tira o foco do campo; a escolha acontece no click.
+    searchList.addEventListener("mousedown", function (event) { event.preventDefault(); });
+    searchList.addEventListener("click", function (event) {
+      var item = event.target instanceof Element ? event.target.closest(".search-item") : null;
+      if (!item) return;
+      chooseSearch(Array.prototype.indexOf.call(searchList.querySelectorAll(".search-item"), item));
+    });
+
+    $("watch-toggle").addEventListener("click", toggleWatch);
+    $("rec-tab-position").addEventListener("click", function () { setRecTab("position"); });
+    $("rec-tab-swing").addEventListener("click", function () { setRecTab("swing"); });
+    $("swing-setups").addEventListener("click", function (event) {
+      var block = event.target instanceof Element ? event.target.closest(".swing-setup") : null;
+      if (block && block.dataset.setup) pickSetup(block.dataset.setup);
+    });
+    document.addEventListener("visibilitychange", catchUpIntraday);
 
     var rankingTable = $("ranking-table");
     rankingTable.tHead.addEventListener("click", function (event) {
       var btn = event.target instanceof Element ? event.target.closest("[data-sort]") : null;
       if (!btn) return;
-      var key = btn.dataset.sort;
-      if (state.ranking.sortKey === key) {
-        state.ranking.sortDir = state.ranking.sortDir === "asc" ? "desc" : "asc";
+      var key = btn.dataset.sort, sc = state.screener;
+      if (sc.sort === key) {
+        sc.order = sc.order === "asc" ? "desc" : "asc";
       } else {
-        state.ranking.sortKey = key;
-        state.ranking.sortDir = TEXT_SORT[key] ? "asc" : "desc";
+        sc.sort = key;
+        sc.order = key === "symbol" ? "asc" : "desc";
       }
-      renderRanking();
+      screenerFilterChanged();
     });
     var openRow = function (event) {
       var row = event.target instanceof Element ? event.target.closest("tr[data-asset-id]") : null;
@@ -1343,12 +2200,23 @@
       if (event.type === "keydown" && event.key !== "Enter") return;
       var id = Number(row.dataset.assetId);
       setTab("chart");
-      if (findAsset(id)) selectAsset(id);
-      else loadAssets().then(function () { selectAsset(id); }).catch(report);
+      // Da watchlist: seleção direta. Papel de índice fora dela: abre sob demanda.
+      if (watchAsset(id)) selectAsset(id);
+      else openAsset(row.dataset.symbol, row.dataset.market);
     };
     rankingTable.tBodies[0].addEventListener("click", openRow);
     rankingTable.tBodies[0].addEventListener("keydown", openRow);
-    $("ranking-market").addEventListener("change", loadRanking);
+    $("screener-scope").addEventListener("change", screenerScopeChanged);
+    ["ranking-market", "screener-verdict", "screener-evidence", "screener-setup"].forEach(function (id) {
+      $(id).addEventListener("change", screenerFilterChanged);
+    });
+    $("screener-prev").addEventListener("click", function () {
+      if (state.screener.page > 1) { state.screener.page--; loadScreener(); }
+    });
+    $("screener-next").addEventListener("click", function () {
+      state.screener.page++;
+      loadScreener();
+    });
 
     $("portfolio-method").addEventListener("change", loadPortfolio);
     $("portfolio-market").addEventListener("change", loadPortfolio);
@@ -1369,7 +2237,13 @@
     try { chartsReady = createCharts(); } catch (e) { if (window.console) console.error(e); }
     applyOverlays();
     if (!chartsReady) setOverlay("A biblioteca de gráficos não carregou. Recarregue a página.");
+    setRecTab(state.recTab);
+    // Ativo aberto fora da watchlist na visita anterior: reabre sob demanda. Marcar
+    // "opening" antes da primeira carga impede a seleção padrão de piscar na tela.
+    var saved = readOpened();
+    if (saved) state.opening = saved;
     reloadAll();
+    if (saved) openAsset(saved.symbol, saved.market, true);
     window.setInterval(autoRefresh, 60000);
   }
 
