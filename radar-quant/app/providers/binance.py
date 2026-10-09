@@ -28,11 +28,17 @@ class BinanceProvider:
                 start = page[-1][0] + DAY_MS
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         candles = []
-        for r in rows:
-            day = datetime.fromtimestamp(r[0] / 1000, timezone.utc).strftime("%Y-%m-%d")
-            if day == today:  # candle do dia corrente ainda está em formação
-                continue
-            candles.append(Candle(day, float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5])))
+        try:
+            for r in rows:
+                day = datetime.fromtimestamp(r[0] / 1000, timezone.utc).strftime("%Y-%m-%d")
+                if day == today:  # candle do dia corrente ainda está em formação
+                    continue
+                o, h, l, c, v = (float(x) for x in r[1:6])
+                if min(o, h, l, c) <= 0:
+                    continue
+                candles.append(Candle(day, o, h, l, c, v))
+        except (ValueError, TypeError, IndexError, KeyError, AttributeError, OverflowError, OSError) as e:
+            raise ProviderError(f"Binance: formato inesperado: {e!r}") from e
         if not candles:
             raise ProviderError(f"Binance: sem candles para {symbol}")
         return candles

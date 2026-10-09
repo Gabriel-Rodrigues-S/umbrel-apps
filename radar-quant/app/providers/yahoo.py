@@ -32,29 +32,33 @@ class YahooProvider:
         if not isinstance(chart, dict):
             raise ProviderError(f"Yahoo: resposta inválida (HTTP {resp.status_code})")
         err = chart.get("error")
-        if err and err.get("code") == "Not Found":
+        if isinstance(err, dict) and err.get("code") == "Not Found":
             raise UnknownSymbol(symbol)
-        if resp.status_code != 200 or err or not chart.get("result"):
+        result = chart.get("result")
+        if resp.status_code != 200 or err or not isinstance(result, list) or not result \
+                or not isinstance(result[0], dict):
             raise ProviderError(f"Yahoo: erro (HTTP {resp.status_code}) {err or ''}".strip())
-        return self._parse(chart["result"][0], symbol)
+        return self._parse(result[0], symbol)
 
     @staticmethod
     def _parse(result: dict, symbol: str) -> list[Candle]:
+        by_date: dict[str, Candle] = {}  # datas duplicadas: fica a última
         try:
             offset = timedelta(seconds=result["meta"].get("gmtoffset") or 0)
             q = result["indicators"]["quote"][0]
             adj = result["indicators"]["adjclose"][0]["adjclose"]
             stamps = result["timestamp"]
-            rows = zip(stamps, q["open"], q["high"], q["low"], q["close"], adj, q["volume"])
-        except (KeyError, IndexError, TypeError) as e:
+            cols = (stamps, q["open"], q["high"], q["low"], q["close"], adj, q["volume"])
+            if len({len(c) for c in cols}) != 1:
+                raise ProviderError("Yahoo: séries com tamanhos diferentes")
+            for ts, o, h, l, c, a, v in zip(*cols):
+                if None in (o, h, l, c, a) or min(o, h, l, c, a) <= 0:
+                    continue
+                day = (datetime.fromtimestamp(ts, timezone.utc) + offset).strftime("%Y-%m-%d")
+                f = a / c
+                by_date[day] = Candle(day, o * f, h * f, l * f, a, v or 0)
+        except (ValueError, TypeError, IndexError, KeyError, AttributeError, OverflowError, OSError) as e:
             raise ProviderError(f"Yahoo: formato inesperado: {e!r}") from e
-        by_date: dict[str, Candle] = {}  # datas duplicadas: fica a última
-        for ts, o, h, l, c, a, v in rows:
-            if None in (o, h, l, c, a) or not c:
-                continue
-            day = (datetime.fromtimestamp(ts, timezone.utc) + offset).strftime("%Y-%m-%d")
-            f = a / c
-            by_date[day] = Candle(day, o * f, h * f, l * f, a, v or 0)
         if not by_date:
             raise ProviderError(f"Yahoo: sem candles válidos para {symbol}")
         return sorted(by_date.values(), key=lambda x: x.date)
