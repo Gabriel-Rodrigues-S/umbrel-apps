@@ -1,11 +1,15 @@
 """Notícias por ativo: Google Notícias (RSS) e busca do Yahoo, saneadas, sem duplicatas, com cache no SQLite.
 
 O conteúdo vem de terceiros: só URLs http(s), textos limitados, XML com DTD/entidades rejeitado."""
+import asyncio
 import html
+import json
 import re
+import unicodedata
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -30,16 +34,23 @@ class NewsError(Exception):
 def _clean(value, limit: int) -> str:
     if not isinstance(value, str):
         return ""
-    return re.sub(r"\s+", " ", html.unescape(value)).strip()[:limit]
+    text = re.sub(r"\s+", " ", html.unescape(value))
+    # tira controle (Cc) e formatação/direção como U+202E (Cf)
+    text = "".join(c for c in text if unicodedata.category(c) not in ("Cc", "Cf"))
+    return text.strip()[:limit]
 
 
 def _url(value) -> str | None:
     if not isinstance(value, str):
         return None
     value = value.strip()
-    if len(value) > MAX_URL or not re.match(r"https?://", value, re.IGNORECASE):
+    if len(value) > MAX_URL or any(c.isspace() or unicodedata.category(c) == "Cc" for c in value):
         return None
-    return value
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return None
+    return value if parts.scheme.lower() in ("http", "https") and parts.netloc else None
 
 
 def _item(title, url, source, published_at) -> dict | None:
@@ -50,14 +61,19 @@ def _item(title, url, source, published_at) -> dict | None:
             "published_at": published_at}
 
 
-def _rss_date(text: str | None) -> str | None:
-    try:
-        dt = parsedate_to_datetime(text)
-    except (TypeError, ValueError, IndexError):
-        return None
+def _iso(dt: datetime) -> str | None:
+    """ISO UTC; datas mais de 1 dia no futuro (feed hostil ou relógio errado) viram None."""
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat()
+    dt = dt.astimezone(timezone.utc)
+    return None if dt > datetime.now(timezone.utc) + timedelta(days=1) else dt.isoformat()
+
+
+def _rss_date(text: str | None) -> str | None:
+    try:
+        return _iso(parsedate_to_datetime(text))
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
 
 
 def parse_google_rss(text: str) -> list[dict]:
@@ -93,7 +109,7 @@ def parse_yahoo(payload: dict) -> list[dict]:
             continue
         published = None
         try:
-            published = datetime.fromtimestamp(e["providerPublishTime"], timezone.utc).isoformat()
+            published = _iso(datetime.fromtimestamp(e["providerPublishTime"], timezone.utc))
         except (KeyError, TypeError, ValueError, OverflowError, OSError):
             pass
         it = _item(e.get("title"), e.get("link"), e.get("publisher"), published)
@@ -105,7 +121,7 @@ def parse_yahoo(payload: dict) -> list[dict]:
 def merge(items: list[dict]) -> list[dict]:
     seen, unique = set(), []
     for it in items:
-        key = re.sub(r"\W+", " ", it["title"].lower()).strip()
+        key = re.sub(r"\W+", " ", it["title"].lower()).strip() or it["title"].lower()
         if key not in seen:
             seen.add(key)
             unique.append(it)
@@ -118,13 +134,24 @@ def synthetic_news(symbol: str) -> list[dict]:
              "source": "Exemplo", "published_at": f"2024-01-0{n}T12:00:00+00:00"} for n in (1, 2, 3)]
 
 
-async def _get(client: httpx.AsyncClient, url: str, params: dict) -> httpx.Response:
-    resp = await client.get(url, params=params)
-    if resp.status_code != 200:
-        raise NewsError(f"HTTP {resp.status_code}")
-    if len(resp.content) > MAX_BODY:
-        raise NewsError("resposta grande demais")
-    return resp
+async def _get(client: httpx.AsyncClient, url: str, params: dict) -> bytes:
+    """Lê o corpo em blocos e aborta ao passar de MAX_BODY bytes."""
+    async with client.stream("GET", url, params=params) as resp:
+        if resp.status_code != 200:
+            raise NewsError(f"HTTP {resp.status_code}")
+        body = b""
+        async for chunk in resp.aiter_bytes():
+            body += chunk
+            if len(body) > MAX_BODY:
+                raise NewsError("resposta grande demais")
+    return body
+
+
+def _parse_yahoo_body(body: bytes) -> list[dict]:
+    try:
+        return parse_yahoo(json.loads(body))
+    except (ValueError, RecursionError) as e:
+        raise NewsError(f"JSON inválido: {e!r}") from e
 
 
 async def fetch_news(symbol: str, market: str, name: str | None,
@@ -134,21 +161,19 @@ async def fetch_news(symbol: str, market: str, name: str | None,
     else:
         query = (name or symbol) if market == "CRYPTO" else symbol
         google = {"q": query, "hl": "pt-BR", "gl": "BR", "ceid": "BR:pt-419"}
-    jobs = [(GOOGLE_URL, google, lambda r: parse_google_rss(r.text))]
+    jobs = [(GOOGLE_URL, google, lambda b: parse_google_rss(b.decode("utf-8", errors="replace")))]
     if market == "US":
-        yahoo = {"q": symbol, "newsCount": 10, "quotesCount": 0}
-        jobs.append((YAHOO_URL, yahoo, lambda r: parse_yahoo(r.json())))
-    items, ok = [], False
+        jobs.append((YAHOO_URL, {"q": symbol, "newsCount": 10, "quotesCount": 0}, _parse_yahoo_body))
+
+    async def one(client, url, params, parse):
+        return parse(await _get(client, url, params))
+
     async with httpx.AsyncClient(transport=transport, timeout=15, headers=HEADERS) as client:
-        for url, params, parse in jobs:
-            try:
-                items += parse(await _get(client, url, params))
-                ok = True
-            except (httpx.HTTPError, NewsError, ValueError):
-                continue  # uma fonte fora do ar não impede a outra
-    if not ok:
+        results = await asyncio.gather(*(one(client, *j) for j in jobs), return_exceptions=True)
+    good = [r for r in results if isinstance(r, list)]  # uma fonte fora do ar não impede a outra
+    if not good:
         raise NewsError("todas as fontes de notícias falharam")
-    return merge(items)
+    return merge([i for r in good for i in r])
 
 
 def _fresh(fetched_at: str | None) -> bool:
@@ -169,7 +194,9 @@ async def get_news(conn, asset: dict, settings, transport: httpx.AsyncBaseTransp
         else:
             entry = db.catalog_entry(conn, asset["symbol"], asset["market"])
             items = await fetch_news(asset["symbol"], asset["market"], (entry or {}).get("name"), transport)
-    except NewsError:
+    except Exception:  # nenhuma falha de rede/parse chega ao chamador
+        return {"items": cached, "fetched_at": fetched_at, "stale": True}
+    if not items and cached:  # busca "ok" porém vazia não apaga cache bom
         return {"items": cached, "fetched_at": fetched_at, "stale": True}
     db.replace_news(conn, asset["id"], items)
     cached, fetched_at = db.load_news(conn, asset["id"])
