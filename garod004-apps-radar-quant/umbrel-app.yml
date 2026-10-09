@@ -1,18 +1,21 @@
 manifestVersion: 1
 id: garod004-apps-radar-quant
 name: Radar Quant
-tagline: Gráficos e recomendações estatísticas para ações e cripto
+tagline: Busca em todo o mercado, screener, curto prazo e notícias com evidência estatística
 icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-radar-quant/icon.svg
 category: finance
-version: '1.0.0'
+version: '1.1.0'
 port: 8430
 description: >-
-  Radar estatístico de mercados: acompanhe ações da B3 e dos EUA e criptomoedas em
-  gráficos interativos, com um score por ativo calculado a partir de indicadores
-  estatísticos e acompanhado da evidência que o sustenta. Inclui ranking dos ativos
-  monitorados e sugestão de carteira. Os dados vêm de fontes públicas e as
-  análises são apenas informativas: o Radar Quant não é recomendação profissional de
-  investimento, e as decisões são sempre de responsabilidade de quem investe.
+  Radar estatístico de mercados: pesquise qualquer papel da B3 e dos EUA e as
+  principais criptomoedas, veja gráficos interativos em doze intervalos (de 1
+  minuto a 1 ano), notícias por ativo e um score calculado a partir de indicadores
+  estatísticos, sempre acompanhado da evidência que o sustenta. Inclui screener
+  pré-analisado dos índices (IBrA, Ibovespa, S&P 500 e Nasdaq-100), setups de
+  curto prazo (swing), ranking dos ativos monitorados e sugestão de carteira. Os
+  dados vêm de fontes públicas e as análises são apenas informativas: o Radar
+  Quant não é recomendação profissional de investimento, e as decisões são sempre
+  de responsabilidade de quem investe.
 developer: garod004
 website: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
 dependencies: []
@@ -26,8 +29,13 @@ path: ''
 defaultUsername: ''
 defaultPassword: ''
 releaseNotes: >-
-  Primeira versão. Gráficos de ações e cripto, score estatístico com evidência,
-  ranking de ativos e sugestão de carteira. Não é recomendação profissional
-  de investimento.
+  1.1.0: busca em todo o catálogo da B3 e dos EUA e abertura de qualquer ativo
+  sob demanda, screener pré-analisado dos índices, setups de curto prazo com
+  evidência, notícias por ativo e doze intervalos de gráfico (com intraday).
+  Os dados da versão 1.0.0 são preservados. Não é recomendação profissional de
+  investimento.
+
+  1.0.0: primeira versão. Gráficos de ações e cripto, score estatístico com
+  evidência, ranking de ativos e sugestão de carteira.
 submitter: garod004
 submission: https://github.com/Gabriel-Rodrigues-S/umbrel-apps

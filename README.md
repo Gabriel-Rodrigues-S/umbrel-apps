@@ -51,8 +51,11 @@ Agregador de notícias e cotações do mercado financeiro, atualizado em segundo
 ### 📊 Radar Quant
 Radar estatístico de ações e cripto, com gráficos e recomendações baseadas em evidência.
 
-- Gráficos interativos de ações (B3 e EUA) e criptomoedas
+- Busca em todo o catálogo da B3 e dos EUA (e cripto): qualquer papel pode ser aberto sob demanda e adicionado à watchlist
+- Gráficos interativos em doze intervalos (1m a 1A, com intraday sob demanda; cotação de ações pode vir com atraso)
 - Score por ativo calculado a partir de indicadores estatísticos, sempre acompanhado da evidência que o sustenta
+- Setups de curto prazo (swing) e notícias por ativo
+- Screener pré-analisado dos índices IBrA, Ibovespa, S&P 500 e Nasdaq-100, com filtros e resumo do índice
 - Ranking dos ativos monitorados e sugestão de carteira
 - Análises apenas informativas: não é recomendação profissional de investimento
 

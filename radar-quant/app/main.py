@@ -2,25 +2,29 @@
 import asyncio
 import logging
 import os
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException, Path as PathParam, Request, Response
+from fastapi import FastAPI, HTTPException, Path as PathParam, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import analysis, db, service
-from app.config import MARKETS, get_settings, normalize_symbol
-from app.providers.base import UnknownSymbol
+from app import analysis, catalog, db, news, screener, service, universe
+from app.config import INDICES, INTERVALS, INTRADAY, MARKETS, get_settings, normalize_symbol
+from app.providers.base import ProviderError, UnknownSymbol
 from app.stats.portfolio import PortfolioError
 
 log = logging.getLogger("radar")
 STATIC = Path(__file__).parent / "static"
 RETRY_SECONDS = 600  # nova tentativa quando algum ativo ficou com erro
 MAX_SHORT_RETRIES = 3  # esperas curtas seguidas; depois volta ao intervalo normal
+UNIVERSE_CHECK_SECONDS = 600  # de quanto em quanto tempo o laço do universo olha se há passada devida
 AssetId = Annotated[int, PathParam(ge=1, le=2**63 - 1)]  # faixa do INTEGER do SQLite
+Interval = Literal[INTERVALS]  # os doze intervalos do gráfico
+Short = Annotated[str, Query(max_length=32)]  # filtros de texto do screener
 
 
 class NewAsset(BaseModel):
@@ -28,11 +32,34 @@ class NewAsset(BaseModel):
     market: str
 
 
+def store_rows(conn, assets: list[dict]) -> None:
+    """Grava a linha do screener de cada ativo; um ativo ruim não impede os demais."""
+    for a in assets:
+        try:
+            screener.store_row(conn, a)
+        except Exception:
+            log.exception("falha ao gravar a linha do screener de %s", a["symbol"])
+
+
 async def refresh_everything(app: FastAPI) -> None:
     """Refresh geral; nunca roda dois ao mesmo tempo."""
     async with app.state.refresh_lock:
         await service.refresh_all(app.state.conn, app.state.settings)
         analysis.invalidate()
+        await asyncio.to_thread(store_rows, app.state.conn, db.list_assets(app.state.conn))
+
+
+async def refresh_catalog_safely(app: FastAPI) -> None:
+    """Atualiza o catálogo se estiver velho; erros são só registrados."""
+    try:
+        if catalog.catalog_is_stale(app.state.conn):
+            result = await catalog.refresh_catalog(app.state.conn, app.state.settings)
+            if result["errors"]:
+                log.warning("catálogo atualizado com falhas: %s", result["errors"])
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("falha ao atualizar o catálogo")
 
 
 async def refresh_safely(app: FastAPI) -> None:
@@ -63,9 +90,26 @@ async def loop_refresh(app: FastAPI) -> None:
     short_retries = 0
     while True:
         await refresh_safely(app)
+        await refresh_catalog_safely(app)
         has_errors = any(a["last_error"] for a in db.list_assets(app.state.conn))
         seconds, short_retries = next_sleep(has_errors, short_retries, app.state.settings.refresh_hours)
         await asyncio.sleep(seconds)
+
+
+async def loop_universe(app: FastAPI) -> None:
+    """Passada diária pelos papéis dos índices; nunca derruba o app nem gira em falso."""
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            if universe.universe_due(app.state.conn, now):
+                async with app.state.universe_lock:
+                    await universe.refresh_universe(app.state.conn, app.state.settings)
+                    await universe.purge_async(app.state.conn, now)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("falha na passada do universo")
+        await asyncio.sleep(UNIVERSE_CHECK_SECONDS)
 
 
 @asynccontextmanager
@@ -74,10 +118,15 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.conn = db.connect(settings.data_dir / "radar.db")
     app.state.refresh_lock = asyncio.Lock()
+    app.state.universe_lock = asyncio.Lock()
     app.state.tasks = set()
     service.seed_watchlist(app.state.conn)
+    if settings.provider == "synthetic" and db.catalog_count(app.state.conn) == 0:
+        await catalog.refresh_catalog(app.state.conn, settings)  # testes e E2E; no modo live o laço busca
     if os.environ.get("RADAR_SKIP_BACKGROUND") != "1":
         app.state.tasks.add(asyncio.create_task(loop_refresh(app)))
+        if settings.universe:
+            app.state.tasks.add(asyncio.create_task(loop_universe(app)))
     try:
         yield
     finally:
@@ -115,52 +164,111 @@ def create_app() -> FastAPI:
 
     @app.get("/api/health")
     def health(request: Request):
-        assets = db.list_assets(conn(request))
+        c = conn(request)
+        assets = db.list_assets(c)
         refreshed = [a["last_refresh"] for a in assets if a["last_refresh"]]
-        return {"status": "ok", "assets": len(assets), "last_refresh": max(refreshed, default=None)}
+        progress = [screener.progress(c, i) for i in INDICES]
+        return {"status": "ok", "assets": len(assets), "last_refresh": max(refreshed, default=None),
+                "catalog": db.catalog_count(c),
+                "universe": {"total": sum(p["total"] for p in progress), "ready": sum(p["ready"] for p in progress)}}
+
+    @app.get("/api/search")
+    def search(request: Request, q: Annotated[str, Query(max_length=64)] = "",
+               limit: Annotated[int, Query(ge=1, le=25)] = 12):
+        return db.search_catalog(conn(request), q, limit)
 
     @app.get("/api/assets")
     def list_assets(request: Request):
         return [analysis.asset_summary(conn(request), a) for a in db.list_assets(conn(request))]
 
+    async def open_or_fail(request: Request, body: NewAsset) -> dict:
+        """Abre o ativo (criando-o se preciso); erros da fonte viram 422/502 sem deixar nada gravado."""
+        _check_market(body.market)
+        try:
+            return await service.open_asset(conn(request), body.symbol, body.market, request.app.state.settings)
+        except UnknownSymbol:
+            raise HTTPException(422, f"símbolo não encontrado em {body.market}")
+        except ProviderError:
+            raise HTTPException(502, "fonte de dados indisponível agora")
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+
+    async def summary_after_refresh(request: Request, asset_id: int) -> dict:
+        """Invalida a análise, regrava a linha do screener e devolve o resumo do ativo."""
+        c = conn(request)
+        analysis.invalidate(asset_id)
+        asset = db.get_asset(c, asset_id)
+        await run_in_threadpool(store_rows, c, [asset])
+        return await run_in_threadpool(analysis.asset_summary, c, asset)
+
+    @app.post("/api/assets/open")
+    async def open_asset(request: Request, body: NewAsset):
+        asset = await open_or_fail(request, body)
+        return await summary_after_refresh(request, asset["id"])
+
     @app.post("/api/assets", status_code=201)
     async def add_asset(request: Request, body: NewAsset):
         _check_market(body.market)
         try:
-            symbol = normalize_symbol(body.symbol, body.market)
+            existing = db.find_asset(conn(request), normalize_symbol(body.symbol, body.market), body.market)
         except ValueError as e:
             raise HTTPException(422, str(e))
-        c = conn(request)
-        try:
-            asset_id = db.add_asset(c, symbol, body.market)
-        except db.DuplicateAsset:
+        if existing and existing["watch"]:
             raise HTTPException(409, "ativo já está na watchlist")
-        try:
-            await service.refresh_asset(c, db.get_asset(c, asset_id), request.app.state.settings)
-        except Exception as e:  # sem refresh bem-sucedido o ativo recém-criado não fica gravado
-            db.delete_asset(c, asset_id)
-            analysis.invalidate(asset_id)
-            if isinstance(e, UnknownSymbol):
-                raise HTTPException(422, f"símbolo não encontrado em {body.market}")
-            raise
-        analysis.invalidate(asset_id)
-        return await run_in_threadpool(analysis.asset_summary, c, db.get_asset(c, asset_id))
+        asset = await open_or_fail(request, body)
+        db.set_watch(conn(request), asset["id"], True)
+        return await summary_after_refresh(request, asset["id"])
 
     @app.delete("/api/assets/{asset_id}", status_code=204)
     def delete_asset(request: Request, asset_id: AssetId):
-        if not db.delete_asset(conn(request), asset_id):
-            raise HTTPException(404, "ativo não encontrado")
-        analysis.invalidate(asset_id)
+        asset = asset_or_404(request, asset_id)
+        entry = db.catalog_entry(conn(request), asset["symbol"], asset["market"])
+        if entry and entry["indices"]:  # membro de índice: sai da watchlist mas continua no screener
+            db.set_watch(conn(request), asset_id, False)
+        else:
+            db.delete_asset(conn(request), asset_id)
+            analysis.invalidate(asset_id)
         return Response(status_code=204)
 
     @app.get("/api/assets/{asset_id}/candles")
-    def candles(request: Request, asset_id: AssetId, interval: Literal["1d", "1wk", "1mo"] = "1d"):
-        asset_or_404(request, asset_id)
-        return analysis.candles_payload(conn(request), asset_id, interval)
+    async def candles(request: Request, asset_id: AssetId, interval: Interval = "1d"):
+        asset = asset_or_404(request, asset_id)
+        if interval not in INTRADAY:
+            return await run_in_threadpool(analysis.candles_payload, conn(request), asset_id, interval)
+        try:
+            data = await service.load_intraday(asset, interval, request.app.state.settings)
+        except ProviderError:  # inclui UnknownSymbol
+            raise HTTPException(422, "intraday indisponível para este ativo agora")
+        return await run_in_threadpool(analysis.intraday_payload, data["bars"], interval, data["delay_minutes"])
+
+    @app.get("/api/assets/{asset_id}/news")
+    async def asset_news(request: Request, asset_id: AssetId):
+        return await news.get_news(conn(request), asset_or_404(request, asset_id), request.app.state.settings)
 
     @app.get("/api/assets/{asset_id}/analysis")
     def asset_analysis(request: Request, asset_id: AssetId):
         return analysis.analyze_asset(conn(request), asset_or_404(request, asset_id))
+
+    def screener_call(fn, *args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except screener.ScreenerError as e:
+            raise HTTPException(422, str(e))
+
+    @app.get("/api/screener")
+    def screener_query(request: Request, scope: Short = "watchlist", market: Short | None = None,
+                       verdict: Short | None = None, evidence: Short | None = None, setup: Short | None = None,
+                       sort: Short = "score", order: Short = "desc", page: int = 1, page_size: int = 50):
+        return screener_call(screener.query, conn(request), scope, market, verdict, evidence, setup,
+                             sort, order, page, page_size)
+
+    @app.get("/api/screener/summary")
+    def screener_summary(request: Request, scope: Short = "watchlist"):
+        return screener_call(screener.summary, conn(request), scope)
+
+    @app.get("/api/screener/progress")
+    def screener_progress(request: Request, scope: Short = "watchlist"):
+        return screener_call(screener.progress, conn(request), scope)
 
     @app.get("/api/ranking")
     def ranking(request: Request, market: str | None = None):
