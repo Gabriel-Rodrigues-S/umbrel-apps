@@ -1,4 +1,5 @@
 """Provedor Binance (cripto, pares USDT)."""
+import math
 import time
 from datetime import datetime, timezone
 
@@ -25,7 +26,10 @@ class BinanceProvider:
                 rows += page
                 if len(page) < 1000:
                     break
-                start = page[-1][0] + DAY_MS
+                try:
+                    start = int(page[-1][0]) + DAY_MS
+                except (ValueError, TypeError, IndexError, KeyError, OverflowError) as e:
+                    raise ProviderError(f"Binance: página malformada: {e!r}") from e
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         candles = []
         try:
@@ -34,7 +38,7 @@ class BinanceProvider:
                 if day == today:  # candle do dia corrente ainda está em formação
                     continue
                 o, h, l, c, v = (float(x) for x in r[1:6])
-                if min(o, h, l, c) <= 0:
+                if not all(math.isfinite(x) for x in (o, h, l, c, v)) or min(o, h, l, c) <= 0:
                     continue
                 candles.append(Candle(day, o, h, l, c, v))
         except (ValueError, TypeError, IndexError, KeyError, AttributeError, OverflowError, OSError) as e:

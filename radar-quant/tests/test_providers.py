@@ -123,6 +123,17 @@ def test_yahoo_descarta_valores_nao_positivos():
     assert len(run(yahoo(lambda r: httpx.Response(200, json=d)).fetch_daily("X", "US"))) == 2
 
 
+def test_yahoo_descarta_nan_e_normaliza_volume():
+    text = (FIX / "yahoo_petr4.json").read_text().replace('"open": [36.0,', '"open": [NaN,')
+    text = text.replace("[1000000, 1200000, null,", '[1000000, "abc", null,')
+    candles = run(yahoo(lambda r: httpx.Response(200, content=text,
+                                                 headers={"content-type": "application/json"}))
+                  .fetch_daily("X", "US"))
+    assert len(candles) == 3  # NaN descartado + linha com close nulo
+    assert candles[0].volume == 0.0 and isinstance(candles[0].volume, float)
+    assert all(isinstance(c.volume, float) for c in candles)
+
+
 # ---------- Binance ----------
 def binance(handler):
     return BinanceProvider(httpx.MockTransport(handler))
@@ -180,6 +191,21 @@ def test_binance_descarta_preco_nao_positivo():
     rows = load("binance_btc.json")
     rows[0][3] = "0"
     assert len(run(binance(lambda r: httpx.Response(200, json=rows)).fetch_daily("BTC", "CRYPTO"))) == 2
+
+
+@pytest.mark.parametrize("last", [[None, "1", "1", "1", "1", "1"], []])
+def test_binance_pagina_cheia_com_ultima_malformada(last):
+    base = 1_500_000_000_000
+    rows = [[base + i * 86_400_000, "1", "2", "1", "1.5", "10"] for i in range(999)] + [last]
+    with pytest.raises(ProviderError):
+        run(binance(lambda r: httpx.Response(200, json=rows)).fetch_daily("BTC", "CRYPTO"))
+
+
+def test_binance_descarta_nao_finito():
+    rows = load("binance_btc.json")
+    rows[0][4] = "nan"
+    rows[1][2] = "inf"
+    assert len(run(binance(lambda r: httpx.Response(200, json=rows)).fetch_daily("BTC", "CRYPTO"))) == 1
 
 
 # ---------- BCB ----------

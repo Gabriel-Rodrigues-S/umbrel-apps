@@ -1,4 +1,5 @@
 """Provedor Yahoo Finance (B3 e EUA)."""
+import math
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -8,6 +9,15 @@ from .base import Candle, ProviderError, UnknownSymbol
 URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
 HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
                          "Chrome/124.0 Safari/537.36"}
+
+
+def _volume(v) -> float:
+    """Volume como float; não numérico ou não finito vira 0.0."""
+    try:
+        x = float(v)
+    except (ValueError, TypeError):
+        return 0.0
+    return x if math.isfinite(x) else 0.0
 
 
 class YahooProvider:
@@ -52,11 +62,12 @@ class YahooProvider:
             if len({len(c) for c in cols}) != 1:
                 raise ProviderError("Yahoo: séries com tamanhos diferentes")
             for ts, o, h, l, c, a, v in zip(*cols):
-                if None in (o, h, l, c, a) or min(o, h, l, c, a) <= 0:
+                if None in (o, h, l, c, a) or not all(math.isfinite(x) for x in (o, h, l, c, a)) \
+                        or min(o, h, l, c, a) <= 0:
                     continue
                 day = (datetime.fromtimestamp(ts, timezone.utc) + offset).strftime("%Y-%m-%d")
                 f = a / c
-                by_date[day] = Candle(day, o * f, h * f, l * f, a, v or 0)
+                by_date[day] = Candle(day, o * f, h * f, l * f, a, _volume(v))
         except (ValueError, TypeError, IndexError, KeyError, AttributeError, OverflowError, OSError) as e:
             raise ProviderError(f"Yahoo: formato inesperado: {e!r}") from e
         if not by_date:
