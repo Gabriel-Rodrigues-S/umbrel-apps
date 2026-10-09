@@ -169,3 +169,44 @@ def test_purge(conn):
     assert universe.purge(conn, now) == 1
     left = {a["symbol"] for a in db.list_assets(conn, watch=None)}
     assert "VELHO1" not in left and {"RECENTE1", "WATCH1", "PETR4"} <= left
+
+
+def test_universe_due_espera_apos_aborto(conn, settings, monkeypatch):
+    monkeypatch.setattr(service, "get_provider", lambda market, s: Flaky(True))
+    out = run(universe.refresh_universe(conn, settings, sleep=Sleeps()))
+    assert out["aborted"]
+    assert db.get_meta(conn, "universe_attempt_at")
+    now = datetime.now(timezone.utc)
+    assert universe.universe_due(conn, now) is False
+    assert universe.universe_due(conn, now + timedelta(hours=1, minutes=59)) is False
+    assert universe.universe_due(conn, now + timedelta(hours=2, minutes=1)) is True  # nunca completou
+
+
+def test_universe_due_passada_completa_mantem_regra_de_20h(conn, settings):
+    run(universe.refresh_universe(conn, settings, sleep=Sleeps()))
+    now = datetime.now(timezone.utc)
+    assert universe.universe_due(conn, now + timedelta(hours=3)) is False
+    t = (now + timedelta(days=2)).replace(hour=6, minute=0)
+    assert universe.universe_due(conn, t) is True
+    assert universe.universe_due(conn, t.replace(hour=14)) is False
+
+
+def test_refresh_universe_falha_no_store_row_conta_falha_e_segue(conn, settings, monkeypatch):
+    real = screener.store_row
+
+    def boom(c, a):
+        if a["symbol"] == "PETR4":
+            raise RuntimeError("estourou")
+        return real(c, a)
+    monkeypatch.setattr(screener, "store_row", boom)
+    out = run(universe.refresh_universe(conn, settings, sleep=Sleeps()))
+    assert out == {"updated": 15, "skipped": 0, "failed": 1, "aborted": False}
+
+
+def test_purge_async(conn):
+    universe.ensure_assets(conn)
+    now = datetime(2026, 10, 9, tzinfo=timezone.utc)
+    aid = db.add_asset(conn, "VELHO1", "B3", watch=False)
+    conn.execute("UPDATE assets SET last_viewed = ? WHERE id = ?", ((now - timedelta(days=40)).isoformat(), aid))
+    conn.commit()
+    assert run(universe.purge_async(conn, now)) == 1

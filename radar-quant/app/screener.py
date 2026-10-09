@@ -1,4 +1,5 @@
 """Screener: uma linha por ativo (gravada em `screener`), consulta com filtros e resumo do índice."""
+import copy
 import threading
 
 from app import analysis, db, service
@@ -38,7 +39,7 @@ def build_row(conn, asset: dict) -> dict | None:
            "score": a["score"], "verdict": a["verdict"], "evidence": a["backtest"]["evidence"],
            **{k: factors[k]["normalized"] for k in F.WEIGHTS},
            "volatility": a["volatility"], "drawdown": a["drawdown"],
-           "above_sma200": (factors["dist_sma200"]["raw"] or 0) > 0,
+           "above_sma200": None if factors["dist_sma200"]["raw"] is None else factors["dist_sma200"]["raw"] > 0,
            "setups": {s["key"]: {"state": s["state"], "evidence": s["stats"]["evidence"]}
                       for s in a["swing"]["setups"]},
            "as_of": a["as_of"], "pool": analysis.swing_pool(conn, asset)}
@@ -89,6 +90,10 @@ def _scope_rows(conn, scope: str) -> list[dict]:
     return [r for r in stored if _valid(r["payload"])]
 
 
+def _active(row: dict, key: str) -> bool:
+    return (row.get("setups", {}).get(key) or {}).get("state") in ("sinal", "posicao")
+
+
 def _updated_at(recs: list[dict]) -> str | None:
     return max((r["updated_at"] for r in recs), default=None)
 
@@ -111,7 +116,7 @@ def query(conn, scope="watchlist", market=None, verdict=None, evidence=None, set
     rows = [r for r in rows
             if (market is None or r["market"] == market) and (verdict is None or r["verdict"] == verdict)
             and (evidence is None or r["evidence"] == evidence)
-            and (setup is None or r["setups"][setup]["state"] in ("sinal", "posicao"))]
+            and (setup is None or _active(r, setup))]
     rows.sort(key=lambda r: r["symbol"])  # desempate estável por símbolo
     have = [r for r in rows if r.get(sort) is not None]
     have.sort(key=lambda r: r[sort], reverse=order == "desc")
@@ -129,19 +134,20 @@ def summary(conn, scope: str) -> dict:
     with _lock:
         hit = _cache.get(scope)
     if hit and hit[0] == key:
-        return hit[1]
+        return copy.deepcopy(hit[1])  # cópia: o chamador não corrompe o cache
     rows = [r["payload"] for r in recs]
     n = len(rows)
+    known = [r["above_sma200"] for r in rows if r.get("above_sma200") is not None]
     setups = []
     for k, meta in SETUPS.items():
         pool = [(m, e) for r in rows for m, e in r.get("pool", {}).get(k, [])]
         setups.append({"key": k, "label": meta["label"],
-                       "active": sum(r["setups"][k]["state"] in ("sinal", "posicao") for r in rows),
+                       "active": sum(_active(r, k) for r in rows),
                        "pooled": pooled_evidence(pool)})
     out = analysis.clean({
         "scope": scope, "count": n,
-        "pct_above_sma200": sum(r["above_sma200"] for r in rows) / n if n else None,
+        "pct_above_sma200": sum(known) / len(known) if known else None,
         "verdicts": {v: sum(r["verdict"] == v for r in rows) for v in VERDICTS}, "setups": setups})
     with _lock:
         _cache[scope] = (key, out)
-    return out
+    return copy.deepcopy(out)
