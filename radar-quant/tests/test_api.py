@@ -5,8 +5,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app import analysis, main, service
-from app.config import get_settings
+from app import analysis, db, main, news, service, universe
+from app.config import INTERVALS, get_settings
+from app.providers.base import ProviderError
 from app.main import create_app, next_sleep
 
 
@@ -15,7 +16,9 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("RADAR_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("RADAR_PROVIDER", "synthetic")
     monkeypatch.setenv("RADAR_SKIP_BACKGROUND", "1")
+    monkeypatch.setenv("RADAR_UNIVERSE", "0")
     analysis.invalidate()
+    service.clear_intraday_cache()
     with TestClient(create_app()) as c:
         asyncio.run(service.refresh_all(c.app.state.conn, get_settings()))
         analysis.invalidate()
@@ -46,7 +49,7 @@ def test_candles(client):
     r = client.get(f"/api/assets/{aid}/candles")
     assert r.status_code == 200 and r.json()["candles"]
     assert client.get(f"/api/assets/{aid}/candles?interval=1wk").status_code == 200
-    assert client.get(f"/api/assets/{aid}/candles?interval=5m").status_code == 422
+    assert client.get(f"/api/assets/{aid}/candles?interval=2m").status_code == 422
     assert client.get("/api/assets/9999/candles").status_code == 404
 
 
@@ -101,7 +104,7 @@ def test_short_history(client):
 
 
 def test_delete(client):
-    aid = _id(client, "AAPL")
+    aid = _id(client, "BTC")
     assert client.delete(f"/api/assets/{aid}").status_code == 204
     assert client.delete(f"/api/assets/{aid}").status_code == 404
 
@@ -114,7 +117,9 @@ def test_refresh_schedules(client):
 def test_no_nan_in_responses(client):
     aid = _id(client, "AAPL")
     for url in ("/api/assets", f"/api/assets/{aid}/candles", f"/api/assets/{aid}/analysis",
-                "/api/ranking", "/api/portfolio", "/api/health"):
+                "/api/ranking", "/api/portfolio", "/api/health", "/api/search?q=a", f"/api/assets/{aid}/news",
+                "/api/screener", "/api/screener/summary", "/api/screener/progress",
+                *(f"/api/assets/{aid}/candles?interval={i}" for i in INTERVALS)):
         text = client.get(url).text
         assert "NaN" not in text and "Infinity" not in text
         json.loads(text)
@@ -126,9 +131,12 @@ def test_static_index(client):
 
 
 def test_asset_without_data(client):
+    n = len(client.get("/api/assets").json())
     r = client.post("/api/assets", json={"symbol": "FALHA1", "market": "US"})
-    assert r.status_code == 201 and r.json()["status"] == "insuficiente" and r.json()["last_error"]
-    aid = r.json()["id"]
+    assert r.status_code == 502 and r.json()["detail"] == "fonte de dados indisponível agora"
+    assert len(client.get("/api/assets").json()) == n and db.find_asset(client.app.state.conn, "FALHA1", "US") is None
+    # ativo já gravado e com erro de refresh continua legível
+    aid = db.add_asset(client.app.state.conn, "FALHA2", "US")
     assert client.get(f"/api/assets/{aid}/candles").status_code == 200
     assert client.get(f"/api/assets/{aid}/analysis").status_code == 200
 
@@ -197,7 +205,7 @@ def test_next_sleep_limita_esperas_curtas():
 
 
 def test_laco_usa_espera_curta_e_depois_volta_ao_normal(client, monkeypatch):
-    client.post("/api/assets", json={"symbol": "FALHA1", "market": "US"})
+    db.add_asset(client.app.state.conn, "FALHA1", "US")
     esperas = []
 
     async def fake_sleep(s):
@@ -210,3 +218,184 @@ def test_laco_usa_espera_curta_e_depois_volta_ao_normal(client, monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(main.loop_refresh(client.app))
     assert esperas == [600, 600, 600, 6 * 3600, 6 * 3600]
+
+
+# ---------- 1.1: busca, abrir, intraday, notícias, screener ----------
+
+def _open(c, symbol="AMZN", market="US"):
+    return c.post("/api/assets/open", json={"symbol": symbol, "market": market})
+
+
+def test_search(client):
+    r = client.get("/api/search?q=pet")
+    assert r.status_code == 200 and r.json()[0]["symbol"] == "PETR4"
+    assert set(r.json()[0]) == {"symbol", "market", "name", "kind", "indices"}
+    assert client.get("/api/search?q=").json() == []
+    assert client.get("/api/search?q=%25").status_code == 200
+    assert len(client.get("/api/search?q=a&limit=2").json()) == 2
+    for bad in ("limit=0", "limit=99", "limit=x", "q=" + "a" * 65):
+        assert client.get(f"/api/search?{bad}").status_code == 422
+
+
+def test_open_asset(client):
+    r = _open(client)
+    assert r.status_code == 200 and r.json()["symbol"] == "AMZN" and r.json()["watch"] is False
+    assert len(client.get("/api/assets").json()) == 13
+    a = client.get(f"/api/assets/{r.json()['id']}/analysis")
+    assert a.status_code == 200 and "swing" in a.json()
+    assert _open(client).status_code == 200  # reabrir é idempotente
+
+
+def test_open_asset_invalid(client):
+    n = len(db.list_assets(client.app.state.conn, watch=None))
+    r = _open(client, "INVALIDO")
+    assert r.status_code == 422 and r.json()["detail"] == "símbolo não encontrado em US"
+    assert _open(client, "AB\x00CD").status_code == 422
+    assert _open(client, "AMZN", "XX").status_code == 422
+    assert client.post("/api/assets/open", json={"symbol": "AMZN"}).status_code == 422
+    assert len(db.list_assets(client.app.state.conn, watch=None)) == n
+
+
+def test_open_asset_fonte_fora_do_ar(client):
+    n = len(db.list_assets(client.app.state.conn, watch=None))
+    r = _open(client, "FALHA1")
+    assert r.status_code == 502 and r.json()["detail"] == "fonte de dados indisponível agora"
+    assert len(db.list_assets(client.app.state.conn, watch=None)) == n
+
+
+def test_promote_and_demote(client):
+    aid = _open(client).json()["id"]
+    r = client.post("/api/assets", json={"symbol": "amzn", "market": "US"})
+    assert r.status_code == 201 and r.json()["watch"] is True and r.json()["id"] == aid
+    assert len(client.get("/api/assets").json()) == 14
+    assert client.post("/api/assets", json={"symbol": "AMZN", "market": "US"}).status_code == 409
+    assert client.delete(f"/api/assets/{aid}").status_code == 204  # membro de SP500: só rebaixa
+    assert len(client.get("/api/assets").json()) == 13
+    assert client.get(f"/api/assets/{aid}/analysis").status_code == 200
+    assert db.get_asset(client.app.state.conn, aid)["watch"] == 0
+
+
+def test_delete_fora_de_indice_apaga(client):
+    aid = _open(client, "BTC", "CRYPTO").json()["id"]  # já na watchlist, fora de índice
+    assert client.delete(f"/api/assets/{aid}").status_code == 204
+    assert client.delete(f"/api/assets/{aid}").status_code == 404
+    vis = _open(client, "ZZZZ", "US").json()["id"]  # visitado, fora de índice
+    assert client.delete(f"/api/assets/{vis}").status_code == 204
+    assert client.get(f"/api/assets/{vis}/analysis").status_code == 404
+
+
+def test_add_grava_linha_do_screener(client):
+    r = client.post("/api/assets", json={"symbol": "TSLA", "market": "US"})
+    assert any(x["asset_id"] == r.json()["id"] for x in db.load_screener(client.app.state.conn))
+
+
+@pytest.mark.parametrize("interval", INTERVALS)
+def test_candles_todos_os_intervalos(client, interval):
+    aid = _id(client, "AAPL")
+    r = client.get(f"/api/assets/{aid}/candles?interval={interval}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["interval"] == interval and body["candles"]
+    if interval in ("1m", "3m", "5m", "10m", "30m", "1h"):
+        assert body["intraday"] is True and isinstance(body["candles"][0]["time"], int)
+        assert body["last_bar_time"] == body["candles"][-1]["time"] and "delay_minutes" in body
+    else:
+        assert not body.get("intraday") and isinstance(body["candles"][0]["time"], str)
+
+
+def test_candles_intraday_indisponivel(client, monkeypatch):
+    class OnlyDaily:
+        NATIVE_INTRADAY = frozenset({"1m", "5m", "30m", "1h"})
+
+        async def fetch_intraday(self, symbol, market, interval):
+            raise ProviderError("fora do ar")
+
+    monkeypatch.setattr(service, "get_provider", lambda market, settings: OnlyDaily())
+    aid = _id(client, "AAPL")
+    r = client.get(f"/api/assets/{aid}/candles?interval=5m")
+    assert r.status_code == 422 and r.json()["detail"] == "intraday indisponível para este ativo agora"
+    assert client.get(f"/api/assets/{aid}/candles?interval=1wk").status_code == 200
+
+
+def test_news(client):
+    aid = _id(client, "AAPL")
+    r = client.get(f"/api/assets/{aid}/news")
+    assert r.status_code == 200 and len(r.json()["items"]) == 3 and r.json()["stale"] is False
+    assert client.get("/api/assets/9999/news").status_code == 404
+    assert client.get("/api/assets/0/news").status_code == 422
+
+
+def test_news_nunca_derruba(client, monkeypatch):
+    async def boom(*a, **k):
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(news, "fetch_news", boom)
+    monkeypatch.setattr(client.app.state, "settings", SimpleNamespace(provider="live"))
+    r = client.get(f"/api/assets/{_id(client, 'AAPL')}/news")
+    assert r.status_code == 200 and r.json()["stale"] is True
+
+
+def test_screener(client):
+    assert client.get("/api/screener?scope=SP500").json()["total"] == 0  # universo ainda não rodou
+    r = client.get("/api/screener")
+    assert r.status_code == 200 and r.json()["scope"] == "watchlist" and r.json()["total"] == 13
+    assert all(row["setups"].keys() == {"reversao", "queda", "rompimento"} for row in r.json()["rows"])
+    asyncio.run(universe.refresh_universe(client.app.state.conn, get_settings(), pace=0))
+    assert client.get("/api/screener?scope=SP500").json()["total"] == 8
+    assert client.get("/api/screener?scope=NDX&sort=symbol&order=asc").json()["rows"][0]["symbol"] == "AAPL"
+    for q in ("setup=reversao", "verdict=comprar", "evidence=sem_evidencia", "market=US", "sort=symbol&order=asc"):
+        assert client.get(f"/api/screener?{q}").status_code == 200
+    p2 = client.get("/api/screener?page_size=5&page=2").json()
+    assert p2["page"] == 2 and len(p2["rows"]) == 5 and p2["total"] == 13
+    for bad in ("scope=XX", "sort=__class__", "page=0", "page_size=201", "verdict=x", "scope=" + "a" * 33):
+        assert client.get(f"/api/screener?{bad}").status_code == 422, bad
+
+
+def test_screener_summary_e_progress(client):
+    r = client.get("/api/screener/summary?scope=watchlist")
+    assert r.status_code == 200 and len(r.json()["setups"]) == 3 and r.json()["count"] == 13
+    assert 0 <= r.json()["pct_above_sma200"] <= 1
+    assert client.get("/api/screener/summary?scope=XX").status_code == 422
+    r = client.get("/api/screener/progress?scope=IBRA")
+    assert r.status_code == 200 and r.json()["total"] == 8
+    assert client.get("/api/screener/progress?scope=XX").status_code == 422
+
+
+def test_health_catalogo_e_universo(client):
+    h = client.get("/api/health").json()
+    assert h["catalog"] > 0 and set(h["universe"]) == {"total", "ready"} and h["universe"]["ready"] == 0
+    asyncio.run(main.refresh_everything(client.app))  # linhas da watchlist (membros de índice incluídos)
+    asyncio.run(universe.refresh_universe(client.app.state.conn, get_settings(), pace=0))
+    h = client.get("/api/health").json()
+    assert h["universe"]["total"] > 0 and h["universe"]["ready"] == h["universe"]["total"]
+
+
+def test_refresh_everything_grava_screener_da_watchlist(client):
+    db.upsert_screener(client.app.state.conn, _id(client, "AAPL"), "x", {"status": "insuficiente"})
+    asyncio.run(main.refresh_everything(client.app))
+    rows = {r["asset_id"]: r for r in db.load_screener(client.app.state.conn)}
+    assert len(rows) == 13 and rows[_id(client, "AAPL")]["payload"].get("symbol") == "AAPL"
+
+
+def test_loop_universo(client, monkeypatch):
+    chamadas = []
+
+    async def fake_refresh(conn, settings, **kw):
+        chamadas.append("refresh")
+        raise RuntimeError("fonte caiu")  # não pode derrubar o laço
+
+    async def fake_sleep(s):
+        chamadas.append(s)
+        if chamadas.count(600) == 2:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(universe, "refresh_universe", fake_refresh)
+    monkeypatch.setattr(main.asyncio, "sleep", fake_sleep)
+    client.app.state.universe_lock = asyncio.Lock()
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(main.loop_universe(client.app))
+    assert chamadas == ["refresh", 600, "refresh", 600]  # nunca rodou nesse banco: sempre devido
+
+
+def test_catalogo_sintetico_na_subida(client):
+    assert db.catalog_count(client.app.state.conn) > 0
