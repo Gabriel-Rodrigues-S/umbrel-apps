@@ -47,6 +47,8 @@ def perf_stats(returns: pd.Series, rf: pd.Series, periods_per_year: int) -> dict
     equity = np.cumprod(1 + r)
     ann_return = equity[-1] ** (periods_per_year / n) - 1
     std = r.std(ddof=1) if n > 1 else 0.0
+    if std <= 1e-12 * max(1.0, abs(r.mean())):  # ruído de ponto flutuante = sem variação
+        std = 0.0
     sharpe = 0.0
     if std > 0:
         excess = r - rf.reindex(returns.index).fillna(0.0).to_numpy(dtype=float)
@@ -104,7 +106,7 @@ def run_backtest(close: pd.Series, score: pd.Series, rf_daily: pd.Series | None,
     # Sinal do dia t vale para t+1: posição efetiva = pos deslocada em 1 dia.
     pos = positions_from_score(score)
     held_full = pos.shift(1).fillna(0.0)
-    ret = close.pct_change().fillna(0.0)
+    ret = close.pct_change(fill_method=None).fillna(0.0)
     rf = (pd.Series(0.0, index=close.index) if rf_daily is None
           else rf_daily.reindex(close.index).fillna(0.0))
     turnover = held_full.diff().abs().fillna(0.0)
@@ -112,8 +114,9 @@ def run_backtest(close: pd.Series, score: pd.Series, rf_daily: pd.Series | None,
 
     # O primeiro dia é só a base (equity 1.0); os retornos começam no dia seguinte.
     strat, bh, held, rf_s = strat_full.iloc[1:], ret.iloc[1:], held_full.iloc[1:], rf.iloc[1:]
-    equity = pd.DataFrame({"strategy": (1 + strat_full).cumprod(), "buy_hold": (1 + ret).cumprod()})
-    equity.iloc[0] = 1.0
+    equity = pd.DataFrame({"strategy": (1 + strat_full.iloc[1:]).cumprod(),
+                           "buy_hold": (1 + ret.iloc[1:]).cumprod()})
+    equity = pd.concat([pd.DataFrame({"strategy": [1.0], "buy_hold": [1.0]}, index=close.index[:1]), equity])
 
     entries = int(((held.diff().fillna(held.iloc[0])) == 1).sum())
     excess = (strat - bh).to_numpy()
