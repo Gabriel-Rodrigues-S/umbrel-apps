@@ -102,8 +102,9 @@ def build_portfolio(returns: pd.DataFrame, method: str, cap: float = 0.35) -> di
     # correlação amostral; variância zero -> 0 fora da diagonal
     sc = np.cov(x, rowvar=False)
     sd = np.sqrt(np.diag(sc))
+    ok = sd > 1e-12  # variância zero (ou ruído numérico) -> correlação 0
     den = np.outer(sd, sd)
-    corr = np.divide(sc, den, out=np.zeros_like(sc), where=den > 1e-12)
+    corr = np.divide(sc, den, out=np.zeros_like(sc), where=np.outer(ok, ok))
     corr = np.clip(corr, -1, 1)
     np.fill_diagonal(corr, 1.0)
 
