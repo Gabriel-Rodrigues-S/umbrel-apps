@@ -1,0 +1,12 @@
+{"indexes": [{"stock": "^BVSP", "name": "IBOVESPA"}],
+ "stocks": [
+  {"stock": "PETR4", "name": "PETROBRAS PN", "type": "stock"},
+  {"stock": "PETR4F", "name": "PETROBRAS PN", "type": "stock"},
+  {"stock": "VALE3", "name": "VALE ON", "type": "stock"},
+  {"stock": "HGLG11", "name": "CSHG LOGISTICA FII", "type": "fund", "subType": "fii"},
+  {"stock": "BOVA11", "name": "ISHARES IBOVESPA FUNDO DE INDICE", "type": "fund"},
+  {"stock": "XFIX11", "name": "FUNDO XPTO", "type": "fund", "subType": "etf"},
+  {"stock": "AAPL34", "name": "APPLE DRN", "type": "bdr"},
+  {"stock": "^BVSP", "name": "Ibovespa", "type": "index"},
+  {"stock": "x1", "name": "lixo", "type": "stock"}
+ ]}

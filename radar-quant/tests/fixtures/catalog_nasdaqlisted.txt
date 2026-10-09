@@ -1,0 +1,7 @@
+Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares
+AAPL|Apple Inc. - Common Stock|Q|N|N|100|N|N
+AAAP|Pacer Barings CLO Market Flex ETF|G|N|N|100|Y|N
+ZZZT|Test Security - Common Stock|G|Y|N|100|N|N
+MSFT|Microsoft Corporation - Common Stock|Q|N|N|100|N|N
+ABC$D|Bad Dollar Corp - Common Stock|G|N|N|100|N|N
+File Creation Time: 1009202607:30|||||||
