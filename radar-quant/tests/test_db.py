@@ -229,7 +229,21 @@ def test_search_catalog_ordem_e_limite(conn):
     assert db.search_catalog(conn, "") == []
 
 
-@pytest.mark.parametrize("q", ["%", "_", "'; DROP TABLE catalog;--", "a" * 500, "  ", "\\"])
+@pytest.mark.parametrize("q", ["%", "_", "\\"])
+def test_search_catalog_curingas_nao_casam_com_tudo(conn, q):
+    _catalogo(conn)
+    assert db.search_catalog(conn, q) == []
+
+
+def test_replace_catalog_lista_vazia_nao_apaga(conn):
+    _catalogo(conn)
+    db.set_index_members(conn, "IBOV", "B3", ["PETR4"])
+    assert db.replace_catalog_market(conn, "B3", []) == 0
+    assert db.catalog_count(conn, "B3") == 4
+    assert db.catalog_entry(conn, "PETR4", "B3")["indices"] == ["IBOV"]
+
+
+@pytest.mark.parametrize("q", ["'; DROP TABLE catalog;--", "a" * 500, "  "])
 def test_search_catalog_entradas_hostis(conn, q):
     _catalogo(conn)
     r = db.search_catalog(conn, q)

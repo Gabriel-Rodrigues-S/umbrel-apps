@@ -246,8 +246,13 @@ def _catalog_dict(r) -> dict:
 
 
 def replace_catalog_market(conn, market: str, rows: Iterable[tuple[str, str, str]]) -> int:
-    """Troca o catálogo do mercado por (symbol, name, kind); quem continua mantém `indices`."""
+    """Troca o catálogo do mercado por (symbol, name, kind); quem continua mantém `indices`.
+
+    `rows` vazio não apaga nada e devolve 0: fonte que falhou não pode zerar o catálogo.
+    """
     new = {sym: (name, kind) for sym, name, kind in rows}
+    if not new:
+        return 0
     with _write(conn):
         old = {r["symbol"]: r["indices"] for r in
                conn.execute("SELECT symbol, indices FROM catalog WHERE market = ?", (market,))}
