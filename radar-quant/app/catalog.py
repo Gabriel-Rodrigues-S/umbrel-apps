@@ -14,6 +14,7 @@ from .config import INDICES
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; RadarQuantBot/1.0)"}
 MAX_BYTES = 5_000_000
 MIN_ROWS = {"US": 3000, "B3": 200}
+MIN_INDEX = {"IBOV": 40, "IBRA": 80, "SP500": 400, "NDX": 90}  # abaixo disso a fonte é lixo
 
 URL_NASDAQ = "https://www.nasdaqtrader.com/dynamic/symdir/nasdaqlisted.txt"
 URL_OTHER = "https://www.nasdaqtrader.com/dynamic/symdir/otherlisted.txt"
@@ -29,6 +30,7 @@ _B3_RE = re.compile(r"[A-Z0-9]{4,6}[0-9]{1,2}")
 _NDX_ROW_RE = re.compile(r"^\|\s*(?:\{\{NasdaqSymbol\|)?([A-Z]{1,5})(?:\}\})?\s*(?:\|\||$)", re.M)
 _SUFFIX_RE = re.compile(r"\s+(?:Class [A-Z]\s+)?(?:Common Stock|Ordinary Shares?)\s*$", re.I)
 _ETF_NAME_RE = re.compile(r"ETF|ISHARES|INDEX", re.I)
+_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 CRYPTO_CATALOG = [(s, n, "Cripto") for s, n in [
     ("BTC", "Bitcoin"), ("ETH", "Ethereum"), ("BNB", "BNB"), ("XRP", "XRP"), ("SOL", "Solana"),
@@ -47,7 +49,7 @@ async def _get(url, transport=None, params=None) -> str:
         async with httpx.AsyncClient(transport=transport, timeout=30, headers=HEADERS,
                                      follow_redirects=True) as client:
             resp = await client.get(url, params=params)
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, httpx.InvalidURL) as e:
         raise CatalogError(f"{url}: fonte indisponível: {e}") from e
     if resp.status_code != 200:
         raise CatalogError(f"{url}: HTTP {resp.status_code}")
@@ -63,28 +65,40 @@ def _json(text: str, url: str):
         raise CatalogError(f"{url}: JSON inválido") from e
 
 
+def _clean(name: str) -> str:
+    """Sem caracteres de controle, espaços colapsados, até 80 caracteres."""
+    return " ".join(_CTRL_RE.sub(" ", name).split())[:80]
+
+
 def _clean_name(name: str) -> str:
-    return _SUFFIX_RE.sub("", name.split(" - ")[0]).strip()[:80]
+    return _clean(_SUFFIX_RE.sub("", _clean(name).split(" - ")[0]))
 
 
 def _parse_us(text: str, sym_col: str) -> list[tuple[str, str, str]]:
     lines = text.splitlines()
-    if not lines or sym_col not in lines[0].split("|"):
-        raise CatalogError(f"cabeçalho inesperado (faltou {sym_col})")
+    need = {sym_col, "Security Name", "Test Issue", "ETF"}
+    if not lines or not need <= set(lines[0].split("|")):
+        raise CatalogError(f"cabeçalho inesperado (esperado: {', '.join(sorted(need))})")
     out = []
-    for r in csv.DictReader(lines, delimiter="|"):
-        sym = (r.get(sym_col) or "").strip()
-        if r.get("Test Issue") == "Y" or not _US_RE.fullmatch(sym):  # rodapé e `$` caem aqui
-            continue
-        out.append((sym, _clean_name(r.get("Security Name") or "") or sym,
-                    "ETF" if r.get("ETF") == "Y" else "Ação"))
+    try:
+        for r in csv.DictReader(lines, delimiter="|"):
+            sym = (r.get(sym_col) or "").strip()
+            if r.get("Test Issue") == "Y" or not _US_RE.fullmatch(sym):  # rodapé e `$` caem aqui
+                continue
+            out.append((sym, _clean_name(r.get("Security Name") or "") or sym,
+                        "ETF" if r.get("ETF") == "Y" else "Ação"))
+    except csv.Error as e:
+        raise CatalogError(f"CSV inválido: {e}") from e
     return out
 
 
 async def fetch_us(transport=None) -> list[tuple[str, str, str]]:
     seen, out = set(), []
     for url, col in ((URL_NASDAQ, "Symbol"), (URL_OTHER, "ACT Symbol")):
-        for row in _parse_us(await _get(url, transport), col):
+        rows = _parse_us(await _get(url, transport), col)
+        if not rows:
+            raise CatalogError(f"{url}: nenhuma linha válida")
+        for row in rows:
             if row[0] not in seen:
                 seen.add(row[0])
                 out.append(row)
@@ -112,7 +126,7 @@ async def fetch_b3(transport=None) -> list[tuple[str, str, str]]:
             kind = "BDR"
         else:
             continue
-        out.append((sym, name or sym, kind))
+        out.append((sym, _clean(name) or sym, kind))
     return out
 
 
@@ -122,8 +136,10 @@ def _parse_ndx(text: str) -> list[str]:
         wiki = data["parse"]["wikitext"]["*"]
     except (KeyError, TypeError) as e:
         raise CatalogError("Wikipedia: resposta sem wikitext") from e
+    if not isinstance(wiki, str):
+        raise CatalogError("Wikipedia: wikitext inválido")
     found = list(dict.fromkeys(_NDX_ROW_RE.findall(wiki)))
-    if not 90 <= len(found) <= 110:
+    if not MIN_INDEX["NDX"] <= len(found) <= 110:
         raise CatalogError(f"Wikipedia: {len(found)} tickers no Nasdaq-100 (esperado 90 a 110)")
     return found
 
@@ -155,8 +171,8 @@ async def fetch_index(index: str, transport=None) -> list[str]:
                 err = e
         raise err
     syms = list(dict.fromkeys(s for s in syms if _US_RE.fullmatch(s) or _B3_RE.fullmatch(s)))
-    if not syms:
-        raise CatalogError(f"{index}: composição vazia")
+    if len(syms) < MIN_INDEX[index]:
+        raise CatalogError(f"{index}: só {len(syms)} membros (mínimo {MIN_INDEX[index]})")
     return syms
 
 
@@ -217,7 +233,11 @@ async def refresh_catalog(conn, settings, transport=None) -> dict:
     out["markets"]["CRYPTO"] = db.replace_catalog_market(conn, "CRYPTO", CRYPTO_CATALOG)
     for index, (market, _) in INDICES.items():
         try:
-            out["indices"][index] = db.set_index_members(conn, index, market, await fetch_index(index, transport))
+            syms = await fetch_index(index, transport)
+            old = len(db.index_members(conn, index))
+            if old and len(syms) * 2 < old:
+                raise CatalogError(f"encolheu de {old} para {len(syms)} membros; mantida a composição anterior")
+            out["indices"][index] = db.set_index_members(conn, index, market, syms)
         except Exception as e:  # noqa: BLE001
             out["errors"].append(f"{index}: {e}")
     if fetched:

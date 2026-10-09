@@ -46,6 +46,18 @@ def tickers(n):
     return [f"{chr(65 + i // 26)}{chr(65 + i % 26)}X" for i in range(n)]
 
 
+def b3codes(n):
+    return [f"{chr(65 + i // 26)}{chr(65 + i % 26)}CD3" for i in range(n)]
+
+
+def b3idx(n):
+    return json.dumps({"page": {}, "results": [{"cod": c, "asset": c} for c in b3codes(n)]})
+
+
+def sp_csv(n):
+    return "Symbol,Security\nBRK.B,Berkshire\n" + "\n".join(f"{t},Co" for t in tickers(n - 1)) + "\n"
+
+
 # ---------- fetch_us ----------
 def us_handler(req):
     if req.url.path.endswith("nasdaqlisted.txt"):
@@ -98,16 +110,25 @@ def test_fetch_index_b3_usa_base64_e_cod():
 
     def h(req):
         seen.append(req.url.path.rsplit("/", 1)[1])
-        return httpx.Response(200, text=fx("catalog_b3_index.json"))
+        return httpx.Response(200, text=b3idx(80))
 
-    assert run(catalog.fetch_index("IBRA", httpx.MockTransport(h))) == ["ALOS3", "PETR4", "VALE3"]
+    got = run(catalog.fetch_index("IBRA", httpx.MockTransport(h)))
+    assert got == b3codes(80)
     sent = json.loads(base64.b64decode(seen[0]))
     assert sent["index"] == "IBRA" and sent["pageSize"] == 300 and sent["language"] == "pt-br"
 
 
 def test_fetch_index_sp500_mantem_ponto():
-    t = httpx.MockTransport(lambda r: httpx.Response(200, text=fx("catalog_sp500.csv")))
-    assert run(catalog.fetch_index("SP500", t)) == ["MMM", "BRK.B", "AAPL"]
+    t = httpx.MockTransport(lambda r: httpx.Response(200, text=sp_csv(450)))
+    got = run(catalog.fetch_index("SP500", t))
+    assert got[0] == "BRK.B" and len(got) == 450
+
+
+@pytest.mark.parametrize("index,n,body", [("IBOV", 39, b3idx), ("IBRA", 79, b3idx), ("SP500", 399, sp_csv)])
+def test_fetch_index_abaixo_do_piso(index, n, body):
+    t = httpx.MockTransport(lambda r: httpx.Response(200, text=body(n)))
+    with pytest.raises(catalog.CatalogError):
+        run(catalog.fetch_index(index, t))
 
 
 @pytest.mark.parametrize("fmt", ["plain", "tpl"])
@@ -122,6 +143,66 @@ def test_fetch_index_ndx_fora_da_faixa(n):
     t = httpx.MockTransport(lambda r: httpx.Response(200, text=wikitext(n)))
     with pytest.raises(catalog.CatalogError):
         run(catalog.fetch_index("NDX", t))
+
+
+def test_fetch_index_ndx_fallback_de_pagina():
+    pages = []
+
+    def h(req):
+        pages.append(req.url.params["page"])
+        if len(pages) == 1:
+            return httpx.Response(404)
+        return httpx.Response(200, text=wikitext(100))
+
+    assert len(run(catalog.fetch_index("NDX", httpx.MockTransport(h)))) == 100
+    assert pages == ["List_of_NASDAQ-100_companies", "Nasdaq-100"]
+    pages.clear()
+
+    def few(req):
+        pages.append(req.url.params["page"])
+        return httpx.Response(200, text=wikitext(100 if len(pages) == 2 else 5))
+
+    assert len(run(catalog.fetch_index("NDX", httpx.MockTransport(few)))) == 100
+
+
+def test_fetch_index_ndx_wikitext_nao_string():
+    body = json.dumps({"parse": {"wikitext": {"*": 5}}})
+    with pytest.raises(catalog.CatalogError):
+        run(catalog.fetch_index("NDX", httpx.MockTransport(lambda r: httpx.Response(200, text=body))))
+
+
+def test_corpo_grande_em_b3_e_indices():
+    big = httpx.MockTransport(lambda r: httpx.Response(200, content=b"x" * 6_000_000))
+    with pytest.raises(catalog.CatalogError):
+        run(catalog.fetch_b3(big))
+    for idx in ("IBOV", "SP500", "NDX"):
+        with pytest.raises(catalog.CatalogError):
+            run(catalog.fetch_index(idx, big))
+
+
+def test_nomes_limitados_em_b3_e_eua():
+    long = "  Nome\x00 com   espaços " + "x" * 500
+    b3 = {"stocks": [{"stock": "PETR4", "name": long, "type": "stock"}]}
+    rows = run(catalog.fetch_b3(httpx.MockTransport(lambda r: httpx.Response(200, json=b3))))
+    assert len(rows[0][1]) == 80 and rows[0][1].startswith("Nome com espaços x")
+    us = "Symbol|Security Name|Test Issue|ETF\nAAA|" + long + "|N|N\n"
+    rows = run(catalog.fetch_us(httpx.MockTransport(
+        lambda r: httpx.Response(200, text=us if "nasdaq" in r.url.path else
+                                 "ACT Symbol|Security Name|Test Issue|ETF\nBBB|Outra|N|N\n"))))
+    assert len(rows[0][1]) == 80 and "\x00" not in rows[0][1]
+
+
+def test_fetch_us_exige_colunas_e_linhas_nos_dois_arquivos():
+    ok_other = "ACT Symbol|Security Name|Test Issue|ETF\nBBB|Outra|N|N\n"
+    ok_nasdaq = "Symbol|Security Name|Test Issue|ETF\nAAA|Uma|N|N\n"
+    cases = [("Symbol|Security Name|Test Issue\nAAA|Uma|N\n", ok_other),  # sem ETF
+             (ok_nasdaq, "ACT Symbol|Security Name|Test Issue|ETF\n"),     # otherlisted sem linhas
+             ("Symbol|Security Name|Test Issue|ETF\n", ok_other)]
+    for nas, oth in cases:
+        t = httpx.MockTransport(lambda r, nas=nas, oth=oth: httpx.Response(
+            200, text=nas if "nasdaq" in r.url.path else oth))
+        with pytest.raises(catalog.CatalogError):
+            run(catalog.fetch_us(t))
 
 
 def test_fetch_index_erros():
@@ -189,9 +270,9 @@ def test_refresh_live_preserva_o_que_falhou(conn, tmp_path):
         if "b3.com.br" in u:
             if json.loads(base64.b64decode(u.rsplit("/", 1)[-1]))["index"] == "IBRA":
                 return httpx.Response(500)
-            return httpx.Response(200, text=fx("catalog_b3_index.json"))
+            return httpx.Response(200, text=b3idx(76))
         if "constituents" in u:
-            return httpx.Response(200, text=fx("catalog_sp500.csv"))
+            return httpx.Response(200, text=sp_csv(503))
         return httpx.Response(200, text=wikitext(100))
 
     out = run(catalog.refresh_catalog(conn, settings(tmp_path), httpx.MockTransport(h)))
@@ -199,9 +280,9 @@ def test_refresh_live_preserva_o_que_falhou(conn, tmp_path):
     assert out["markets"]["B3"] == 250 and "US" not in out["markets"]
     assert db.catalog_entry(conn, "OLD", "US") is not None and db.catalog_entry(conn, "US0", "US") is None
     assert [m["symbol"] for m in db.index_members(conn, "IBRA")] == ["AACD3"]
-    assert [m["symbol"] for m in db.index_members(conn, "IBOV")] == ["ALOS3", "PETR4", "VALE3"]
+    assert [m["symbol"] for m in db.index_members(conn, "IBOV")] == sorted(b3codes(76))
     assert len(db.index_members(conn, "NDX")) == 100
-    assert {m["symbol"] for m in db.index_members(conn, "SP500")} == {"MMM", "BRK.B", "AAPL"}
+    assert len(db.index_members(conn, "SP500")) == 503
     assert db.catalog_count(conn, "CRYPTO") == 20
     assert not catalog.catalog_is_stale(conn)
 
@@ -212,3 +293,20 @@ def test_refresh_live_tudo_fora_do_ar_nao_marca_atualizado(conn, tmp_path):
                                       httpx.MockTransport(lambda r: httpx.Response(500))))
     assert len(out["errors"]) == 6 and out["markets"] == {"CRYPTO": 20}
     assert db.catalog_entry(conn, "PETR4", "B3") is not None
+
+
+def test_refresh_nao_substitui_indice_que_encolheu_a_menos_da_metade(conn, tmp_path):
+    db.set_index_members(conn, "IBOV", "B3", b3codes(100))
+
+    def h(req):
+        if "b3.com.br" in str(req.url):
+            return httpx.Response(200, text=b3idx(45))  # acima do piso (40), abaixo de 50
+        return httpx.Response(500)
+
+    out = run(catalog.refresh_catalog(conn, settings(tmp_path), httpx.MockTransport(h)))
+    assert len(db.index_members(conn, "IBOV")) == 100
+    assert any(e.startswith("IBOV") for e in out["errors"]) and "IBOV" not in out["indices"]
+    # 60 (>= metade) é aceito
+    h2 = lambda req: httpx.Response(200, text=b3idx(60)) if "b3.com.br" in str(req.url) else httpx.Response(500)
+    run(catalog.refresh_catalog(conn, settings(tmp_path), httpx.MockTransport(h2)))
+    assert len(db.index_members(conn, "IBOV")) == 60
