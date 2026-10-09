@@ -136,8 +136,6 @@ def test_insufficient_history_raises():
     score = pd.Series(0.0, index=close.index)
     with pytest.raises(ValueError, match="histórico insuficiente"):
         run_backtest(close, score, None, 252)
-    score2 = pd.Series(np.nan, index=close.index)
-    score2.iloc[-10:] = 0.0
     long_close = _close_from_rets(np.full(100, 0.001))
     score3 = pd.Series(np.nan, index=long_close.index)
     score3.iloc[-10:] = 0.0
@@ -162,3 +160,20 @@ def test_perf_stats_zero_std_and_drawdown():
     s = perf_stats(ret, pd.Series(0.0, index=ret.index), 252)
     assert s["max_drawdown"] == pytest.approx(-0.5)
     assert perf_stats(pd.Series(0.0, index=range(5)), pd.Series(0.0, index=range(5)), 252)["sharpe"] == 0.0
+
+
+def test_equity_with_rf_cash_all_the_time():
+    close = _close_from_rets(np.full(60, 0.001))
+    score = pd.Series(0.0, index=close.index)
+    rf = pd.Series(0.0004, index=close.index)
+    r = run_backtest(close, score, rf, 252, n_boot=50)
+    assert r.equity["strategy"].iloc[-1] == pytest.approx(1.0004 ** (len(close) - 1))
+    assert r.equity["strategy"].iloc[0] == 1.0
+
+
+def test_constant_nonzero_return_has_zero_sharpe_and_vol():
+    close = _close_from_rets(np.full(60, 0.001))
+    score = pd.Series(100.0, index=close.index)
+    r = run_backtest(close, score, None, 252, cost=0.0, n_boot=50)
+    assert r.buy_hold["sharpe"] == 0.0
+    assert r.buy_hold["ann_vol"] == 0.0
