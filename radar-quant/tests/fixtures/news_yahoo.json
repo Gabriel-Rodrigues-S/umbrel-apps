@@ -1,0 +1,5 @@
+{"explains": [], "count": 3, "quotes": [], "news": [
+ {"uuid": "u1", "title": "Apple supplier outlook improves", "publisher": "Benzinga", "link": "https://finance.yahoo.com/m/u1/apple-supplier.html", "providerPublishTime": 1791519786, "type": "STORY", "relatedTickers": ["AAPL"]},
+ {"uuid": "u2", "title": "Tech stocks &amp; the week ahead", "publisher": "Reuters", "link": "http://finance.yahoo.com/m/u2/tech.html", "providerPublishTime": 1791500000, "type": "STORY"},
+ {"uuid": "u3", "title": "Item sem data", "publisher": "Fonte Z", "link": "https://finance.yahoo.com/m/u3/x.html", "type": "STORY"}
+]}
