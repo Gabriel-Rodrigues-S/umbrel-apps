@@ -241,13 +241,49 @@ def test_summary_vazio(uni):
 
 
 def test_summary_cache(uni, monkeypatch):
+    calls = []
+    real = screener.pooled_evidence
+    monkeypatch.setattr(screener, "pooled_evidence", lambda pool: calls.append(1) or real(pool))
     first = screener.summary(uni, "NDX")
-    assert screener.summary(uni, "NDX") is first
+    n = len(calls)
+    assert n > 0
+    first["count"] = 999  # mexer na cópia não corrompe o cache
+    again = screener.summary(uni, "NDX")
+    assert len(calls) == n and again["count"] == 4 and again is not first
     a = db.find_asset(uni, "AAPL", "US")
     assert screener.store_row(uni, a)  # linha regravada: muda o updated_at, invalida o cache
-    assert screener.summary(uni, "NDX") is not first
+    screener.summary(uni, "NDX")
+    assert len(calls) > n
 
 
 def test_summary_escopo_invalido(uni):
     with pytest.raises(screener.ScreenerError):
         screener.summary(uni, "XYZ")
+
+
+def test_linha_antiga_sem_setups_e_above_nulo(conn):
+    a, b = add(conn, "AAA1"), add(conn, "BBB1")
+    put(conn, a, setups={}, above_sma200=None)
+    put(conn, b, above_sma200=True)
+    assert [r["symbol"] for r in screener.query(conn, setup="reversao")["rows"]] == []
+    s = screener.summary(conn, "watchlist")
+    assert s["count"] == 2 and s["pct_above_sma200"] == 1.0
+    assert all(x["active"] == 0 for x in s["setups"])
+
+
+def test_pct_acima_todas_nulas(conn):
+    put(conn, add(conn, "AAA1"), above_sma200=None)
+    s = screener.summary(conn, "watchlist")
+    assert s["count"] == 1 and s["pct_above_sma200"] is None
+
+
+def test_build_row_above_nulo_quando_bruto_nulo(uni, monkeypatch):
+    a = db.find_asset(uni, "PETR4", "B3")
+    real = analysis.analyze_asset
+
+    def fake(c, asset):
+        out = dict(real(c, asset))
+        out["factors"] = [{**f, "raw": None} if f["key"] == "dist_sma200" else f for f in out["factors"]]
+        return out
+    monkeypatch.setattr(analysis, "analyze_asset", fake)
+    assert screener.build_row(uni, a)["above_sma200"] is None

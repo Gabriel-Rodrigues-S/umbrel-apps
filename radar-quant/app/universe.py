@@ -13,6 +13,8 @@ MAX_FAILS = 5  # falhas seguidas que abortam a passada
 PURGE_DAYS = 30
 WINDOW = range(5, 9)  # horas UTC (madrugada em Manaus)
 META_KEY = "universe_refreshed_at"
+ATTEMPT_KEY = "universe_attempt_at"  # início da última passada, completa ou não
+RETRY_HOURS = 2  # espera mínima após qualquer tentativa (evita martelar a fonte depois de um aborto)
 
 
 def _utc(dt: datetime) -> datetime:
@@ -37,12 +39,19 @@ def ensure_assets(conn) -> int:
 
 
 def universe_due(conn, now: datetime) -> bool:
-    """Nunca rodou, ou última passada completa há mais de STALE_HOURS e estamos na janela da madrugada."""
+    """Nunca rodou, ou última passada completa há mais de STALE_HOURS e estamos na janela da madrugada.
+
+    Nunca antes de RETRY_HOURS desde a última tentativa, qualquer que seja o resultado dela."""
+    now = _utc(now)
+    try:
+        if now - _utc(datetime.fromisoformat(db.get_meta(conn, ATTEMPT_KEY) or "")) < timedelta(hours=RETRY_HOURS):
+            return False
+    except ValueError:
+        pass
     try:
         last = _utc(datetime.fromisoformat(db.get_meta(conn, META_KEY) or ""))
     except ValueError:
         return True
-    now = _utc(now)
     return now - last > timedelta(hours=STALE_HOURS) and now.hour in WINDOW
 
 
@@ -52,6 +61,11 @@ def _stale(asset: dict, now: datetime) -> bool:
     except ValueError:
         return True
     return now - last > timedelta(hours=STALE_HOURS)
+
+
+def _universe_assets(conn) -> list[dict]:
+    keys = _member_keys(conn)
+    return [a for a in db.list_assets(conn, watch=None) if (a["symbol"], a["market"]) in keys]
 
 
 async def _refresh_one(conn, asset: dict, settings) -> bool:
@@ -69,8 +83,9 @@ async def _refresh_one(conn, asset: dict, settings) -> bool:
     analysis.invalidate(asset["id"])
     try:
         await asyncio.to_thread(screener.store_row, conn, asset | (db.get_asset(conn, asset["id"]) or {}))
-    except Exception as e:  # noqa: BLE001 - os candles já foram gravados
+    except Exception as e:  # noqa: BLE001
         log.warning("falha ao gravar a linha do screener de %s: %s", asset["symbol"], e)
+        return False
     return True
 
 
@@ -78,10 +93,11 @@ async def refresh_universe(conn, settings, pace: float | None = None, limit: int
                            sleep=asyncio.sleep) -> dict:
     """Uma passada pelos ativos de índice desatualizados. `limit` corta a passada (que então é parcial)."""
     pace = settings.universe_pace if pace is None else pace
-    ensure_assets(conn)
-    keys = _member_keys(conn)
-    assets = [a for a in db.list_assets(conn, watch=None) if (a["symbol"], a["market"]) in keys]
     now = datetime.now(timezone.utc)
+    db.set_meta(conn, ATTEMPT_KEY, now.isoformat())
+    # centenas de commits e leituras: fora do event loop
+    await asyncio.to_thread(ensure_assets, conn)
+    assets = await asyncio.to_thread(_universe_assets, conn)
     out = {"updated": 0, "skipped": 0, "failed": 0, "aborted": False}
     log.info("passada do universo: %d ativos", len(assets))
     streak, partial, first = 0, False, True
@@ -116,3 +132,8 @@ def purge(conn, now: datetime) -> int:
     keys = _member_keys(conn)
     keep = {a["id"] for a in db.list_assets(conn, watch=None) if (a["symbol"], a["market"]) in keys}
     return db.purge_viewed(conn, (_utc(now) - timedelta(days=PURGE_DAYS)).isoformat(), keep)
+
+
+async def purge_async(conn, now: datetime) -> int:
+    """`purge` fora do event loop (para o laço assíncrono do servidor)."""
+    return await asyncio.to_thread(purge, conn, now)
