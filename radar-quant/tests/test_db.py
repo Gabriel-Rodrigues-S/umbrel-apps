@@ -61,3 +61,52 @@ def test_rf_ida_e_volta(conn):
     db.upsert_rf(conn, [("2024-01-03", 0.0004), ("2024-01-02", 0.0003)])
     db.upsert_rf(conn, [("2024-01-02", 0.0005)])
     assert db.load_rf(conn) == [("2024-01-02", 0.0005), ("2024-01-03", 0.0004)]
+
+
+def _closes(conn, a):
+    return [(r["date"], r["close"]) for r in db.load_candles(conn, a)]
+
+
+def test_replace_candles_apaga_o_que_saiu_da_janela(conn):
+    a, outro = db.add_asset(conn, "AAPL", "US"), db.add_asset(conn, "MSFT", "US")
+    db.upsert_candles(conn, a, [c("2024-01-02", 100), c("2024-01-03", 100), c("2024-01-04", 100)])
+    db.upsert_candles(conn, outro, [c("2024-01-02", 7)])
+    # janela reajustada (split 10:1) que já começa depois das duas primeiras datas
+    assert db.replace_candles(conn, a, [c("2024-01-05", 10), c("2024-01-04", 10)]) == 2
+    assert _closes(conn, a) == [("2024-01-04", 10), ("2024-01-05", 10)]
+    assert _closes(conn, outro) == [("2024-01-02", 7)]
+
+
+def test_replace_candles_lista_vazia_nao_apaga(conn):
+    a = db.add_asset(conn, "AAPL", "US")
+    db.upsert_candles(conn, a, [c("2024-01-02", 2)])
+    assert db.replace_candles(conn, a, []) == 0
+    assert _closes(conn, a) == [("2024-01-02", 2)]
+
+
+@pytest.mark.parametrize("write", ["replace_candles", "upsert_candles"])
+def test_escrita_de_candles_com_erro_no_meio_nao_muda_nada(conn, write):
+    a = db.add_asset(conn, "AAPL", "US")
+    db.upsert_candles(conn, a, [c("2024-01-02", 2), c("2024-01-03", 3)])
+    with pytest.raises(Exception):
+        getattr(db, write)(conn, a, [c("2024-01-03", 9), c("2024-01-04", object())])  # 2ª linha não é gravável
+    assert not conn.in_transaction
+    assert _closes(conn, a) == [("2024-01-02", 2), ("2024-01-03", 3)]
+
+
+def test_upsert_rf_com_erro_no_meio_nao_muda_nada(conn):
+    db.upsert_rf(conn, [("2024-01-02", 0.0003)])
+    with pytest.raises(Exception):
+        db.upsert_rf(conn, [("2024-01-02", 0.0009), ("2024-01-03", None)])  # rate é NOT NULL
+    assert not conn.in_transaction
+    assert db.load_rf(conn) == [("2024-01-02", 0.0003)]
+
+
+def test_delete_asset_com_erro_nao_apaga_candles(conn):
+    a = db.add_asset(conn, "AAPL", "US")
+    db.upsert_candles(conn, a, [c("2024-01-02", 2)])
+    conn.execute("CREATE TRIGGER trava BEFORE DELETE ON assets BEGIN SELECT RAISE(ABORT, 'travado'); END")
+    with pytest.raises(Exception):
+        db.delete_asset(conn, a)
+    assert not conn.in_transaction
+    assert len(db.load_candles(conn, a)) == 1 and db.get_asset(conn, a)

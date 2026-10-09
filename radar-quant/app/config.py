@@ -1,5 +1,6 @@
 """Configuração e constantes do Radar Quant."""
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,6 +11,9 @@ DEFAULT_WATCHLIST = [("PETR4", "B3"), ("VALE3", "B3"), ("ITUB4", "B3"), ("BBAS3"
                      ("WEGE3", "B3"), ("BOVA11", "B3"),
                      ("AAPL", "US"), ("MSFT", "US"), ("NVDA", "US"), ("SPY", "US"), ("QQQ", "US"),
                      ("BTC", "CRYPTO"), ("ETH", "CRYPTO")]
+# Letras, dígitos e a pontuação dos tickers reais (BRK.B, BRK-B, ^BVSP, EURUSD=X); até 20 caracteres.
+# O símbolo vai para a URL do provedor: nada de barras, espaços ou caracteres de controle.
+_SYMBOL_RE = re.compile(r"[A-Z0-9^][A-Z0-9.\-^=]{0,19}")
 
 
 @dataclass(frozen=True)
@@ -39,4 +43,6 @@ def normalize_symbol(symbol: str, market: str) -> str:
                 break
     if not s:
         raise ValueError("símbolo vazio")
+    if not _SYMBOL_RE.fullmatch(s):
+        raise ValueError("símbolo inválido")
     return s

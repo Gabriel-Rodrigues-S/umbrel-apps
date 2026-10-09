@@ -798,7 +798,7 @@
     clear(excess); clear(body); meta.textContent = "";
     if (!bt) return;
     var x = bt.excess || {};
-    excess.appendChild(document.createTextNode("Excesso sobre buy & hold: "));
+    excess.appendChild(document.createTextNode("Excesso de crescimento (log) sobre buy & hold: "));
     excess.appendChild(el("b", signClass(x.mean), fmtPct(x.mean, 1) + " a.a."));
     excess.appendChild(document.createTextNode(" · IC 95%: "));
     excess.appendChild(el("b", "", fmtPct(x.ci_low, 1) + " a " + fmtPct(x.ci_high, 1)));

@@ -1,6 +1,7 @@
 """Camada SQLite: ativos, candles diários e taxa livre de risco."""
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
@@ -33,10 +34,24 @@ CREATE TABLE IF NOT EXISTS rf_rates (
     rate REAL NOT NULL
 );
 """
+_UPSERT_CANDLE = ("INSERT OR REPLACE INTO candles (asset_id, date, open, high, low, close, volume) "
+                  "VALUES (?, ?, ?, ?, ?, ?, ?)")
 
 
 class DuplicateAsset(Exception):
     pass
+
+
+@contextmanager
+def _write(conn):
+    """Escrita sob o lock numa única transação: commit no sucesso, rollback em qualquer erro."""
+    with _lock:
+        try:
+            yield
+        except BaseException:
+            conn.rollback()
+            raise
+        conn.commit()
 
 
 def connect(path: Path) -> sqlite3.Connection:
@@ -79,18 +94,36 @@ def add_asset(conn, symbol: str, market: str) -> int:
 
 
 def delete_asset(conn, asset_id: int) -> bool:
-    with _lock:
+    with _write(conn):
         conn.execute("DELETE FROM candles WHERE asset_id = ?", (asset_id,))
         cur = conn.execute("DELETE FROM assets WHERE id = ?", (asset_id,))
-        conn.commit()
-        return cur.rowcount > 0
+    return cur.rowcount > 0
+
+
+def _candle_rows(asset_id: int, candles: Iterable[Candle]) -> list[tuple]:
+    return [(asset_id, c.date, c.open, c.high, c.low, c.close, c.volume) for c in candles]
 
 
 def upsert_candles(conn, asset_id: int, candles: Iterable[Candle]) -> int:
-    rows = [(asset_id, c.date, c.open, c.high, c.low, c.close, c.volume) for c in candles]
-    with _lock:
-        conn.executemany("INSERT OR REPLACE INTO candles VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
-        conn.commit()
+    rows = _candle_rows(asset_id, candles)
+    with _write(conn):
+        conn.executemany(_UPSERT_CANDLE, rows)
+    return len(rows)
+
+
+def replace_candles(conn, asset_id: int, candles: Iterable[Candle]) -> int:
+    """Grava a janela recebida e apaga o que ficou antes dela.
+
+    A fonte reajusta o histórico inteiro a cada dividendo/split; linhas que já saíram
+    da janela ficariam com o fator antigo. Lista vazia não apaga nada.
+    """
+    rows = _candle_rows(asset_id, candles)
+    if not rows:
+        return 0
+    with _write(conn):
+        conn.execute("DELETE FROM candles WHERE asset_id = ? AND date < ?",
+                     (asset_id, min(r[1] for r in rows)))
+        conn.executemany(_UPSERT_CANDLE, rows)
     return len(rows)
 
 
@@ -109,9 +142,8 @@ def set_refresh_status(conn, asset_id: int, error: str | None) -> None:
 
 
 def upsert_rf(conn, rows: Iterable[tuple[str, float]]) -> None:
-    with _lock:
-        conn.executemany("INSERT OR REPLACE INTO rf_rates VALUES (?, ?)", list(rows))
-        conn.commit()
+    with _write(conn):
+        conn.executemany("INSERT OR REPLACE INTO rf_rates (date, rate) VALUES (?, ?)", list(rows))
 
 
 def load_rf(conn) -> list[tuple[str, float]]:

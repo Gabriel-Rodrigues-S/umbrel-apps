@@ -1,4 +1,4 @@
-"""Backtest long/caixa com histerese e bootstrap em blocos para o IC do excesso."""
+"""Backtest long/caixa com histerese e bootstrap em blocos para o IC do excesso de crescimento."""
 from dataclasses import dataclass
 
 import numpy as np
@@ -32,6 +32,11 @@ def block_bootstrap_ci(x: np.ndarray, periods_per_year: int, n_boot: int = 1000,
     means = x[idx].mean(axis=1) * periods_per_year
     lo, hi = np.percentile(means, [2.5, 97.5])
     return float(x.mean() * periods_per_year), float(lo), float(hi)
+
+
+def _log1p(returns: pd.Series) -> np.ndarray:
+    """ln(1 + r); retornos <= -100% são limitados para o log existir."""
+    return np.log1p(np.clip(returns.to_numpy(dtype=float), -0.999999, None))
 
 
 def _finite(v: float) -> float:
@@ -71,7 +76,7 @@ class BacktestResult:
     trades: int
     time_in_market: float
     hit_rate: float | None
-    excess_mean: float
+    excess_mean: float  # excesso de crescimento logarítmico anualizado sobre o buy & hold
     ci_low: float
     ci_high: float
     evidence: str  # "favoravel" | "contraria" | "sem_evidencia"
@@ -119,7 +124,9 @@ def run_backtest(close: pd.Series, score: pd.Series, rf_daily: pd.Series | None,
     equity = pd.concat([pd.DataFrame({"strategy": [1.0], "buy_hold": [1.0]}, index=close.index[:1]), equity])
 
     entries = int(((held.diff().fillna(held.iloc[0])) == 1).sum())
-    excess = (strat - bh).to_numpy()
+    # Excesso em log-retornos: a soma bate com ln(equity_estratégia / equity_buy_hold), a mesma
+    # base geométrica da tabela. A média aritmética de (strat - bh) penalizaria o tempo em caixa.
+    excess = _log1p(strat) - _log1p(bh)
     if np.allclose(excess, 0.0, atol=1e-15):
         mean_x, lo, hi = 0.0, 0.0, 0.0
     else:

@@ -66,7 +66,7 @@ def _compute(conn, asset: dict, df: pd.DataFrame) -> dict:
         return insufficient
     frame = F.factor_frame(close)
     raw, norm = frame.iloc[-1], F.normalize(frame).iloc[-1]
-    equity = bt.equity.resample("W-FRI").last().dropna()
+    equity = service.resample_real_dates(bt.equity, "W-FRI", "last").dropna()
     return clean({
         **base, "status": "ok", "as_of": _date(df.index[-1]),
         "score": last_score, "verdict": F.verdict(last_score),
@@ -83,7 +83,9 @@ def _compute(conn, asset: dict, df: pd.DataFrame) -> dict:
 
 
 def _analyze(conn, asset: dict, df: pd.DataFrame) -> dict:
-    sig = (asset["symbol"], asset["market"], len(df), _date(df.index[-1]) if len(df) else None)
+    # last_refresh entra na assinatura: o candle do dia pode ser reescrito sem mudar contagem/data
+    sig = (asset["symbol"], asset["market"], len(df), _date(df.index[-1]) if len(df) else None,
+           asset.get("last_refresh"))
     with _lock:
         hit = _cache.get(asset["id"])
     if hit and hit[0] == sig:

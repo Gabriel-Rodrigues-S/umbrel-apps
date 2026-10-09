@@ -4,9 +4,9 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import FastAPI, HTTPException, Path as PathParam, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -18,6 +18,8 @@ from app.stats.portfolio import PortfolioError
 
 log = logging.getLogger("radar")
 STATIC = Path(__file__).parent / "static"
+RETRY_SECONDS = 600  # nova tentativa quando algum ativo ficou com erro
+AssetId = Annotated[int, PathParam(ge=1, le=2**63 - 1)]  # faixa do INTEGER do SQLite
 
 
 class NewAsset(BaseModel):
@@ -41,10 +43,17 @@ async def refresh_safely(app: FastAPI) -> None:
         log.exception("falha no refresh em segundo plano")
 
 
+def sleep_seconds(app: FastAPI) -> float:
+    """Espera até o próximo refresh; curta se algum ativo ficou com erro (ex.: rede fora na subida)."""
+    normal = app.state.settings.refresh_hours * 3600
+    failed = any(a["last_error"] for a in db.list_assets(app.state.conn))
+    return min(RETRY_SECONDS, normal) if failed else normal
+
+
 async def loop_refresh(app: FastAPI) -> None:
     while True:
         await refresh_safely(app)
-        await asyncio.sleep(app.state.settings.refresh_hours * 3600)
+        await asyncio.sleep(sleep_seconds(app))
 
 
 @asynccontextmanager
@@ -79,6 +88,8 @@ def create_app() -> FastAPI:
         response = await call_next(request)
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
+        else:  # estáticos: revalidar sempre, para index.html e app.js nunca ficarem de versões diferentes
+            response.headers.setdefault("Cache-Control", "no-cache")
         return response
 
     def conn(request: Request):
@@ -114,27 +125,29 @@ def create_app() -> FastAPI:
             raise HTTPException(409, "ativo já está na watchlist")
         try:
             await service.refresh_asset(c, db.get_asset(c, asset_id), request.app.state.settings)
-        except UnknownSymbol:
+        except Exception as e:  # sem refresh bem-sucedido o ativo recém-criado não fica gravado
             db.delete_asset(c, asset_id)
             analysis.invalidate(asset_id)
-            raise HTTPException(422, f"símbolo não encontrado em {body.market}")
+            if isinstance(e, UnknownSymbol):
+                raise HTTPException(422, f"símbolo não encontrado em {body.market}")
+            raise
         analysis.invalidate(asset_id)
         return await run_in_threadpool(analysis.asset_summary, c, db.get_asset(c, asset_id))
 
     @app.delete("/api/assets/{asset_id}", status_code=204)
-    def delete_asset(request: Request, asset_id: int):
+    def delete_asset(request: Request, asset_id: AssetId):
         if not db.delete_asset(conn(request), asset_id):
             raise HTTPException(404, "ativo não encontrado")
         analysis.invalidate(asset_id)
         return Response(status_code=204)
 
     @app.get("/api/assets/{asset_id}/candles")
-    def candles(request: Request, asset_id: int, interval: Literal["1d", "1wk", "1mo"] = "1d"):
+    def candles(request: Request, asset_id: AssetId, interval: Literal["1d", "1wk", "1mo"] = "1d"):
         asset_or_404(request, asset_id)
         return analysis.candles_payload(conn(request), asset_id, interval)
 
     @app.get("/api/assets/{asset_id}/analysis")
-    def asset_analysis(request: Request, asset_id: int):
+    def asset_analysis(request: Request, asset_id: AssetId):
         return analysis.analyze_asset(conn(request), asset_or_404(request, asset_id))
 
     @app.get("/api/ranking")
@@ -152,6 +165,8 @@ def create_app() -> FastAPI:
 
     @app.post("/api/refresh", status_code=202)
     async def refresh(request: Request):
+        if request.app.state.refresh_lock.locked():
+            return {"status": "em andamento"}
         task = asyncio.create_task(refresh_safely(request.app))
         request.app.state.tasks.add(task)
         task.add_done_callback(request.app.state.tasks.discard)

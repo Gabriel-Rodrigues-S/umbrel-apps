@@ -125,8 +125,10 @@ risco), drawdown máximo. Só da estratégia: número de operações, % do tempo
 posicionado, taxa de acerto das operações fechadas.
 
 **Evidência:** bootstrap em blocos (bloco de 21 dias, 1000 reamostragens,
-semente fixa) da diferença diária `retorno_estratégia − retorno_buy_and_hold`,
-gerando IC de 95% do excesso anualizado. Rótulo:
+semente fixa) da diferença diária dos log-retornos
+`ln(1+r_estratégia) − ln(1+r_buy_and_hold)`, gerando IC de 95% do excesso de
+crescimento logarítmico anualizado (a mesma base geométrica dos retornos da
+tabela). Rótulo:
 
 - limite inferior > 0 → `favoravel`
 - limite superior < 0 → `contraria`

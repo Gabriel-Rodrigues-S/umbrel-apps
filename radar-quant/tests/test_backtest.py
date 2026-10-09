@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 
 from app.stats.backtest import (
+    _log1p,
     block_bootstrap_ci,
     perf_stats,
     positions_from_score,
@@ -177,3 +178,27 @@ def test_constant_nonzero_return_has_zero_sharpe_and_vol():
     r = run_backtest(close, score, None, 252, cost=0.0, n_boot=50)
     assert r.buy_hold["sharpe"] == 0.0
     assert r.buy_hold["ann_vol"] == 0.0
+
+
+def test_excess_is_log_growth_difference_and_matches_equity():
+    # Ativo volátil (+20%/-18%): média aritmética positiva, crescimento composto negativo.
+    # Metade do tempo em caixa: a estratégia termina ACIMA do buy & hold, mas a média
+    # aritmética de (strat - bh) é negativa. O excesso tem de seguir a equity.
+    n = 201
+    close = _close_from_rets(np.tile([0.20, -0.18], n)[:n])
+    score = pd.Series(0.0, index=close.index)
+    score.iloc[n // 2:] = 35.0
+    r = run_backtest(close, score, None, 252, n_boot=200)
+    eq_s, eq_b = r.equity["strategy"].iloc[-1], r.equity["buy_hold"].iloc[-1]
+    assert 0 < r.time_in_market < 1 and eq_s > eq_b
+    assert r.strategy["ann_return"] > r.buy_hold["ann_return"]
+    diff = np.log(eq_s) - np.log(eq_b)
+    assert np.sign(r.excess_mean) == np.sign(diff) == 1
+    assert r.excess_mean == pytest.approx(diff * 252 / (len(close) - 1), abs=1e-9)
+    assert r.ci_low <= r.excess_mean <= r.ci_high
+    assert r.evidence == ("favoravel" if r.ci_low > 0 else "contraria" if r.ci_high < 0 else "sem_evidencia")
+
+
+def test_log_return_is_clipped_at_total_loss():
+    out = _log1p(pd.Series([0.0, -1.0, -1.5]))  # retorno <= -100%: log limitado, sem -inf/NaN
+    assert out[0] == 0.0 and out[1] == out[2] == pytest.approx(np.log(1e-6))
