@@ -62,14 +62,11 @@ def test_min_variance_diagonal():
 
 
 def test_min_variance_long_only():
-    # correlação alta e variâncias diferentes: solução irrestrita tem peso negativo
-    cov = np.array([[0.04, 0.036, 0.0], [0.036, 0.04, 0.0], [0.0, 0.0, 0.0225]])
-    cov[0, 1] = cov[1, 0] = 0.0388
-    cov[0, 0] = 0.09
+    # cov01 > menor variância: a solução irrestrita seria [-0.2, 1.2]
+    cov = np.array([[0.16, 0.10], [0.10, 0.09]])
     w = min_variance(cov)
-    eq = np.ones(3) / 3
-    assert (w >= -1e-12).all() and w.sum() == pytest.approx(1)
-    assert w @ cov @ w <= eq @ cov @ eq + 1e-12
+    assert w == pytest.approx([0.0, 1.0], abs=1e-6)
+    assert (w >= 0).all() and w.sum() == pytest.approx(1)
 
 
 def test_apply_cap():
