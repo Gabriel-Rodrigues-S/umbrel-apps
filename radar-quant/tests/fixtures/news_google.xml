@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/"><channel><title>"PETR4" - Google Notícias</title><link>https://news.google.com/search?q=PETR4</link>
+<item><title>Lucro &amp; dividendos da Petrobras surpreendem - InfoMoney</title><link>https://news.google.com/rss/articles/AAA1</link><guid isPermaLink="false">AAA1</guid><pubDate>Thu, 08 Oct 2026 12:06:22 GMT</pubDate><description>&lt;a href="x"&gt;resumo&lt;/a&gt;</description><source url="https://www.infomoney.com.br">InfoMoney</source></item>
+<item><title>Notícia sem link</title><guid isPermaLink="false">AAA2</guid><pubDate>Thu, 08 Oct 2026 10:00:00 GMT</pubDate><source url="https://x.example">Fonte X</source></item>
+<item><title>Link malicioso</title><link>javascript:alert(1)</link><pubDate>Thu, 08 Oct 2026 09:00:00 GMT</pubDate><source url="https://x.example">Fonte Y</source></item>
+<item><title>Petrobras anuncia novo bloco - Valor Investe</title><link>https://news.google.com/rss/articles/AAA4</link><pubDate>Wed, 07 Oct 2026 21:37:00 GMT</pubDate><source url="https://valor.example">Valor Investe</source></item>
+<item><title>Petrobras anuncia novo bloco - Investidor10</title><link>https://news.google.com/rss/articles/AAA5</link><pubDate>data inválida</pubDate><source url="https://inv10.example">Investidor10</source></item>
+</channel></rss>
