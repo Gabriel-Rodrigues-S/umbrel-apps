@@ -4,13 +4,14 @@ name: Crypto Paper Bot
 tagline: Bot de trading de criptomoedas em modo simulado (paper trading)
 icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-crypto-paper-bot/icon.svg
 category: finance
-version: '1.4.8'
+version: '1.5.0'
 port: 3458
 description: >-
   Bot de trading automático que opera com dinheiro simulado usando preços reais
-  da Binance. Crie bots com 4 estratégias (SMA crossover, MACD crossover, RSI
-  reversão, Bandas de Bollinger), cada uma filtrada por ADX pra só operar no
-  regime de mercado certo (tendência ou lateral). Acompanhe saldo, posições e
+  da Binance. Crie bots com 6 estratégias: SMA crossover, MACD crossover, RSI
+  reversão e Bandas de Bollinger (filtradas por ADX pra só operar no regime
+  de mercado certo), mais Preço acima da média e Rompimento de canal (baixa
+  frequência, decidem no fechamento da vela). Acompanhe saldo, posições e
   histórico de trades em um dashboard. Nenhuma ordem real é enviada — é uma
   ferramenta de estudo e teste de estratégias.
 developer: garod004
@@ -26,6 +27,7 @@ path: ''
 defaultUsername: ''
 defaultPassword: ''
 releaseNotes: >-
+  v1.5.0: duas estratégias novas de baixa frequência, pensadas para o gráfico diário — "Preço acima da média" (fica comprado enquanto o fechamento estiver acima da média) e "Rompimento de canal" (compra quando o fechamento supera a máxima das últimas N velas e sai quando perde a mínima de N/2). Diferente das outras, elas decidem só no fechamento da vela e não usam o filtro de ADX. Novos timeframes de 30m e 1d na tela. Os bots existentes não mudam de comportamento.
   v1.4.8: a aba do navegador agora mostra o ícone do app em vez do ícone genérico.
   v1.4.7: a lista de bots ficou praticamente instantânea (antes a tela consultava a exchange uma vez por bot a cada atualização; com 24 bots isso levava ~22s — agora lê o preço e o ADX que o motor já calcula a cada ciclo). Novo modo de confirmação "sem confirmação", que entra no primeiro sinal e serve de grupo de controle. A confirmação por timeframe maior passa a ser recusada em RSI e Bandas de Bollinger, onde ela nunca teve efeito.
   v1.4.6: a lista de bots agora pode ser reordenada arrastando pela alça à esquerda de cada linha. A ordem escolhida fica salva e vale para os próximos acessos. Nenhuma mudança na lógica de operação dos bots.
