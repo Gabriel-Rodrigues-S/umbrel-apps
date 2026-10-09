@@ -31,12 +31,16 @@ else
   SERVER_PID=$!
 fi
 
-# espera o primeiro refresh terminar (até 120 s)
-for _ in $(seq 1 120); do
-  if curl -sf "$BASE/api/health" | grep -q '"last_refresh":"'; then break; fi
+# espera o primeiro refresh passar por todos os ativos (até 180 s); com dados
+# reais ele leva vários segundos e o health já responde depois do primeiro ativo
+pending() {
+  curl -sf "$BASE/api/assets" | python3 -c 'import json,sys; print(sum(1 for a in json.load(sys.stdin) if not a["last_refresh"]))' 2>/dev/null
+}
+for _ in $(seq 1 180); do
+  [ "$(pending)" = "0" ] && break
   sleep 1
 done
-curl -sf "$BASE/api/health" | grep -q '"last_refresh":"' || { echo "FALHA: servidor não respondeu em $BASE"; exit 1; }
+[ "$(pending)" = "0" ] || { echo "FALHA: refresh inicial não terminou em $BASE"; exit 1; }
 
 N_ASSETS=$(curl -sf "$BASE/api/assets" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
 N_OK=$(curl -sf "$BASE/api/ranking" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
