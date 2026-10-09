@@ -6,9 +6,11 @@ from .db import get_conn
 from .strategy import (
     adx,
     bollinger_reversion_signal,
+    donchian_signal,
     macd_crossover_signal,
     rsi_signal,
     sma_crossover_signal,
+    sma_trend_signal,
     trend_direction,
 )
 
@@ -18,18 +20,34 @@ POLL_SECONDS = 10
 FEE_RATE = 0.001  # 0.1%, taxa típica de spot da Binance, simulada
 
 # regime em que cada estratégia funciona bem: 'trend' (segue tendência,
-# só deve operar quando o ADX indica tendência forte) ou 'range' (reversão
-# à média, só deve operar quando o ADX indica mercado lateral)
+# só deve operar quando o ADX indica tendência forte), 'range' (reversão
+# à média, só deve operar quando o ADX indica mercado lateral) ou 'any'
+# (sem filtro de ADX: a própria regra já define quando estar posicionado)
 STRATEGY_REGIME = {
     "sma_crossover": "trend",
     "macd_crossover": "trend",
     "rsi_reversion": "range",
     "bollinger_reversion": "range",
+    "sma_trend": "any",
+    "donchian_breakout": "any",
 }
 
+# estratégias que decidem só com velas FECHADAS. As demais reavaliam a vela
+# ainda em formação a cada checagem; nestas isso faria o preço cruzar a média
+# (ou o canal) várias vezes dentro da mesma vela, multiplicando operações e
+# taxas. A ordem sai na primeira checagem depois do fechamento, ao preço atual.
+# Ambas usam `slow_period` como período (da média / do canal de entrada).
+CLOSED_CANDLE_STRATEGIES = {"sma_trend", "donchian_breakout"}
 
-def compute_signal(bot: dict, closes: list[float]) -> str | None:
+
+def compute_signal(
+    bot: dict, closes: list[float], highs: list[float] | None = None, lows: list[float] | None = None
+) -> str | None:
     strategy = bot["strategy"]
+    if strategy == "sma_trend":
+        return sma_trend_signal(closes, bot["slow_period"])
+    if strategy == "donchian_breakout":
+        return donchian_signal(highs, lows, closes, bot["slow_period"], bot["position_qty"])
     if strategy == "sma_crossover":
         return sma_crossover_signal(closes, bot["fast_period"], bot["slow_period"])
     if strategy == "macd_crossover":
@@ -47,6 +65,9 @@ def required_candles(bot: dict) -> int:
         "macd_crossover": bot["macd_slow"] + bot["macd_signal"] + 5,
         "rsi_reversion": bot["rsi_period"] + 5,
         "bollinger_reversion": bot["bb_period"] + 2,
+        # +1 pela vela em formação, que estas estratégias descartam
+        "sma_trend": bot["slow_period"] + 1,
+        "donchian_breakout": bot["slow_period"] + 2,
     }
     return max(strategy_needs[bot["strategy"]], bot["adx_period"] * 2 + 5) + 5
 
@@ -90,7 +111,11 @@ async def tick_bot(bot: dict):
         return
     price = closes[-1]
 
-    signal = compute_signal(bot, closes)
+    if bot["strategy"] in CLOSED_CANDLE_STRATEGIES:
+        # decide só com velas fechadas: descarta a última, ainda em formação
+        signal = compute_signal(bot, closes[:-1], highs[:-1], lows[:-1])
+    else:
+        signal = compute_signal(bot, closes)
     adx_value = adx(highs, lows, closes, bot["adx_period"])
     regime = STRATEGY_REGIME[bot["strategy"]]
     trading_mode = bot["trading_mode"]  # 'long', 'short' ou 'long_short'
@@ -112,7 +137,7 @@ async def tick_bot(bot: dict):
     # Nunca bloqueia uma saída que fecharia uma posição já aberta — senão o bot
     # pode ficar preso numa posição perdedora se o regime de mercado mudar
     # antes do sinal de saída aparecer.
-    if is_new_entry:
+    if is_new_entry and regime != "any":
         if adx_value is None:
             signal = None
         elif regime == "trend" and adx_value < bot["adx_threshold"]:

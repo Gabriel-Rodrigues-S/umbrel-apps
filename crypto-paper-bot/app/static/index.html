@@ -48,6 +48,7 @@
   .regime-tag { font-size: 10px; padding: 1px 7px; border-radius: 999px; margin-left: 6px; }
   .regime-tag.trend { background: #1e2f47; color: #6fa8ff; }
   .regime-tag.range { background: #3a2f1e; color: #e0a952; }
+  .regime-tag.any { background: #1f3a2a; color: #6fd39a; }
   .mode-tag { font-size: 10px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
   .mode-tag.long { background: #1e3a2a; color: var(--green); }
   .mode-tag.short { background: #3a1e24; color: var(--red); }
@@ -81,7 +82,7 @@
       <div class="field">
         <label>Timeframe</label>
         <select id="f-timeframe">
-          <option>1m</option><option selected>5m</option><option>15m</option><option>1h</option><option>4h</option>
+          <option>1m</option><option selected>5m</option><option>15m</option><option>30m</option><option>1h</option><option>4h</option><option>1d</option>
         </select>
       </div>
       <div class="field">
@@ -91,6 +92,8 @@
           <option value="macd_crossover">MACD Crossover</option>
           <option value="rsi_reversion">RSI Reversão</option>
           <option value="bollinger_reversion">Bandas de Bollinger</option>
+          <option value="sma_trend">Preço acima da média</option>
+          <option value="donchian_breakout">Rompimento de canal</option>
         </select>
       </div>
       <div class="field">
@@ -132,6 +135,12 @@
       <div class="field"><label>Período</label><input id="f-bb-period" type="number" value="20" style="width:70px" /></div>
       <div class="field"><label>Desvios padrão</label><input id="f-bb-std" type="number" value="2" step="0.1" style="width:70px" /></div>
     </div>
+    <div class="form-row strategy-params" id="params-sma_trend" style="margin-top:10px">
+      <div class="field"><label>Período da média (velas)</label><input id="f-trend-period" type="number" value="100" min="2" style="width:70px" /></div>
+    </div>
+    <div class="form-row strategy-params" id="params-donchian_breakout" style="margin-top:10px">
+      <div class="field"><label>Canal de entrada (velas)</label><input id="f-donchian-period" type="number" value="55" min="2" style="width:70px" /></div>
+    </div>
     <div class="form-row" style="margin-top:10px">
       <div class="field"><label>Período ADX</label><input id="f-adx-period" type="number" value="14" style="width:70px" /></div>
       <div class="field"><label>Limiar ADX</label><input id="f-adx-threshold" type="number" value="25" style="width:70px" /></div>
@@ -139,7 +148,7 @@
         <label>Modo de confirmação</label>
         <select id="f-confirmation-mode" onchange="onConfirmationModeChange()">
           <option value="ticks">Persistência (checagens seguidas)</option>
-          <option value="higher_timeframe">Timeframe maior (só SMA e MACD)</option>
+          <option value="higher_timeframe">Timeframe maior (só cruzamento de SMA e MACD)</option>
           <option value="none">Sem confirmação (controle)</option>
         </select>
       </div>
@@ -184,7 +193,7 @@ let priceChart = null;
 let strategies = [];
 let lastTickerFetchMs = null;
 
-const TIMEFRAME_MS = { '1m': 60e3, '5m': 300e3, '15m': 900e3, '1h': 3600e3, '4h': 14400e3 };
+const TIMEFRAME_MS = { '1m': 60e3, '5m': 300e3, '15m': 900e3, '30m': 1800e3, '1h': 3600e3, '4h': 14400e3, '1d': 86400e3 };
 
 function updateTickerAge() {
   const el = document.getElementById('ticker-age');
@@ -223,7 +232,9 @@ function onStrategyChange() {
   const info = strategies.find(s => s.id === selected);
   const hint = document.getElementById('strategy-hint');
   if (info) {
-    hint.innerHTML = `${info.description} Regime: <b>${info.regime}</b> — o filtro de ADX só deixa esse bot operar quando o mercado estiver nesse regime.`;
+    hint.innerHTML = info.regime === 'qualquer'
+      ? `${info.description} <b>Sem filtro de ADX</b>: os campos de ADX abaixo não têm efeito nesta estratégia.`
+      : `${info.description} Regime: <b>${info.regime}</b> — o filtro de ADX só deixa esse bot operar quando o mercado estiver nesse regime.`;
   }
 }
 
@@ -236,7 +247,7 @@ function onConfirmationModeChange() {
       ? 'Persistência: só executa quando o sinal se repete por N checagens seguidas (a cada 10s), evitando reversões relâmpago (whipsaw).'
       : mode === 'none'
         ? 'Sem confirmação: entra no primeiro sinal, sem nenhum filtro de confirmação (o filtro de ADX continua valendo). Serve de grupo de controle para medir o que a confirmação agrega.'
-        : 'Timeframe maior: só entra se a tendência do timeframe de confirmação concordar com o sinal do timeframe do bot. Filtro mais forte, opera com menos frequência. Só funciona em estratégias de tendência (SMA e MACD).';
+        : 'Timeframe maior: só entra se a tendência do timeframe de confirmação concordar com o sinal do timeframe do bot. Filtro mais forte, opera com menos frequência. Só funciona nos cruzamentos de SMA e de MACD.';
 }
 
 async function loadSymbols() {
@@ -246,6 +257,12 @@ async function loadSymbols() {
   } catch (e) {}
 }
 
+// 'Preço acima da média' e 'Rompimento de canal' guardam o período em slow_period
+function slowPeriodFor(strategy) {
+  const field = { sma_trend: 'f-trend-period', donchian_breakout: 'f-donchian-period' }[strategy] || 'f-slow';
+  return parseInt(document.getElementById(field).value);
+}
+
 async function createBot() {
   const payload = {
     symbol: document.getElementById('f-symbol').value.trim(),
@@ -253,7 +270,7 @@ async function createBot() {
     strategy: document.getElementById('f-strategy').value,
     starting_balance: parseFloat(document.getElementById('f-balance').value),
     fast_period: parseInt(document.getElementById('f-fast').value),
-    slow_period: parseInt(document.getElementById('f-slow').value),
+    slow_period: slowPeriodFor(document.getElementById('f-strategy').value),
     macd_fast: parseInt(document.getElementById('f-macd-fast').value),
     macd_slow: parseInt(document.getElementById('f-macd-slow').value),
     macd_signal: parseInt(document.getElementById('f-macd-signal').value),
@@ -288,11 +305,14 @@ async function loadBots() {
   const body = document.getElementById('bots-body');
   body.innerHTML = bots.map(b => {
     const info = strategies.find(s => s.id === b.strategy);
-    const regimeClass = info && info.regime === 'tendência' ? 'trend' : 'range';
+    const semAdx = info && info.regime === 'qualquer';
+    const regimeClass = semAdx ? 'any' : info && info.regime === 'tendência' ? 'trend' : 'range';
     const adxText = b.current_adx != null ? b.current_adx.toFixed(1) : '—';
-    const adxClass = b.trading_active ? 'active' : '';
+    const adxClass = b.trading_active && !semAdx ? 'active' : '';
     const hasPosition = b.position_qty !== 0;
-    const adxHint = b.trading_active == null
+    const adxHint = semAdx
+      ? 'esta estratégia não usa o filtro de ADX'
+      : b.trading_active == null
       ? 'aguardando dados'
       : b.trading_active
         ? 'filtro liberado pra novas entradas'
@@ -309,7 +329,7 @@ async function loadBots() {
         <span class="mode-tag ${b.trading_mode}">${modeLabel}</span>
         <div style="color:var(--muted);font-size:11px">${b.symbol} ${b.timeframe}${positionLabel}</div>
       </td>
-      <td>${strategyLabel(b.strategy)}<span class="regime-tag ${regimeClass}">${info ? info.regime : ''}</span>
+      <td>${strategyLabel(b.strategy)}<span class="regime-tag ${regimeClass}">${semAdx ? 'vela fechada' : info ? info.regime : ''}</span>
         <div style="color:var(--muted);font-size:11px">${b.confirmation_mode === 'higher_timeframe' ? `confirma em ${b.higher_timeframe}` : b.confirmation_mode === 'none' ? 'sem confirmação' : `persistência ${b.confirm_ticks}x`}</div>
       </td>
       <td class="adx-tag ${adxClass}" title="${adxHint}">${adxText}</td>

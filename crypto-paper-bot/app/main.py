@@ -36,13 +36,15 @@ async def no_cache_api(request: Request, call_next):
         response.headers["Cache-Control"] = "no-store"
     return response
 
-STRATEGIES = ["sma_crossover", "macd_crossover", "rsi_reversion", "bollinger_reversion"]
+STRATEGIES = ["sma_crossover", "macd_crossover", "rsi_reversion", "bollinger_reversion", "sma_trend", "donchian_breakout"]
 
 
 class BotCreate(BaseModel):
     symbol: str = "BTC/USDT"
     timeframe: str = "5m"
-    strategy: Literal["sma_crossover", "macd_crossover", "rsi_reversion", "bollinger_reversion"] = "sma_crossover"
+    strategy: Literal[
+        "sma_crossover", "macd_crossover", "rsi_reversion", "bollinger_reversion", "sma_trend", "donchian_breakout"
+    ] = "sma_crossover"
     starting_balance: float = 1000
     fast_period: int = 9
     slow_period: int = 21
@@ -74,6 +76,12 @@ def api_strategies():
          "description": "Compra na volta da sobrevenda, vende na volta da sobrecompra. Bom sem tendência."},
         {"id": "bollinger_reversion", "name": "Bandas de Bollinger", "regime": "lateral",
          "description": "Compra no repique da banda inferior, vende no repique da banda superior."},
+        {"id": "sma_trend", "name": "Preço acima da média", "regime": "qualquer",
+         "description": "Fica comprado enquanto o fechamento estiver acima da média; sai (ou vende) quando "
+                        "fechar abaixo. Decide só no fechamento da vela. Pensada para o diário (1d)."},
+        {"id": "donchian_breakout", "name": "Rompimento de canal", "regime": "qualquer",
+         "description": "Compra quando o fechamento supera a máxima das últimas N velas e sai quando perde a "
+                        "mínima de N/2 velas. Decide só no fechamento da vela. Pensada para o diário (1d)."},
     ]
 
 
@@ -91,11 +99,13 @@ def create_bot(payload: BotCreate):
     # exige regime == "trend"), e trend_direction() nem sabe calcular direcao
     # para RSI/Bollinger. Aceitar essa combinacao criaria um bot cujo apelido
     # promete confirmacao em 1h mas que na pratica entra sem filtro algum.
+    if payload.strategy in engine.CLOSED_CANDLE_STRATEGIES and payload.slow_period < 2:
+        raise HTTPException(422, "o período precisa ser de pelo menos 2 velas.")
     if payload.confirmation_mode == "higher_timeframe" and engine.STRATEGY_REGIME[payload.strategy] != "trend":
         raise HTTPException(
             422,
             "confirmação por timeframe maior só funciona em estratégias de tendência "
-            f"(SMA e MACD). Para {payload.strategy}, use 'ticks' ou 'none'.",
+            f"(cruzamento de SMA e MACD). Para {payload.strategy}, use 'ticks' ou 'none'.",
         )
     with get_conn() as conn:
         cur = conn.execute(
@@ -148,7 +158,9 @@ def list_bots():
             last_price = bot.get("last_price")
             current_adx = bot.get("current_adx")
             regime = engine.STRATEGY_REGIME[bot["strategy"]]
-            if current_adx is None:
+            if regime == "any":
+                bot["trading_active"] = True  # sem filtro de ADX
+            elif current_adx is None:
                 bot["trading_active"] = None
             elif regime == "trend":
                 bot["trading_active"] = current_adx >= bot["adx_threshold"]

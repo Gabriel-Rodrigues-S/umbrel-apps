@@ -227,3 +227,49 @@ def trend_direction(strategy: str, closes: list[float], bot: dict) -> str | None
         return "up" if macd_line[-1] > signal_line[-1] else "down"
 
     return None
+
+
+def sma_trend_signal(closes: list[float], period: int) -> str | None:
+    """
+    Segue tendência de baixa frequência: 'buy' enquanto o fechamento estiver
+    acima da média de `period` velas, 'sell' enquanto estiver abaixo.
+
+    Diferente do cruzamento de SMA, isto é um ESTADO e não um evento: o sinal
+    se repete a cada checagem enquanto a condição valer. O motor só age quando
+    o estado pede uma posição diferente da atual. Deve receber apenas velas
+    FECHADAS (ver engine.CLOSED_CANDLE_STRATEGIES).
+    """
+    mean = sma(closes, period)
+    if mean is None:
+        return None
+    if closes[-1] > mean:
+        return "buy"
+    if closes[-1] < mean:
+        return "sell"
+    return None
+
+
+def donchian_signal(
+    highs: list[float], lows: list[float], closes: list[float], period: int, position: float
+) -> str | None:
+    """
+    Rompimento de canal (Donchian): abre quando o fechamento supera a máxima
+    das `period` velas anteriores (ou perde a mínima, para short) e sai quando
+    o fechamento cruza o canal mais curto, de period/2 velas, no sentido oposto.
+
+    Precisa saber a posição atual porque entrada e saída usam canais de
+    tamanhos diferentes. Deve receber apenas velas FECHADAS.
+    """
+    if len(closes) < period + 1:
+        return None
+    exit_period = max(period // 2, 2)
+    close = closes[-1]
+    if position > 0:
+        return "sell" if close < min(lows[-exit_period - 1:-1]) else None
+    if position < 0:
+        return "buy" if close > max(highs[-exit_period - 1:-1]) else None
+    if close > max(highs[-period - 1:-1]):
+        return "buy"
+    if close < min(lows[-period - 1:-1]):
+        return "sell"
+    return None
