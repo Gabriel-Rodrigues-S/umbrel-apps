@@ -45,6 +45,7 @@
     contraria: "evidência contrária",
     sem_evidencia: "sem evidência estatística",
   };
+  var EVIDENCE_SHORT = { favoravel: "favorável", contraria: "contrária", sem_evidencia: "sem evid." };
   var EVIDENCE_EXPLAIN = {
     favoravel: "O intervalo inteiro fica acima de zero: no histórico, a estratégia superou segurar o ativo.",
     contraria: "O intervalo inteiro fica abaixo de zero: no histórico, a estratégia foi pior que segurar o ativo.",
@@ -194,8 +195,8 @@
     return !(err instanceof ApiError) || err.status === 0 || err.status >= 500;
   }
 
-  function showNetError(err) {
-    var msg = err && err.status >= 500
+  function showNetError(err, text) {
+    var msg = text ? text : err && err.status >= 500
       ? "O servidor respondeu com erro (" + err.status + ")."
       : "Não foi possível falar com o servidor.";
     $("net-error-msg").textContent = msg;
@@ -605,8 +606,27 @@
     return icon;
   }
 
+  var watchlistSig = null;  // assinatura do que está desenhado na watchlist
+
+  function watchlistSignature() {
+    return JSON.stringify([state.selectedId, state.assets.map(function (a) {
+      return [a.id, a.symbol, a.market, a.currency, a.price, a.change_pct, a.status, a.verdict, a.evidence, a.last_error];
+    })]);
+  }
+
+  // Reconstrói só quando algo visível mudou: o auto-refresh de 60 s não pode
+  // roubar o foco do teclado nem engolir um clique em andamento.
   function renderWatchlist() {
     var root = $("watchlist");
+    var sig = watchlistSignature();
+    if (sig === watchlistSig) return;
+    watchlistSig = sig;
+
+    var active = document.activeElement;
+    var focusItem = active && root.contains(active) && active.closest ? active.closest("[data-asset-id]") : null;
+    var focusId = focusItem ? focusItem.dataset.assetId : null;
+    var focusSel = active && active.classList && active.classList.contains("remove-asset") ? ".remove-asset" : ".wl-select";
+
     clear(root);
     root.setAttribute("aria-busy", "false");
     if (!state.assets.length) {
@@ -637,11 +657,26 @@
         pick.appendChild(sym);
         pick.appendChild(el("span", "wl-price", fmtMoney(a.price, a.currency)));
         var verdict = assetVerdict(a);
+        var evidence = a.status === "ok" && EVIDENCE_LABEL[a.evidence] ? a.evidence : "";
+        li.dataset.evidence = evidence;
+        var row2 = el("span", "wl-row2");
         var badge = el("span", "badge wl-badge", VERDICT_SHORT[verdict] || verdict);
         badge.dataset.verdict = verdict;
-        if (a.evidence && EVIDENCE_LABEL[a.evidence]) badge.title = VERDICT_LABEL[verdict] + " — " + EVIDENCE_LABEL[a.evidence];
-        pick.appendChild(badge);
-        pick.appendChild(el("span", "wl-change " + signClass(a.change_pct), fmtPct(a.change_pct)));
+        row2.appendChild(badge);
+        if (evidence) {
+          // Evidência visível ao lado do veredito: ponto colorido + texto curto;
+          // o rótulo completo vai para leitores de tela e para o title.
+          var ev = el("span", "wl-ev");
+          ev.dataset.evidence = evidence;
+          ev.title = EVIDENCE_LABEL[evidence];
+          var shortText = el("span", "", EVIDENCE_SHORT[evidence]);
+          shortText.setAttribute("aria-hidden", "true");
+          ev.appendChild(shortText);
+          ev.appendChild(el("span", "sr-only", EVIDENCE_LABEL[evidence]));
+          row2.appendChild(ev);
+        }
+        row2.appendChild(el("span", "wl-change " + signClass(a.change_pct), fmtPct(a.change_pct)));
+        pick.appendChild(row2);
         li.appendChild(pick);
 
         var rm = el("button", "remove-asset", "×");
@@ -654,6 +689,11 @@
       group.appendChild(list);
       root.appendChild(group);
     });
+
+    if (focusId !== null) {
+      var again = root.querySelector('[data-asset-id="' + focusId + '"] ' + focusSel);
+      if (again) again.focus({ preventScroll: true });
+    }
   }
 
   function renderDataStatus() {
@@ -663,8 +703,12 @@
     $("data-status").textContent = text ? "Dados de " + text : "";
   }
 
+  var assetsToken = 0;
+
   function loadAssets() {
+    var token = ++assetsToken;
     return api("/api/assets").then(function (list) {
+      if (token !== assetsToken) return state.assets;  // resposta antiga: uma mais nova já foi pedida
       state.assets = Array.isArray(list) ? list : [];
       state.assetsLoaded = true;
       hideNetError();
@@ -793,7 +837,7 @@
       verdictEl.textContent = DASH; verdictEl.dataset.verdict = "";
       evidenceEl.textContent = summary ? "análise indisponível no momento" : DASH; evidenceEl.dataset.evidence = "";
       message.hidden = true;
-      $("rec-score").textContent = DASH; marker.hidden = true;
+      $("rec-score").textContent = DASH; $("rec-score").className = "score-value"; marker.hidden = true;
       $("rec-body").hidden = true;
       drawEquity([]);
       return;
@@ -808,7 +852,7 @@
           + " — menos de 300 candles, o mínimo para calcular score, veredito e backtest."
         : "O histórico deste ativo (" + fmtNum(n, 0) + " candles) ainda não permite calcular score e backtest.";
       message.hidden = false;
-      $("rec-score").textContent = DASH; marker.hidden = true;
+      $("rec-score").textContent = DASH; $("rec-score").className = "score-value"; marker.hidden = true;
       $("rec-body").hidden = true;
       drawEquity([]);
       return;
@@ -895,6 +939,7 @@
       } else {
         report(c.error);
         if (fresh) {
+          loadedKey = "";
           drawCandles({ candles: [], indicators: {} }, false);
           setOverlay("Não foi possível carregar os candles.");
         }
@@ -1176,7 +1221,9 @@
     api("/api/refresh", { method: "POST" }).then(function () {
       window.setTimeout(function () { reloadAll().then(done, done); }, 5000);
     }, function (err) {
-      report(err);
+      showNetError(err, isNetworkFailure(err)
+        ? "Não foi possível pedir a atualização dos dados: sem resposta do servidor."
+        : "Não foi possível pedir a atualização dos dados: " + err.message);
       done();
     });
   }
@@ -1203,6 +1250,7 @@
       body: JSON.stringify({ symbol: symbol, market: $("add-market").value }),
     }).then(function (created) {
       input.value = "";
+      showAddError("");
       return loadAssets().then(function () {
         if (created && findAsset(created.id)) selectAsset(created.id);
         return loadTabData();
@@ -1218,6 +1266,7 @@
 
   function removeAsset(id, button) {
     if (button) button.disabled = true;
+    showAddError("");
     api("/api/assets/" + id, { method: "DELETE" }).catch(function (err) {
       if (!(err instanceof ApiError && err.status === 404)) throw err;  // já não existe: só recarrega
     }).then(function () {
