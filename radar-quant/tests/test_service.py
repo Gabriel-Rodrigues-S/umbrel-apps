@@ -329,3 +329,37 @@ def test_refresh_all_so_watchlist(conn, settings):
     c = db.add_asset(conn, "TSLA", "US", watch=False)
     asyncio.run(service.refresh_all(conn, settings))
     assert len(db.load_candles(conn, w)) == 1500 and db.load_candles(conn, c) == []
+
+
+# ---------- 1.1: abrir ativo com a fonte fora do ar ----------
+
+class ForaDoAr:
+    async def fetch_daily(self, symbol, market):
+        raise ProviderError("fonte fora do ar")
+
+
+def test_open_asset_novo_com_fonte_fora_nao_deixa_orfao(conn, settings, monkeypatch):
+    monkeypatch.setattr(service, "get_provider", lambda market, s: ForaDoAr())
+    with pytest.raises(ProviderError, match="fonte fora do ar"):
+        asyncio.run(service.open_asset(conn, "TSLA", "US", settings))
+    assert db.find_asset(conn, "TSLA", "US") is None
+
+
+def test_open_asset_existente_sem_candles_levanta_sem_apagar(conn, settings, monkeypatch):
+    monkeypatch.setattr(service, "get_provider", lambda market, s: ForaDoAr())
+    a = db.add_asset(conn, "TSLA", "US", watch=False)
+    with pytest.raises(ProviderError, match="fonte fora do ar"):
+        asyncio.run(service.open_asset(conn, "TSLA", "US", settings))
+    assert db.get_asset(conn, a) is not None
+
+
+def test_open_asset_simultaneo_atualiza_uma_vez(conn, settings, monkeypatch):
+    p = DiarioContado()
+    monkeypatch.setattr(service, "get_provider", lambda market, s: p)
+
+    async def duas():
+        return await asyncio.gather(service.open_asset(conn, "TSLA", "US", settings),
+                                    service.open_asset(conn, "TSLA", "US", settings))
+    a, b = asyncio.run(duas())
+    assert a["id"] == b["id"] and p.n == 1 and len(db.list_assets(conn, watch=None)) == 1
+    assert service._open_locks == {}

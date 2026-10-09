@@ -1,4 +1,5 @@
 """Serviço de dados: atualização a partir dos provedores e leitura de séries."""
+import asyncio
 import logging
 import threading
 import time
@@ -112,12 +113,28 @@ def _stale(last_refresh: str | None) -> bool:
     return age.total_seconds() > OPEN_STALE_HOURS * 3600
 
 
+_open_locks: dict[tuple[str, str], list] = {}  # (símbolo, mercado) -> [lock, nº de interessados]
+
+
 async def open_asset(conn, symbol: str, market: str, settings: Settings) -> dict:
     """Garante o ativo (criando com watch=0 se preciso), atualiza se faltar dado ou estiver velho e marca a visita.
 
-    Falha num ativo criado nesta chamada não deixa nada gravado.
+    Falha num ativo criado nesta chamada não deixa nada gravado; sem candles no fim, levanta ProviderError.
+    Aberturas simultâneas do mesmo símbolo são serializadas.
     """
     symbol = normalize_symbol(symbol, market)
+    entry = _open_locks.setdefault((symbol, market), [asyncio.Lock(), 0])
+    entry[1] += 1
+    try:
+        async with entry[0]:
+            return await _open_locked(conn, symbol, market, settings)
+    finally:
+        entry[1] -= 1
+        if entry[1] == 0:
+            _open_locks.pop((symbol, market), None)
+
+
+async def _open_locked(conn, symbol: str, market: str, settings: Settings) -> dict:
     asset = db.find_asset(conn, symbol, market)
     created = asset is None
     if created:
@@ -125,12 +142,20 @@ async def open_asset(conn, symbol: str, market: str, settings: Settings) -> dict
     if created or _stale(asset["last_refresh"]) or not db.load_candles(conn, asset["id"]):
         try:
             await refresh_asset(conn, asset, settings)
-        except BaseException:
+        except BaseException:  # inclui cancelamento: não deixar o ativo recém-criado órfão
             if created:
                 db.delete_asset(conn, asset["id"])
             raise
+        if not db.load_candles(conn, asset["id"]):
+            error = (db.get_asset(conn, asset["id"]) or {}).get("last_error")
+            if created:
+                db.delete_asset(conn, asset["id"])
+            raise ProviderError(error or "fonte sem dados")
     db.touch_viewed(conn, asset["id"])
-    return db.get_asset(conn, asset["id"])
+    fresh = db.get_asset(conn, asset["id"])
+    if fresh is None:  # apagado por outra rotina no meio
+        raise ProviderError("ativo removido durante a abertura")
+    return fresh
 
 
 # ---------- intraday sob demanda ----------
