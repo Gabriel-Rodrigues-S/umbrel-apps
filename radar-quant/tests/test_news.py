@@ -219,3 +219,81 @@ def test_get_news_sem_cache_e_fonte_fora(conn, tmp_path):
     out = run(news.get_news(conn, db.get_asset(conn, aid), settings(tmp_path),
                             httpx.MockTransport(handler_for([], 500))))
     assert out["items"] == [] and out["stale"] is True and out["fetched_at"] is None
+
+
+# ---------- rodada de correção 1 ----------
+def test_data_fora_do_intervalo_ou_no_futuro_vira_none():
+    for d in ("Fri, 31 Dec 9999 23:59:59 -0500", "Fri, 31 Dec 2999 23:59:59 GMT"):
+        xml = rss(f"<item><title>a</title><link>https://a.example/1</link><pubDate>{d}</pubDate></item>")
+        assert news.parse_google_rss(xml)[0]["published_at"] is None
+    y = {"news": [{"title": "a", "link": "https://a.example/1", "providerPublishTime": 32503680000}]}
+    assert news.parse_yahoo(y)[0]["published_at"] is None
+
+
+def test_json_profundo_do_yahoo_nao_escapa():
+    def h(req):
+        if req.url.host == "news.google.com":
+            return httpx.Response(200, text=GOOGLE)
+        return httpx.Response(200, content=b"[" * 100000)
+    out = run(news.fetch_news("AAPL", "US", None, httpx.MockTransport(h)))
+    assert len(out) == 2  # só o Google
+
+
+def test_get_news_captura_qualquer_excecao(conn, tmp_path, monkeypatch):
+    aid = db.add_asset(conn, "PETR4", "B3")
+
+    async def boom(*a, **k):
+        raise RuntimeError("inesperado")
+    monkeypatch.setattr(news, "fetch_news", boom)
+    out = run(news.get_news(conn, db.get_asset(conn, aid), settings(tmp_path)))
+    assert out["items"] == [] and out["stale"] is True
+
+
+def test_url_invalida():
+    for u in ("https://", "https://a b", "https://a.example/\x7fx", "http:///x", "https://[::1"):
+        xml = rss(f"<item><title>a</title><link>{u}</link></item>")
+        assert news.parse_google_rss(xml) == [], u
+
+
+def test_remove_controle_e_direcao():
+    xml = rss("<item><title>ab‮cd​ef\x7fg</title><link>https://a.example/1</link>"
+              "<source>fo‮o</source></item>")
+    it = news.parse_google_rss(xml)[0]
+    assert it["title"] == "abcdefg" and it["source"] == "foo"
+
+
+def test_corpo_grande_via_transporte():
+    t = httpx.MockTransport(lambda r: httpx.Response(200, content=b"x" * (news.MAX_BODY + 1)))
+    with pytest.raises(news.NewsError):
+        run(news.fetch_news("PETR4", "B3", None, t))
+
+
+def test_dedup_titulo_so_pontuacao():
+    out = news.merge([item("!!!", "2026-10-01T00:00:00+00:00"), item("???", "2026-10-02T00:00:00+00:00", 1),
+                      item("!!!", "2026-10-03T00:00:00+00:00", 2)])
+    assert len(out) == 2
+
+
+def test_doctype_minusculo():
+    with pytest.raises(news.NewsError):
+        news.parse_google_rss('<!doctype x>' + rss())
+
+
+def test_simbolo_especial_codificado():
+    urls = []
+    run(news.fetch_news("A&B=1#x", "US", None, httpx.MockTransport(handler_for(urls))))
+    g = next(u for u in urls if u.host == "news.google.com")
+    assert g.params["q"] == "A&B=1#x stock" and "A%26B%3D1%23x" in str(g)
+    assert next(u for u in urls if u.host != "news.google.com").params["q"] == "A&B=1#x"
+
+
+def test_busca_vazia_nao_apaga_cache_bom(conn, tmp_path):
+    aid = db.add_asset(conn, "PETR4", "B3")
+    asset = db.get_asset(conn, aid)
+    run(news.get_news(conn, asset, settings(tmp_path), httpx.MockTransport(handler_for([]))))
+    old = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    db.set_meta(conn, db._news_key(aid), old)
+    vazio = httpx.MockTransport(lambda r: httpx.Response(200, text=rss()))
+    out = run(news.get_news(conn, asset, settings(tmp_path), vazio))
+    assert out["stale"] is True and len(out["items"]) == 2 and out["fetched_at"] == old
+    assert len(db.load_news(conn, aid)[0]) == 2
