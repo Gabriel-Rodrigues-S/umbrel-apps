@@ -1,4 +1,5 @@
 """Provedor Yahoo Finance (B3 e EUA)."""
+import asyncio
 import math
 from datetime import datetime, timedelta, timezone
 
@@ -7,8 +8,8 @@ import httpx
 from .base import Candle, ProviderError, UnknownSymbol
 
 URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
-HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                         "Chrome/124.0 Safari/537.36"}
+# UA de navegador completo recebe HTTP 429 do Yahoo; este é aceito.
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; RadarQuantBot/1.0)"}
 
 
 def _volume(v) -> float:
@@ -21,15 +22,20 @@ def _volume(v) -> float:
 
 
 class YahooProvider:
-    def __init__(self, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(self, transport: httpx.AsyncBaseTransport | None = None, retry_delay: float = 1.5):
         self._transport = transport
+        self._retry_delay = retry_delay  # esperas: delay, 2*delay (até 2 retentativas)
 
     async def fetch_daily(self, symbol: str, market: str) -> list[Candle]:
         ticker = f"{symbol}.SA" if market == "B3" else symbol
         params = {"range": "10y", "interval": "1d", "events": "div,splits"}
         try:
             async with httpx.AsyncClient(transport=self._transport, timeout=20, headers=HEADERS) as client:
-                resp = await client.get(URL.format(ticker=ticker), params=params)
+                for attempt in range(3):
+                    resp = await client.get(URL.format(ticker=ticker), params=params)
+                    if (resp.status_code != 429 and resp.status_code < 500) or attempt == 2:
+                        break
+                    await asyncio.sleep(self._retry_delay * (attempt + 1))
         except httpx.HTTPError as e:
             raise ProviderError(f"Yahoo indisponível: {e}") from e
         if resp.status_code == 404:

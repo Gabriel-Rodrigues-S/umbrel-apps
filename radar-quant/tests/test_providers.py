@@ -29,7 +29,7 @@ def run(coro):
 
 # ---------- Yahoo ----------
 def yahoo(handler):
-    return YahooProvider(httpx.MockTransport(handler))
+    return YahooProvider(httpx.MockTransport(handler), retry_delay=0)
 
 
 def test_yahoo_ajusta_e_descarta_nulos():
@@ -59,6 +59,54 @@ def test_yahoo_us_sem_sufixo():
 
     run(yahoo(h).fetch_daily("AAPL", "US"))
     assert "/AAPL?" in urls[0] and ".SA" not in urls[0]
+
+
+def test_yahoo_user_agent():
+    seen = []
+
+    def h(req):
+        seen.append(req.headers["user-agent"])
+        return httpx.Response(200, json=load("yahoo_petr4.json"))
+
+    run(yahoo(h).fetch_daily("X", "US"))
+    assert "RadarQuantBot" in seen[0]
+
+
+def test_yahoo_429_depois_200():
+    calls = []
+
+    def h(req):
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(429)
+        return httpx.Response(200, json=load("yahoo_petr4.json"))
+
+    assert len(run(yahoo(h).fetch_daily("X", "US"))) == 4
+    assert len(calls) == 2
+
+
+def test_yahoo_429_persistente():
+    calls = []
+
+    def h(req):
+        calls.append(1)
+        return httpx.Response(429)
+
+    with pytest.raises(ProviderError):
+        run(yahoo(h).fetch_daily("X", "US"))
+    assert len(calls) == 3
+
+
+def test_yahoo_404_nao_retenta():
+    calls = []
+
+    def h(req):
+        calls.append(1)
+        return httpx.Response(404, json={})
+
+    with pytest.raises(UnknownSymbol):
+        run(yahoo(h).fetch_daily("X", "US"))
+    assert len(calls) == 1
 
 
 def test_yahoo_404():
