@@ -210,3 +210,39 @@ def test_purge_async(conn):
     conn.execute("UPDATE assets SET last_viewed = ? WHERE id = ?", ((now - timedelta(days=40)).isoformat(), aid))
     conn.commit()
     assert run(universe.purge_async(conn, now)) == 1
+
+
+def test_catalogo_vazio_nao_grava_metas_nem_cria_nada(tmp_path, settings):
+    c = db.connect(tmp_path / "vazio.db")
+    now = datetime(2026, 10, 9, 6, 0, tzinfo=timezone.utc)
+    assert universe.universe_due(c, now) is False
+    out = run(universe.refresh_universe(c, settings, sleep=Sleeps()))
+    assert out == {"updated": 0, "skipped": 0, "failed": 0, "aborted": False}
+    assert db.get_meta(c, "universe_attempt_at") is None and db.get_meta(c, "universe_refreshed_at") is None
+    assert db.list_assets(c, watch=None) == []
+    run(catalog.refresh_catalog(c, settings))  # o catálogo chega
+    assert universe.universe_due(c, now) is True
+    assert run(universe.refresh_universe(c, settings, sleep=Sleeps()))["updated"] == 16
+
+
+def test_purge_com_catalogo_vazio_nao_apaga(tmp_path):
+    c = db.connect(tmp_path / "vazio.db")
+    aid = db.add_asset(c, "ANTIGO1", "B3", watch=False)
+    now = datetime(2026, 10, 9, tzinfo=timezone.utc)
+    c.execute("UPDATE assets SET last_viewed = ? WHERE id = ?", ((now - timedelta(days=90)).isoformat(), aid))
+    c.commit()
+    assert universe.purge(c, now) == 0
+    assert db.get_asset(c, aid) is not None
+
+
+def test_passada_sem_nada_a_fazer_nao_grava_conclusao(conn, settings):
+    run(universe.refresh_universe(conn, settings, sleep=Sleeps()))
+    conn.execute("DELETE FROM meta WHERE key = 'universe_refreshed_at'")
+    conn.commit()
+    monkey = universe._universe_assets
+    universe._universe_assets = lambda c: []
+    try:
+        run(universe.refresh_universe(conn, settings, sleep=Sleeps()))
+    finally:
+        universe._universe_assets = monkey
+    assert db.get_meta(conn, "universe_refreshed_at") is None

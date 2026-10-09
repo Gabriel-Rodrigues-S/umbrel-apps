@@ -326,11 +326,21 @@ def upsert_screener(conn, asset_id: int, as_of: str, payload: dict) -> None:
 
 
 def load_screener(conn, asset_ids: Iterable[int] | None = None) -> list[dict]:
+    """Linhas do screener ordenadas por ativo; com `asset_ids`, lê só essas (em lotes de 500)."""
+    if asset_ids is None:
+        sql, batches = "SELECT * FROM screener ORDER BY asset_id", [()]
+    else:
+        ids = sorted(set(asset_ids))
+        batches = [ids[i:i + 500] for i in range(0, len(ids), 500)]
+        sql = None
+    rows = []
     with _lock:
-        rows = conn.execute("SELECT * FROM screener ORDER BY asset_id").fetchall()
-    ids = None if asset_ids is None else set(asset_ids)
+        for batch in batches:
+            q = sql or f"SELECT * FROM screener WHERE asset_id IN ({','.join('?' * len(batch))})"
+            rows += conn.execute(q, tuple(batch)).fetchall()
+    rows.sort(key=lambda r: r["asset_id"])
     return [{"asset_id": r["asset_id"], "as_of": r["as_of"], "updated_at": r["updated_at"],
-             "payload": json.loads(r["payload"])} for r in rows if ids is None or r["asset_id"] in ids]
+             "payload": json.loads(r["payload"])} for r in rows]
 
 
 # ---------- notícias ----------

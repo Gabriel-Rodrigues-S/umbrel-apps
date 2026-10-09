@@ -267,6 +267,16 @@ def test_screener_ida_e_volta(conn):
     assert db.load_screener(conn, []) == []
 
 
+def test_load_screener_muitos_ids(conn):
+    ids = [db.add_asset(conn, f"S{i}", "US") for i in range(1203)]
+    for i in ids[::2]:
+        db.upsert_screener(conn, i, "2024-01-02", {"score": i})
+    got = db.load_screener(conn, ids + [999999])
+    assert [r["asset_id"] for r in got] == ids[::2]
+    assert [r["asset_id"] for r in db.load_screener(conn, set(ids[:3]))] == [ids[0], ids[2]]
+    assert len(db.load_screener(conn)) == len(ids[::2])
+
+
 def test_news_ordem_e_fetched_at(conn):
     a = db.add_asset(conn, "AAPL", "US")
     assert db.load_news(conn, a) == ([], None)

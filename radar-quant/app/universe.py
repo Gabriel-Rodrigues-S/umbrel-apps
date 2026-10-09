@@ -41,7 +41,10 @@ def ensure_assets(conn) -> int:
 def universe_due(conn, now: datetime) -> bool:
     """Nunca rodou, ou última passada completa há mais de STALE_HOURS e estamos na janela da madrugada.
 
-    Nunca antes de RETRY_HOURS desde a última tentativa, qualquer que seja o resultado dela."""
+    Nunca antes de RETRY_HOURS desde a última tentativa, qualquer que seja o resultado dela,
+    e nunca sem membros de índice no catálogo (ele ainda não chegou)."""
+    if not db.index_members(conn):
+        return False
     now = _utc(now)
     try:
         if now - _utc(datetime.fromisoformat(db.get_meta(conn, ATTEMPT_KEY) or "")) < timedelta(hours=RETRY_HOURS):
@@ -93,6 +96,9 @@ async def refresh_universe(conn, settings, pace: float | None = None, limit: int
                            sleep=asyncio.sleep) -> dict:
     """Uma passada pelos ativos de índice desatualizados. `limit` corta a passada (que então é parcial)."""
     pace = settings.universe_pace if pace is None else pace
+    if not await asyncio.to_thread(db.index_members, conn):
+        log.info("catálogo sem membros de índice: passada adiada")
+        return {"updated": 0, "skipped": 0, "failed": 0, "aborted": False}
     now = datetime.now(timezone.utc)
     db.set_meta(conn, ATTEMPT_KEY, now.isoformat())
     # centenas de commits e leituras: fora do event loop
@@ -121,7 +127,7 @@ async def refresh_universe(conn, settings, pace: float | None = None, limit: int
             out["aborted"] = True
             log.warning("passada do universo abortada após %d falhas seguidas", streak)
             break
-    if not out["aborted"] and not partial:
+    if not out["aborted"] and not partial and out["updated"] + out["skipped"] > 0:
         db.set_meta(conn, META_KEY, datetime.now(timezone.utc).isoformat())
     log.info("passada do universo concluída: %s%s", out, " (parcial)" if partial else "")
     return out
@@ -130,6 +136,8 @@ async def refresh_universe(conn, settings, pace: float | None = None, limit: int
 def purge(conn, now: datetime) -> int:
     """Apaga os visitados fora de índice sem visita nos últimos PURGE_DAYS dias."""
     keys = _member_keys(conn)
+    if not keys:  # catálogo momentaneamente vazio não pode levar à limpeza dos ativos de índice
+        return 0
     keep = {a["id"] for a in db.list_assets(conn, watch=None) if (a["symbol"], a["market"]) in keys}
     return db.purge_viewed(conn, (_utc(now) - timedelta(days=PURGE_DAYS)).isoformat(), keep)
 
