@@ -45,7 +45,7 @@ def _num(x, nd: int = 6):
         x = float(x)
     except (TypeError, ValueError):
         return None
-    return round(x, nd) if np.isfinite(x) else None
+    return round(x, nd) + 0.0 if np.isfinite(x) else None  # + 0.0 normaliza -0.0
 
 
 def signals(df: pd.DataFrame, key: str) -> tuple[pd.Series, pd.Series]:
@@ -91,6 +91,9 @@ def simulate(df, key, cost=COST, max_hold=MAX_HOLD) -> tuple[list[Trade], dict |
             continue
         e = t + 1  # compra na abertura de t+1
         entry_price = op[e]
+        if not (np.isfinite(entry_price) and entry_price > 0):  # dado inválido: descarta a operação
+            t += 1
+            continue
         done = False
         for j in range(e, n):
             days = j - e + 1
@@ -100,14 +103,17 @@ def simulate(df, key, cost=COST, max_hold=MAX_HOLD) -> tuple[list[Trade], dict |
                 x_i, x_price = j + 1, op[j + 1]
             else:
                 continue
+            t, done = j + 1, True
+            if not (np.isfinite(x_price) and x_price > 0):
+                break
             net = x_price / entry_price - 1 - 2 * cost
             trades.append(Trade(idx[e], float(entry_price), idx[x_i], float(x_price), days, float(net),
                                 float(net - (np.exp(mu * days) - 1))))
-            t, done = j + 1, True
             break
         if not done:
             return trades, {"entry_date": idx[e].isoformat(), "entry_price": float(entry_price),
-                            "days": n - e, "ret": float(cl[-1] / entry_price - 1)}
+                            "days": n - e, "ret": float(cl[-1] / entry_price - 1),
+                            "exit_pending": bool(ex[-1])}  # saída já sinalizada: venda na próxima abertura
     return trades, None
 
 
@@ -116,7 +122,7 @@ def _boot_ci(x: np.ndarray, n_boot: int, seed: int) -> tuple[float, float]:
     rng = np.random.default_rng(seed)
     means = x[rng.integers(0, len(x), size=(n_boot, len(x)))].mean(axis=1)
     lo, hi = np.percentile(means, [2.5, 97.5])
-    return round(float(lo), 6), round(float(hi), 6)
+    return float(lo), float(hi)
 
 
 def _label(lo: float, hi: float) -> str:
@@ -134,9 +140,15 @@ def trade_stats(trades: list[Trade], n_boot: int = 2000, seed: int = 42) -> dict
     out.update(win_rate=_num((net > 0).mean()), mean_net=_num(net.mean()), median_net=_num(np.median(net)),
                avg_days=_num(np.mean([t.days for t in trades])), mean_excess=_num(exc.mean()))
     if n >= MIN_TRADES:
-        out["ci_low"], out["ci_high"] = _boot_ci(exc, n_boot, seed)
-        out["evidence"] = _label(out["ci_low"], out["ci_high"])
+        lo, hi = _boot_ci(exc, n_boot, seed)
+        out["ci_low"], out["ci_high"], out["evidence"] = _num(lo), _num(hi), _label(lo, hi)  # rótulo com IC bruto
     return out
+
+
+def _cut(marks: list[dict]) -> list[dict]:
+    """Últimas MAX_MARKERS marcações, sem começar por uma saída órfã."""
+    marks = marks[-MAX_MARKERS:]
+    return marks[1:] if marks and marks[0]["type"] == "exit" else marks
 
 
 def setup_report(df, key) -> dict:
@@ -146,7 +158,7 @@ def setup_report(df, key) -> dict:
     ent, _ = signals(df, key)
     if pos is not None:
         pos = {"entry_date": pos["entry_date"], "entry_price": _num(pos["entry_price"]),
-               "days": pos["days"], "ret": _num(pos["ret"])}
+               "days": pos["days"], "ret": _num(pos["ret"]), "exit_pending": pos["exit_pending"]}
         state = "posicao"
     else:
         state = "sinal" if len(ent) and bool(ent.iloc[-1]) else "nenhum"
@@ -158,7 +170,7 @@ def setup_report(df, key) -> dict:
         marks.append({"time": pos["entry_date"], "type": "entry", "price": pos["entry_price"]})
     return {"key": key, "label": SETUPS[key]["label"], "description": SETUPS[key]["description"],
             "state": state, "position": pos, "stats": trade_stats(trades),
-            "markers": marks[-MAX_MARKERS:],
+            "markers": _cut(marks),
             "pool": [[t.entry_date.year * 100 + t.entry_date.month, _num(t.excess)] for t in trades]}
 
 
@@ -183,7 +195,8 @@ def swing_report(df) -> dict:
 
 
 def pooled_evidence(pool: list[tuple[int, float]], n_boot: int = 1000, seed: int = 42) -> dict:
-    """Evidência do índice: bootstrap por mês de entrada (reamostra meses inteiros)."""
+    """Evidência do índice por bootstrap de meses de entrada; `win_rate` = fração com excesso > 0."""
+    pool = [(m, e) for m, e in pool if e is not None and np.isfinite(e)]
     n = len(pool)
     out = {"trades": n, "win_rate": None, "mean_excess": None, "ci_low": None, "ci_high": None,
            "evidence": "amostra_insuficiente"}
@@ -200,6 +213,5 @@ def pooled_evidence(pool: list[tuple[int, float]], n_boot: int = 1000, seed: int
     pick = np.random.default_rng(seed).integers(0, len(uniq), size=(n_boot, len(uniq)))
     means = sums[pick].sum(axis=1) / counts[pick].sum(axis=1)
     lo, hi = np.percentile(means, [2.5, 97.5])
-    out["ci_low"], out["ci_high"] = round(float(lo), 6), round(float(hi), 6)
-    out["evidence"] = _label(out["ci_low"], out["ci_high"])
+    out["ci_low"], out["ci_high"], out["evidence"] = _num(lo), _num(hi), _label(lo, hi)
     return out

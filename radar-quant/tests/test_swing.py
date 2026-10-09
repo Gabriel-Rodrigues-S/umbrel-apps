@@ -247,7 +247,88 @@ def test_markers_limitados_a_200(monkeypatch):
     n = 1200
     fake_signals(monkeypatch, n, entries=range(2, n, 4), exits=range(4, n, 4))
     r = swing.setup_report(sim_df(n), "reversao")
-    assert len(r["markers"]) == swing.MAX_MARKERS
+    assert len(r["markers"]) <= swing.MAX_MARKERS
+    assert r["markers"][0]["type"] == "entry"  # corte não deixa saída órfã no início
+    assert len(r["markers"]) == swing.MAX_MARKERS - 1
+
+
+def test_position_exit_pending(monkeypatch):
+    fake_signals(monkeypatch, 30, entries=[25], exits=[29])
+    assert swing.simulate(sim_df(), "reversao")[1]["exit_pending"] is True
+    assert swing.setup_report(sim_df(), "reversao")["position"]["exit_pending"] is True
+    fake_signals(monkeypatch, 30, entries=[25])
+    assert swing.simulate(sim_df(), "reversao")[1]["exit_pending"] is False
+
+
+def test_fronteira_entrada_e_saida_no_mesmo_fechamento(monkeypatch):
+    fake_signals(monkeypatch, 30, entries=[3], exits=[3])  # saída só vale a partir do pregão de entrada
+    t = swing.simulate(sim_df(), "reversao")[0]
+    assert len(t) == 1 and t[0].days == 10
+
+
+def test_fronteira_saida_no_pregao_de_entrada(monkeypatch):
+    fake_signals(monkeypatch, 30, entries=[3], exits=[4])
+    t = swing.simulate(sim_df(), "reversao")[0][0]
+    assert t.days == 1 and t.exit_price == 105.0
+
+
+def test_fronteira_entrada_no_fechamento_da_saida_por_limite(monkeypatch):
+    fake_signals(monkeypatch, 30, entries=[3, 13])
+    t = swing.simulate(sim_df(), "reversao")[0]
+    assert len(t) == 1 and t[0].exit_date == sim_df().index[13]
+
+
+def test_fronteira_saida_no_10o_pregao_limite_prevalece(monkeypatch):
+    fake_signals(monkeypatch, 30, entries=[3], exits=[13])
+    t = swing.simulate(sim_df(), "reversao")[0][0]
+    assert t.days == 10 and t.exit_price == 113.5
+
+
+@pytest.mark.parametrize("key", KEYS)
+def test_simulate_prefixo(key):
+    df = random_df(1500, seed=5)
+    full = swing.simulate(df, key)[0]
+    for k in (700, 1000, 1300):
+        part = swing.simulate(df.iloc[:k], key)[0]
+        closed = [t for t in full if t.exit_date <= df.index[k - 1]]
+        # excess depende de mu do df inteiro (spec); o resto da operação não pode mudar
+        strip = lambda ts: [(t.entry_date, t.entry_price, t.exit_date, t.exit_price, t.days, t.net) for t in ts]  # noqa: E731
+        assert strip(part) == strip(closed)
+
+
+def test_open_nan_na_entrada_descarta_operacao():
+    close = np.full(60, 100.0)
+    close[40] = 105.0
+    vol = np.full(60, 1000.0)
+    vol[40] = 2000.0
+    op = close.copy()
+    op[41] = np.nan
+    df = make_df(close, open_=op, volume=vol)
+    assert swing.simulate(df, "rompimento") == ([], None)
+    rep = swing.swing_report(df)
+    json.dumps(rep, allow_nan=False)
+    assert rep["setups"][2]["markers"] == [] and rep["setups"][2]["pool"] == []
+
+
+def test_open_invalido_na_saida_descarta_operacao(monkeypatch):
+    df = sim_df()
+    df.iloc[7, df.columns.get_loc("open")] = 0.0
+    fake_signals(monkeypatch, 30, entries=[3], exits=[6])
+    assert swing.simulate(df, "reversao") == ([], None)
+
+
+def test_rotulo_usa_ic_bruto_e_sem_zero_negativo():
+    s = swing.trade_stats([trade(4e-7, i) for i in range(30)])
+    assert s["ci_low"] == 0.0 and s["evidence"] == "favoravel"
+    s = swing.trade_stats([trade(-4e-7, i) for i in range(30)])
+    assert s["ci_high"] == 0.0 and str(s["ci_high"]) == "0.0" and s["evidence"] == "contraria"
+
+
+def test_pooled_ignora_excesso_invalido():
+    pool = _pool() + [(202001, None), (202001, float("nan")), (202001, float("inf"))]
+    p = swing.pooled_evidence(pool)
+    assert p["trades"] == 300 and p["evidence"] == "favoravel"
+    json.dumps(p, allow_nan=False)
 
 
 def test_context_atr_e_volume():
