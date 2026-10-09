@@ -6,9 +6,9 @@ import pandas as pd
 
 from app import db, service
 from app.config import CURRENCY, PERIODS_PER_YEAR
+from app.providers.base import Bar
 from app.stats import factors as F
 from app.stats.backtest import run_backtest
-from app.providers.base import Bar
 from app.stats.indicators import bollinger, macd, rsi, sma
 from app.stats.portfolio import METHODS, PortfolioError, build_portfolio
 from app.stats.swing import swing_report
@@ -119,8 +119,10 @@ def asset_summary(conn, asset: dict) -> dict:
     df = service.load_frame(conn, asset["id"])
     entry = db.catalog_entry(conn, asset["symbol"], asset["market"])
     out = {"id": asset["id"], "symbol": asset["symbol"], "market": asset["market"],
-           "currency": asset["currency"], "watch": bool(asset.get("watch", 1)),
-           "name": entry["name"] if entry else None, "indices": entry["indices"] if entry else [], "price": None, "change_pct": None, "score": None,
+           "currency": asset["currency"],
+           "watch": bool(asset.get("watch", 1)),
+           "name": entry["name"] if entry else None,
+           "indices": entry["indices"] if entry else [], "price": None, "change_pct": None, "score": None,
            "verdict": None, "evidence": None, "status": "insuficiente",
            "last_error": asset.get("last_error"), "last_refresh": asset.get("last_refresh")}
     if df.empty:
