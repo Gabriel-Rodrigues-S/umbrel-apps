@@ -4,6 +4,7 @@ O conteúdo vem de terceiros: só URLs http(s), textos limitados, XML com DTD/en
 import asyncio
 import html
 import json
+import logging
 import re
 import unicodedata
 import xml.etree.ElementTree as ET
@@ -21,6 +22,8 @@ MAX_BODY = 2_000_000
 MAX_TITLE = 300
 MAX_SOURCE = 80
 MAX_URL = 2000
+
+log = logging.getLogger("radar.news")
 
 GOOGLE_URL = "https://news.google.com/rss/search"
 YAHOO_URL = "https://query1.finance.yahoo.com/v1/finance/search"
@@ -170,7 +173,12 @@ async def fetch_news(symbol: str, market: str, name: str | None,
 
     async with httpx.AsyncClient(transport=transport, timeout=15, headers=HEADERS) as client:
         results = await asyncio.gather(*(one(client, *j) for j in jobs), return_exceptions=True)
-    good = [r for r in results if isinstance(r, list)]  # uma fonte fora do ar não impede a outra
+    good = []  # uma fonte fora do ar não impede a outra
+    for (url, _, _), r in zip(jobs, results):
+        if isinstance(r, list):
+            good.append(r)
+        else:
+            log.warning("fonte de notícias %s falhou: %s: %s", urlsplit(url).netloc, type(r).__name__, r)
     if not good:
         raise NewsError("todas as fontes de notícias falharam")
     return merge([i for r in good for i in r])
@@ -195,9 +203,11 @@ async def get_news(conn, asset: dict, settings, transport: httpx.AsyncBaseTransp
             entry = db.catalog_entry(conn, asset["symbol"], asset["market"])
             items = await fetch_news(asset["symbol"], asset["market"], (entry or {}).get("name"), transport)
     except Exception:  # nenhuma falha de rede/parse chega ao chamador
+        log.exception("falha ao buscar notícias de %s", asset.get("symbol"))
         return {"items": cached, "fetched_at": fetched_at, "stale": True}
-    if not items and cached:  # busca "ok" porém vazia não apaga cache bom
-        return {"items": cached, "fetched_at": fetched_at, "stale": True}
+    if not items and cached:  # busca "ok" porém vazia não apaga cache bom; renova o carimbo (TTL)
+        db.touch_news(conn, asset["id"])
+        return {"items": cached, "fetched_at": db.load_news(conn, asset["id"])[1], "stale": True}
     db.replace_news(conn, asset["id"], items)
     cached, fetched_at = db.load_news(conn, asset["id"])
     return {"items": cached, "fetched_at": fetched_at, "stale": False}

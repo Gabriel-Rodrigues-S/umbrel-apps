@@ -351,6 +351,12 @@ def replace_news(conn, asset_id: int, items: list[dict]) -> None:
         conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (_news_key(asset_id), now))
 
 
+def touch_news(conn, asset_id: int) -> None:
+    """Renova só o carimbo de busca das notícias (as linhas ficam como estão)."""
+    with _write(conn):
+        conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (_news_key(asset_id), _now()))
+
+
 def load_news(conn, asset_id: int) -> tuple[list[dict], str | None]:
     with _lock:
         rows = conn.execute("SELECT title, url, source, published_at FROM news WHERE asset_id = ? "

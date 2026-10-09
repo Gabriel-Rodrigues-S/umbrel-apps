@@ -293,3 +293,12 @@ def test_meta(conn):
     db.set_meta(conn, "k", "1")
     db.set_meta(conn, "k", "2")
     assert db.get_meta(conn, "k") == "2"
+
+
+def test_touch_news_renova_so_o_carimbo(conn):
+    a = db.add_asset(conn, "PETR4", "B3")
+    db.replace_news(conn, a, [{"title": "t", "url": "http://x/1", "source": "s", "published_at": "2024-01-01"}])
+    db.set_meta(conn, db._news_key(a), "2020-01-01T00:00:00+00:00")
+    db.touch_news(conn, a)
+    items, fetched = db.load_news(conn, a)
+    assert len(items) == 1 and fetched > "2020-01-02"
