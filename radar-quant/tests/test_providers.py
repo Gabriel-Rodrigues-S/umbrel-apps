@@ -99,6 +99,30 @@ def test_yahoo_datas_duplicadas_fica_a_ultima():
     assert candles[0].close == 34.3
 
 
+@pytest.mark.parametrize("mutate", [
+    lambda d: d["chart"]["result"][0]["timestamp"].__setitem__(0, None),
+    lambda d: d["chart"]["result"][0]["timestamp"].__setitem__(0, "x"),
+    lambda d: d["chart"]["result"][0]["indicators"]["quote"][0]["open"].__setitem__(0, "abc"),
+    lambda d: d["chart"].__setitem__("error", "boom"),
+    lambda d: d["chart"].__setitem__("error", ["x"]),
+    lambda d: d["chart"].__setitem__("result", {"a": 1}),
+    lambda d: d["chart"].__setitem__("result", ["texto"]),
+    lambda d: d["chart"]["result"][0]["timestamp"].pop(),  # tamanhos diferentes
+])
+def test_yahoo_corpo_malformado(mutate):
+    d = load("yahoo_petr4.json")
+    mutate(d)
+    with pytest.raises(ProviderError):
+        run(yahoo(lambda r: httpx.Response(200, json=d)).fetch_daily("X", "US"))
+
+
+def test_yahoo_descarta_valores_nao_positivos():
+    d = load("yahoo_petr4.json")
+    d["chart"]["result"][0]["indicators"]["quote"][0]["low"][0] = 0
+    d["chart"]["result"][0]["indicators"]["adjclose"][0]["adjclose"][1] = -1
+    assert len(run(yahoo(lambda r: httpx.Response(200, json=d)).fetch_daily("X", "US"))) == 2
+
+
 # ---------- Binance ----------
 def binance(handler):
     return BinanceProvider(httpx.MockTransport(handler))
@@ -144,6 +168,18 @@ def test_binance_simbolo_invalido():
 def test_binance_lista_vazia():
     with pytest.raises(ProviderError):
         run(binance(lambda r: httpx.Response(200, json=[])).fetch_daily("BTC", "CRYPTO"))
+
+
+@pytest.mark.parametrize("row", [[1704067200000, "1"], [1704067200000, "x", "2", "1", "1", "1"], [None, "1", "1", "1", "1", "1"]])
+def test_binance_linha_malformada(row):
+    with pytest.raises(ProviderError):
+        run(binance(lambda r: httpx.Response(200, json=[row])).fetch_daily("BTC", "CRYPTO"))
+
+
+def test_binance_descarta_preco_nao_positivo():
+    rows = load("binance_btc.json")
+    rows[0][3] = "0"
+    assert len(run(binance(lambda r: httpx.Response(200, json=rows)).fetch_daily("BTC", "CRYPTO"))) == 2
 
 
 # ---------- BCB ----------
