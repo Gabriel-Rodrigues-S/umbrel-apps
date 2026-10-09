@@ -67,6 +67,9 @@
   var SWING_EVIDENCE_LEGEND = {
     favoravel: "favorável", contraria: "contrária", sem_evidencia: "sem evidência", amostra_insuficiente: "amostra insuficiente",
   };
+  var SWING_EVIDENCE_SHORT = {
+    favoravel: "favorável", contraria: "contrária", sem_evidencia: "s/ evid.", amostra_insuficiente: "amostra insuf.",
+  };
   var SWING_EVIDENCE_ORDER = ["favoravel", "contraria", "sem_evidencia", "amostra_insuficiente"];
   var SETUP_SHORT = { reversao: "Reversão", queda: "Queda", rompimento: "Rompimento" };
   var SETUP_STATE_SHORT = { sinal: "sinal", posicao: "posição" };
@@ -165,6 +168,7 @@
   }
 
   function fmtDateTime(iso) {
+    if (typeof iso !== "string" || !iso) return "";  // new Date(null) é o epoch 0, não uma data inválida
     var d = new Date(iso);
     if (isNaN(d.getTime())) return "";
     return new Intl.DateTimeFormat(LOCALE, {
@@ -193,6 +197,7 @@
 
   // "há 3 h" — tempo relativo curto para as notícias.
   function fmtAgo(iso) {
+    if (typeof iso !== "string" || !iso) return "";
     var t = Date.parse(iso);
     if (isNaN(t)) return "";
     var s = (Date.now() - t) / 1000;
@@ -873,6 +878,7 @@
 
   // ------------------------------------------------------- ativo em foco
   var detailToken = 0;
+  var openToken = 0;      // aberturas sob demanda (POST /api/assets/open)
   var detailStamp = "";   // last_refresh do ativo quando o detalhe foi carregado
 
   function renderChartHeader(a) {
@@ -1194,6 +1200,7 @@
 
   // ---------------------------------------------------------------- notícias
   var newsToken = 0;
+  var newsFor = null;   // id do ativo cujas notícias estão na tela (ou a caminho)
   var NEWS_EMPTY = "Nenhuma notícia encontrada para este ativo.";
 
   function renderNews(data) {
@@ -1225,6 +1232,7 @@
 
   function loadNews(id) {
     var token = ++newsToken;
+    newsFor = id;
     var panel = $("news-panel"), loading = $("news-loading"), empty = $("news-empty");
     clear($("news-list"));
     $("news-stale").hidden = true;
@@ -1253,6 +1261,7 @@
   // ---------------------------------------------------------------- intraday
   var intradayTimer = 0;
   var candlesAt = 0;  // quando os candles em exibição foram pedidos
+  var candlesBusy = false;  // recarga silenciosa em voo: não empilha outra por cima
 
   function renderIntradayNote(payload, asset, errorText) {
     var note = $("intraday-note");
@@ -1281,16 +1290,19 @@
   // Recarga silenciosa só dos candles (o cartão de recomendação é diário).
   function reloadCandles() {
     var id = state.selectedId, interval = selInterval, token = detailToken;
-    if (id === null || !isIntraday(interval)) return Promise.resolve();
+    if (id === null || !isIntraday(interval) || candlesBusy) return Promise.resolve();
+    candlesBusy = true;
     var same = function () { return token === detailToken && state.selectedId === id && selInterval === interval; };
     candlesAt = Date.now();
     return api("/api/assets/" + id + "/candles?interval=" + encodeURIComponent(interval)).then(function (payload) {
+      candlesBusy = false;
       if (!same()) return;
       state.interval = interval;
       drawCandles(payload, state.candleCount === 0);
       loadedKey = id + "|" + interval;
       renderIntradayNote(payload, findAsset(id));
     }, function (err) {
+      candlesBusy = false;
       if (!same()) return;
       if (intradayUnavailable(err)) {
         renderIntradayNote(null, null, state.candleCount > 0
@@ -1349,8 +1361,10 @@
       state.swingSetup = null;   // marcações são do ativo anterior
       swingData = null;
       applyMarkers();
-      loadNews(id);
     }
+    // Pelo id e não por "ativo novo": numa troca rápida A→B→A o gráfico de A ainda
+    // está desenhado, mas as notícias pedidas por último são as de B.
+    if (newsFor !== id) loadNews(id);
     if (fresh && isIntraday(interval)) renderIntradayNote(null, summary);
     candlesAt = Date.now();
 
@@ -1407,11 +1421,15 @@
   function selectAsset(id, force) {
     if (!findAsset(id)) return;
     var changed = state.selectedId !== id;
+    // Uma escolha explícita vence qualquer abertura sob demanda ainda em curso.
+    var wasOpening = !!state.opening;
+    openToken++;
+    state.opening = null;
     state.selectedId = id;
     if (state.opened && state.opened.id !== id) state.opened = null;  // o aberto só vive enquanto selecionado
     persistSelection();
     renderWatchlist();
-    if (force || changed || loadedKey.split("|")[0] !== String(id)) loadDetail().catch(report);
+    if (force || changed || wasOpening || loadedKey.split("|")[0] !== String(id)) loadDetail().catch(report);
   }
 
   function setInterval_(interval) {
@@ -1427,8 +1445,6 @@
   }
 
   // ---------------------------------------------- abrir ativo sob demanda
-  var openToken = 0;
-
   // Abre (criando no servidor se preciso) um papel do catálogo sem pôr na
   // watchlist. quiet = restauração na carga da página: falha não vira aviso.
   function openAsset(symbol, market, quiet) {
@@ -1446,7 +1462,9 @@
       if (!summary || !isNum(summary.id)) throw new ApiError(500, "resposta inesperada do servidor");
       if (summary.watch) {
         var ready = watchAsset(summary.id) ? Promise.resolve() : loadAssets();
-        return ready.then(function () { selectAsset(summary.id, true); });
+        return ready.then(function () {
+          if (token === openToken) selectAsset(summary.id, true);  // o usuário pode ter escolhido outro no meio
+        });
       }
       state.opened = summary;
       selectAsset(summary.id, true);
@@ -1494,10 +1512,17 @@
       chip.dataset.state = info.state;
       chip.dataset.evidence = evidence;
       chip.title = (SETUP_SHORT[key] || key) + ": " + (info.state === "sinal" ? "sinal hoje" : "em posição") + " — " + evText + " neste ativo";
-      chip.appendChild(evidenceDot(evidence));
       chip.appendChild(el("span", "", SETUP_SHORT[key] || key));
       chip.appendChild(el("small", "", SETUP_STATE_SHORT[info.state]));
-      chip.appendChild(el("span", "sr-only", evText));
+      // Evidência escrita ao lado do sinal (não só um ponto colorido nem só no title).
+      var ev = el("span", "chip-ev");
+      ev.dataset.evidence = evidence;
+      ev.appendChild(evidenceDot(evidence));
+      var shortText = el("span", "", evidence ? SWING_EVIDENCE_SHORT[evidence] : "evid. n/d");
+      shortText.setAttribute("aria-hidden", "true");
+      ev.appendChild(shortText);
+      ev.appendChild(el("span", "sr-only", evText));
+      chip.appendChild(ev);
       td.appendChild(chip);
     });
     if (!any) td.appendChild(el("span", "muted", DASH));
@@ -1648,7 +1673,9 @@
     SWING_EVIDENCE_ORDER.forEach(function (key) {
       var item = el("span");
       item.appendChild(evidenceDot(key));
-      item.appendChild(document.createTextNode(SWING_EVIDENCE_LEGEND[key]));
+      item.appendChild(document.createTextNode(
+        SWING_EVIDENCE_SHORT[key] === SWING_EVIDENCE_LEGEND[key] ? SWING_EVIDENCE_LEGEND[key]
+          : SWING_EVIDENCE_SHORT[key] + " = " + SWING_EVIDENCE_LEGEND[key]));
       legend.appendChild(item);
     });
     note.appendChild(legend);
@@ -1874,9 +1901,30 @@
     }).catch(report);
   }
 
+  var openedToken = 0;
+
+  // O ativo aberto fora da watchlist não vem em /api/assets: o resumo dele (preço,
+  // variação, veredito) é renovado reabrindo-o. Só troca o resumo; não mexe em
+  // seleção, busca nem sobreposições, e desiste se o usuário mudou algo no meio.
+  function refreshOpened() {
+    var o = state.opened;
+    if (!o || state.selectedId !== o.id || state.opening) return Promise.resolve(false);
+    var token = ++openedToken, guard = openToken;
+    return api("/api/assets/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol: o.symbol, market: o.market }),
+    }).then(function (summary) {
+      if (token !== openedToken || guard !== openToken || state.opened !== o || state.selectedId !== o.id) return false;
+      if (!summary || summary.id !== o.id || summary.watch) return false;  // promovido em outra aba: /api/assets cuida
+      state.opened = summary;
+      return true;
+    }, function () { return false; });  // falha aqui fica calada: o resumo antigo continua valendo
+  }
+
   function autoRefresh() {
     if (document.hidden) return;
-    loadAssets().then(function () {
+    loadAssets().then(refreshOpened).then(function () {
       var a = findAsset(state.selectedId);
       var stamp = a && a.last_refresh ? a.last_refresh : "";
       if (state.selectedId !== null && (stamp !== detailStamp || loadedKey === "")) return loadDetail();
@@ -2064,7 +2112,8 @@
     });
     if (!search.items.length) {
       root.appendChild(el("li", "search-empty",
-        "Nada no catálogo para “" + query + "”. Para tentar o símbolo direto na fonte, escolha o mercado e use Adicionar."));
+        "Nenhum papel encontrado para “" + query + "”. Tente o código, ex.: BBAS3 — a B3 abrevia os nomes. "
+        + "Para buscar o símbolo direto na fonte, escolha o mercado e use Adicionar."));
     }
     root.hidden = false;
     search.open = true;
@@ -2112,7 +2161,11 @@
       // segue o caminho de sempre (adicionar o que foi digitado à watchlist).
       if (search.open && search.active >= 0) { event.preventDefault(); chooseSearch(search.active); }
     } else if (event.key === "Escape") {
-      if (search.open) { event.preventDefault(); closeSearch(); }
+      // Invalida também a busca pendente ou em voo, para a lista não reabrir sozinha.
+      if (search.open) event.preventDefault();
+      window.clearTimeout(search.timer);
+      search.token++;
+      closeSearch();
     }
   }
 

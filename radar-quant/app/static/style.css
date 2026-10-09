@@ -494,6 +494,7 @@ input::placeholder { color: var(--muted); }
 .data-table td.name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .setup-chip {
   position: relative;  /* contém o .sr-only, que senão escaparia da rolagem da tabela */
+  margin-top: 1px; margin-bottom: 1px;
   display: inline-flex; align-items: center; gap: 5px; margin-right: 4px; padding: 1px 7px;
   border-radius: 4px; border: 1px solid var(--border-strong);
   font-size: 11px; font-weight: 650; white-space: nowrap; color: var(--text-strong);
@@ -501,6 +502,11 @@ input::placeholder { color: var(--muted); }
 .setup-chip[data-state="sinal"] { background: var(--up-tint); border-color: transparent; }
 .setup-chip[data-state="posicao"] { background: var(--amber-tint); border-color: transparent; }
 .setup-chip small { font-size: 10.5px; font-weight: 500; color: var(--muted); }
+/* Evidência com o mesmo peso do nome do setup: texto curto colorido + ponto. */
+.chip-ev { display: inline-flex; align-items: center; gap: 4px; padding-left: 6px; border-left: 1px solid var(--border-strong); color: var(--muted); }
+.chip-ev[data-evidence="favoravel"] { color: var(--up-text); }
+.chip-ev[data-evidence="contraria"] { color: var(--down-text); }
+.chip-ev[data-evidence="sem_evidencia"] { color: var(--amber); }
 .pager { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
 
 /* ---------- Tabelas ---------- */
