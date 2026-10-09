@@ -1,1 +1,235 @@
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Radar Quant</title></head><body><h1>Radar Quant</h1></body></html>
+<!doctype html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Radar Quant</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<script src="app.js"></script>
+<script src="vendor/lightweight-charts.standalone.production.js" defer></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <img src="favicon.svg" alt="" width="22" height="22">
+    <span>Radar Quant</span>
+  </div>
+  <nav class="tabs" role="tablist" aria-label="Seções">
+    <button id="tab-chart" class="tab" role="tab" aria-selected="true" aria-controls="view-chart">Gráfico</button>
+    <button id="tab-ranking" class="tab" role="tab" aria-selected="false" aria-controls="view-ranking">Ranking</button>
+    <button id="tab-portfolio" class="tab" role="tab" aria-selected="false" aria-controls="view-portfolio">Carteira</button>
+  </nav>
+  <div class="topbar-actions">
+    <span id="data-status" class="data-status" aria-live="polite"></span>
+    <button id="refresh-btn" class="btn" type="button">Atualizar dados</button>
+    <button id="theme-toggle" class="btn btn-icon" type="button" aria-label="Alternar tema claro/escuro" title="Alternar tema claro/escuro">
+      <svg class="icon-sun" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <svg class="icon-moon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" fill="currentColor"/></svg>
+    </button>
+  </div>
+</header>
+
+<div id="net-error" class="banner" role="alert" hidden>
+  <span id="net-error-msg">Não foi possível falar com o servidor.</span>
+  <button id="net-retry" class="btn btn-small" type="button">Tentar de novo</button>
+</div>
+
+<main>
+  <!-- ===================== Gráfico ===================== -->
+  <section id="view-chart" class="view" role="tabpanel" aria-labelledby="tab-chart">
+    <aside class="panel watch-panel" aria-label="Watchlist">
+      <form id="add-form" class="add-form" autocomplete="off">
+        <input id="add-symbol" type="text" placeholder="Símbolo (ex.: PETR4)" aria-label="Símbolo" maxlength="20" spellcheck="false" autocapitalize="characters" required>
+        <select id="add-market" aria-label="Mercado">
+          <option value="B3">B3</option>
+          <option value="US">EUA</option>
+          <option value="CRYPTO">Cripto</option>
+        </select>
+        <button id="add-submit" class="btn btn-primary" type="submit" title="Adicionar à watchlist">Adicionar</button>
+      </form>
+      <p id="add-error" class="form-error" role="alert" hidden></p>
+      <div id="watchlist" class="watchlist" aria-busy="true">
+        <div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div>
+        <div class="skeleton sk-row"></div><div class="skeleton sk-row"></div><div class="skeleton sk-row"></div>
+      </div>
+    </aside>
+
+    <div class="panel chart-panel">
+      <div class="chart-head">
+        <div class="chart-id">
+          <h1 id="chart-title">—</h1>
+          <span id="chart-market" class="tag"></span>
+          <span id="chart-alert" class="alert-icon" hidden>⚠</span>
+        </div>
+        <div class="chart-quote">
+          <span id="chart-price" class="quote-price"></span>
+          <span id="chart-change" class="quote-change"></span>
+          <span id="chart-asof" class="muted"></span>
+        </div>
+        <div class="chart-tools">
+          <div class="seg" role="group" aria-label="Intervalo">
+            <button id="interval-1d" type="button" aria-pressed="true" title="Diário">D</button>
+            <button id="interval-1wk" type="button" aria-pressed="false" title="Semanal">S</button>
+            <button id="interval-1mo" type="button" aria-pressed="false" title="Mensal">M</button>
+          </div>
+          <div class="seg seg-toggle" role="group" aria-label="Indicadores sobre o preço">
+            <button id="toggle-sma20" type="button" data-overlay="sma20" aria-pressed="true"><i class="swatch" data-color="sma20"></i>SMA 20</button>
+            <button id="toggle-sma50" type="button" data-overlay="sma50" aria-pressed="true"><i class="swatch" data-color="sma50"></i>SMA 50</button>
+            <button id="toggle-sma200" type="button" data-overlay="sma200" aria-pressed="true"><i class="swatch" data-color="sma200"></i>SMA 200</button>
+            <button id="toggle-bb" type="button" data-overlay="bb" aria-pressed="false"><i class="swatch" data-color="bb"></i>Bollinger</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-stack" id="chart-stack">
+        <div class="pane">
+          <div id="price-legend" class="pane-legend"></div>
+          <div id="price-chart" class="chart chart-price"></div>
+        </div>
+        <div class="pane">
+          <div id="rsi-legend" class="pane-legend"><b>RSI 14</b></div>
+          <div id="rsi-chart" class="chart chart-rsi"></div>
+        </div>
+        <div class="pane">
+          <div id="macd-legend" class="pane-legend"><b>MACD 12, 26, 9</b></div>
+          <div id="macd-chart" class="chart chart-macd"></div>
+        </div>
+        <div id="chart-overlay" class="chart-overlay" hidden></div>
+      </div>
+    </div>
+
+    <aside id="rec-card" class="panel rec-card" aria-label="Recomendação estatística" aria-busy="true">
+      <h2 class="panel-title">Recomendação estatística</h2>
+
+      <div class="rec-hero">
+        <div id="rec-verdict" class="verdict" data-verdict="">—</div>
+        <div id="rec-evidence" class="evidence" data-evidence="">—</div>
+      </div>
+      <p id="rec-message" class="rec-message" hidden></p>
+      <p id="rec-source-error" class="rec-message rec-warn" hidden></p>
+
+      <div class="score-block">
+        <div class="score-line">
+          <span class="label">Score</span>
+          <span id="rec-score" class="score-value">—</span>
+        </div>
+        <div class="score-track" aria-hidden="true">
+          <i class="zone zone-sell"></i><i class="zone zone-hold"></i><i class="zone zone-buy"></i>
+          <i id="rec-score-marker" class="score-marker" hidden></i>
+        </div>
+        <div class="score-scale" aria-hidden="true"><span>−100</span><span>0</span><span>+100</span></div>
+      </div>
+
+      <div class="rec-body" id="rec-body">
+        <h3 class="sub-title">Fatores <span class="muted">(normalizados de −1 a +1)</span></h3>
+        <div id="rec-factors" class="factors"></div>
+
+        <dl class="kv kv-2">
+          <div><dt>Volatilidade anual</dt><dd id="rec-vol">—</dd></div>
+          <div><dt>Drawdown atual</dt><dd id="rec-dd">—</dd></div>
+        </dl>
+
+        <h3 class="sub-title">Evidência do backtest</h3>
+        <p id="rec-excess" class="excess"></p>
+        <table class="mini-table" id="rec-bt-table">
+          <thead><tr><th></th><th>Estratégia</th><th>Buy &amp; hold</th></tr></thead>
+          <tbody id="rec-bt-body"></tbody>
+        </table>
+        <p id="rec-bt-meta" class="muted small"></p>
+
+        <h3 class="sub-title">Curva de equity
+          <span class="legend-inline"><i class="swatch" data-color="strategy"></i>Estratégia <i class="swatch" data-color="buyhold"></i>Buy &amp; hold</span>
+        </h3>
+        <div id="equity-chart" class="chart chart-equity"></div>
+      </div>
+    </aside>
+  </section>
+
+  <!-- ===================== Ranking ===================== -->
+  <section id="view-ranking" class="view view-single" role="tabpanel" aria-labelledby="tab-ranking" hidden>
+    <div class="panel">
+      <div class="panel-head">
+        <h2 class="panel-title">Ranking por score</h2>
+        <label class="field">Mercado
+          <select id="ranking-market">
+            <option value="">Todos</option>
+            <option value="B3">B3</option>
+            <option value="US">EUA</option>
+            <option value="CRYPTO">Cripto</option>
+          </select>
+        </label>
+      </div>
+      <p id="ranking-note" class="muted small"></p>
+      <div class="table-scroll">
+        <table id="ranking-table" class="data-table">
+          <thead>
+            <tr>
+              <th class="num" scope="col">#</th>
+              <th scope="col"><button type="button" data-sort="symbol">Ativo</button></th>
+              <th scope="col"><button type="button" data-sort="market">Mercado</button></th>
+              <th class="num" scope="col"><button type="button" data-sort="score">Score</button></th>
+              <th scope="col"><button type="button" data-sort="verdict">Veredito</button></th>
+              <th scope="col"><button type="button" data-sort="evidence">Evidência</button></th>
+              <th class="num" scope="col"><button type="button" data-sort="momentum">Momentum</button></th>
+              <th class="num" scope="col"><button type="button" data-sort="trend">Tendência</button></th>
+              <th class="num" scope="col"><button type="button" data-sort="dist_sma200">Dist. SMA 200</button></th>
+              <th class="num" scope="col"><button type="button" data-sort="reversal">Reversão</button></th>
+              <th class="num" scope="col"><button type="button" data-sort="volatility">Volatilidade</button></th>
+              <th class="num" scope="col"><button type="button" data-sort="drawdown">Drawdown</button></th>
+            </tr>
+          </thead>
+          <tbody><tr><td class="empty" colspan="12">Carregando…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== Carteira ===================== -->
+  <section id="view-portfolio" class="view view-single" role="tabpanel" aria-labelledby="tab-portfolio" hidden>
+    <div class="panel">
+      <div class="panel-head">
+        <h2 class="panel-title">Sugestão de carteira</h2>
+        <label class="field">Método
+          <select id="portfolio-method">
+            <option value="risk_parity">Paridade de risco</option>
+            <option value="min_variance">Mínima variância</option>
+          </select>
+        </label>
+        <label class="field">Mercado
+          <select id="portfolio-market">
+            <option value="">Todos</option>
+            <option value="B3">B3</option>
+            <option value="US">EUA</option>
+            <option value="CRYPTO">Cripto</option>
+          </select>
+        </label>
+      </div>
+      <p id="portfolio-error" class="form-error block-error" role="alert" hidden></p>
+      <div id="portfolio-loading" class="loading-block"><div class="skeleton sk-line"></div><div class="skeleton sk-line"></div><div class="skeleton sk-line"></div></div>
+      <div id="portfolio-content" class="portfolio-grid" hidden>
+        <div class="pf-col">
+          <h3 class="sub-title">Pesos sugeridos</h3>
+          <div id="portfolio-weights" class="weights"></div>
+          <h3 class="sub-title">Estatísticas da carteira</h3>
+          <dl id="portfolio-stats" class="kv kv-stats"></dl>
+          <p id="portfolio-note" class="note" hidden></p>
+        </div>
+        <div class="pf-col">
+          <h3 class="sub-title">Correlação dos retornos semanais</h3>
+          <div class="table-scroll">
+            <table id="portfolio-correlation" class="heatmap"></table>
+          </div>
+          <div class="heat-scale" aria-hidden="true"><span>−1</span><i></i><span>+1</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer id="disclaimer">Ferramenta de análise estatística para uso pessoal. Não é recomendação profissional de investimento; resultado passado não garante resultado futuro.</footer>
+
+</body>
+</html>
