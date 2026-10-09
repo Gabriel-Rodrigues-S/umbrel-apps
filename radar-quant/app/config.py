@@ -7,6 +7,11 @@ from pathlib import Path
 MARKETS = ("B3", "US", "CRYPTO")
 PERIODS_PER_YEAR = {"B3": 252, "US": 252, "CRYPTO": 365}
 CURRENCY = {"B3": "BRL", "US": "USD", "CRYPTO": "USD"}
+INTERVALS = ("1m", "3m", "5m", "10m", "30m", "1h", "1d", "1wk", "1mo", "3mo", "6mo", "1y")
+INTRADAY = ("1m", "3m", "5m", "10m", "30m", "1h")
+INTRADAY_SECONDS = {"1m": 60, "3m": 180, "5m": 300, "10m": 600, "30m": 1800, "1h": 3600}
+INDICES = {"IBOV": ("B3", "Ibovespa"), "IBRA": ("B3", "IBrA"), "SP500": ("US", "S&P 500"),
+           "NDX": ("US", "Nasdaq-100")}
 DEFAULT_WATCHLIST = [("PETR4", "B3"), ("VALE3", "B3"), ("ITUB4", "B3"), ("BBAS3", "B3"),
                      ("WEGE3", "B3"), ("BOVA11", "B3"),
                      ("AAPL", "US"), ("MSFT", "US"), ("NVDA", "US"), ("SPY", "US"), ("QQQ", "US"),
@@ -21,6 +26,8 @@ class Settings:
     data_dir: Path
     provider: str  # "live" | "synthetic"
     refresh_hours: float
+    universe: bool = True  # rotina em segundo plano do universo dos índices
+    universe_pace: float = 1.0  # segundos entre chamadas à fonte
 
 
 def get_settings() -> Settings:
@@ -29,6 +36,8 @@ def get_settings() -> Settings:
         data_dir=Path(os.environ.get("RADAR_DATA_DIR", "/app/data")),
         provider=os.environ.get("RADAR_PROVIDER", "live"),
         refresh_hours=float(os.environ.get("RADAR_REFRESH_HOURS", "6")),
+        universe=os.environ.get("RADAR_UNIVERSE", "1") != "0",
+        universe_pace=float(os.environ.get("RADAR_UNIVERSE_PACE", "1.0")),
     )
 
 

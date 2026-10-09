@@ -128,3 +128,154 @@ def test_delete_asset_com_erro_nao_apaga_candles(conn):
         db.delete_asset(conn, a)
     assert not conn.in_transaction
     assert len(db.load_candles(conn, a)) == 1 and db.get_asset(conn, a)
+
+
+# ---------- 1.1: watchlist x cache ----------
+
+def test_list_assets_watch(conn):
+    a = db.add_asset(conn, "PETR4", "B3")
+    b = db.add_asset(conn, "AAPL", "US", watch=False)
+    assert [r["id"] for r in db.list_assets(conn)] == [a]
+    assert [r["id"] for r in db.list_assets(conn, None)] == [a, b]
+    assert [r["id"] for r in db.list_assets(conn, False)] == [b]
+
+
+def test_find_asset_set_watch_touch_viewed(conn):
+    b = db.add_asset(conn, "AAPL", "US", watch=False)
+    assert db.find_asset(conn, "AAPL", "US")["id"] == b
+    assert db.find_asset(conn, "AAPL", "B3") is None
+    assert db.get_asset(conn, b)["watch"] == 0 and db.get_asset(conn, b)["last_viewed"] is None
+    db.touch_viewed(conn, b)
+    assert db.get_asset(conn, b)["last_viewed"]
+    db.set_watch(conn, b, True)
+    assert db.get_asset(conn, b)["watch"] == 1
+    assert [r["id"] for r in db.list_assets(conn)] == [b]
+
+
+def test_delete_asset_apaga_screener_e_news(conn):
+    a = db.add_asset(conn, "AAPL", "US")
+    k = db.add_asset(conn, "MSFT", "US")
+    for x in (a, k):
+        db.upsert_screener(conn, x, "2024-01-02", {"score": 1})
+        db.replace_news(conn, x, [{"title": "t", "url": "http://x/1", "source": "s", "published_at": "2024-01-01"}])
+    assert db.delete_asset(conn, a) is True
+    assert [r["asset_id"] for r in db.load_screener(conn)] == [k]
+    assert db.load_news(conn, a) == ([], None)
+    assert len(db.load_news(conn, k)[0]) == 1
+
+
+def test_purge_viewed(conn):
+    velho = db.add_asset(conn, "OLD", "US", watch=False)
+    nunca = db.add_asset(conn, "NEVER", "US", watch=False)
+    mantido = db.add_asset(conn, "KEEP", "US", watch=False)
+    recente = db.add_asset(conn, "NEW", "US", watch=False)
+    wl = db.add_asset(conn, "WL", "US")
+    conn.execute("UPDATE assets SET last_viewed='2024-01-01T00:00:00' WHERE id IN (?,?,?)", (velho, mantido, wl))
+    conn.execute("UPDATE assets SET last_viewed='2024-06-01T00:00:00' WHERE id=?", (recente,))
+    conn.commit()
+    db.upsert_candles(conn, velho, [c("2024-01-02", 1)])
+    assert db.purge_viewed(conn, "2024-03-01T00:00:00", {mantido}) == 2
+    ids = {r["id"] for r in db.list_assets(conn, None)}
+    assert ids == {mantido, recente, wl}
+    assert db.load_candles(conn, velho) == []
+
+
+# ---------- 1.1: catálogo ----------
+
+def _catalogo(conn):
+    db.replace_catalog_market(conn, "B3", [("PETR4", "Petrobras PN", "Ação"), ("VALE3", "Vale ON", "Ação"),
+                                           ("XPET3", "Companhia Petroleo", "Ação"), ("ITUB4", "Itau", "Ação")])
+
+
+def test_replace_catalog_preserva_indices(conn):
+    _catalogo(conn)
+    db.set_index_members(conn, "IBOV", "B3", ["PETR4", "VALE3"])
+    n = db.replace_catalog_market(conn, "B3", [("PETR4", "Petrobras", "Ação"), ("ABEV3", "Ambev", "Ação")])
+    assert n == 2 and db.catalog_count(conn, "B3") == 2
+    assert db.catalog_entry(conn, "PETR4", "B3") == {
+        "symbol": "PETR4", "market": "B3", "name": "Petrobras", "kind": "Ação", "indices": ["IBOV"]}
+    assert db.catalog_entry(conn, "ABEV3", "B3")["indices"] == []
+    assert db.catalog_entry(conn, "VALE3", "B3") is None
+
+
+def test_replace_catalog_nao_mexe_em_outro_mercado(conn):
+    _catalogo(conn)
+    db.replace_catalog_market(conn, "US", [("AAPL", "Apple", "Ação")])
+    db.replace_catalog_market(conn, "B3", [("PETR4", "Petrobras", "Ação")])
+    assert db.catalog_count(conn) == 2 and db.catalog_count(conn, "US") == 1
+
+
+def test_set_index_members(conn):
+    _catalogo(conn)
+    db.set_index_members(conn, "IBOV", "B3", ["PETR4", "VALE3"])
+    db.set_index_members(conn, "IBRA", "B3", ["PETR4", "ITUB4"])
+    assert db.catalog_entry(conn, "PETR4", "B3")["indices"] == ["IBOV", "IBRA"]
+    # IBOV muda: PETR4 sai do IBOV e continua no IBRA; símbolo ausente é inserido
+    assert db.set_index_members(conn, "IBOV", "B3", ["VALE3", "NOVO3"]) == 2
+    assert db.catalog_entry(conn, "PETR4", "B3")["indices"] == ["IBRA"]
+    novo = db.catalog_entry(conn, "NOVO3", "B3")
+    assert novo["name"] == "NOVO3" and novo["kind"] == "Ação" and novo["indices"] == ["IBOV"]
+    assert {m["symbol"] for m in db.index_members(conn, "IBRA")} == {"PETR4", "ITUB4"}
+    assert {m["symbol"] for m in db.index_members(conn, "IBOV")} == {"VALE3", "NOVO3"}
+    assert {m["symbol"] for m in db.index_members(conn)} == {"PETR4", "ITUB4", "VALE3", "NOVO3"}
+    assert db.index_members(conn, "IBOV")[0]["market"] == "B3"
+
+
+def test_search_catalog_ordem_e_limite(conn):
+    _catalogo(conn)
+    assert [r["symbol"] for r in db.search_catalog(conn, "pet")] == ["PETR4", "XPET3"]
+    assert db.search_catalog(conn, "PETR4")[0]["indices"] == []
+    assert len(db.search_catalog(conn, "pet", limit=1)) == 1
+    assert db.search_catalog(conn, "") == []
+
+
+@pytest.mark.parametrize("q", ["%", "_", "'; DROP TABLE catalog;--", "a" * 500, "  ", "\\"])
+def test_search_catalog_entradas_hostis(conn, q):
+    _catalogo(conn)
+    r = db.search_catalog(conn, q)
+    assert isinstance(r, list) and len(r) < 4
+    assert db.catalog_count(conn) == 4
+
+
+# ---------- 1.1: screener, notícias, meta ----------
+
+def test_screener_ida_e_volta(conn):
+    a = db.add_asset(conn, "AAPL", "US")
+    b = db.add_asset(conn, "MSFT", "US")
+    db.upsert_screener(conn, a, "2024-01-02", {"score": 1.5, "setups": {"x": {"state": "nenhum"}}})
+    db.upsert_screener(conn, b, "2024-01-02", {"score": 2})
+    db.upsert_screener(conn, a, "2024-01-03", {"score": 3})
+    todos = db.load_screener(conn)
+    assert len(todos) == 2
+    ra = next(r for r in todos if r["asset_id"] == a)
+    assert ra["as_of"] == "2024-01-03" and ra["payload"] == {"score": 3} and ra["updated_at"]
+    assert [r["asset_id"] for r in db.load_screener(conn, [b])] == [b]
+    assert db.load_screener(conn, []) == []
+
+
+def test_news_ordem_e_fetched_at(conn):
+    a = db.add_asset(conn, "AAPL", "US")
+    assert db.load_news(conn, a) == ([], None)
+    db.replace_news(conn, a, [
+        {"title": "velha", "url": "http://x/1", "source": "S", "published_at": "2024-01-01T00:00:00Z"},
+        {"title": "nova", "url": "http://x/2", "source": "S", "published_at": "2024-01-02T00:00:00Z"}])
+    items, fetched = db.load_news(conn, a)
+    assert [i["title"] for i in items] == ["nova", "velha"]
+    assert set(items[0]) == {"title", "url", "source", "published_at"} and fetched
+    db.replace_news(conn, a, [{"title": "só", "url": "http://x/3", "source": "S", "published_at": "2024-01-03"}])
+    assert [i["title"] for i in db.load_news(conn, a)[0]] == ["só"]
+
+
+def test_news_lista_vazia_grava_fetched_at(conn):
+    a = db.add_asset(conn, "AAPL", "US")
+    db.replace_news(conn, a, [{"title": "t", "url": "http://x/1", "source": "S", "published_at": "2024-01-01"}])
+    db.replace_news(conn, a, [])
+    items, fetched = db.load_news(conn, a)
+    assert items == [] and fetched
+
+
+def test_meta(conn):
+    assert db.get_meta(conn, "k") is None
+    db.set_meta(conn, "k", "1")
+    db.set_meta(conn, "k", "2")
+    assert db.get_meta(conn, "k") == "2"
