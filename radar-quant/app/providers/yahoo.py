@@ -2,6 +2,7 @@
 import asyncio
 import math
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 import httpx
 
@@ -29,13 +30,16 @@ class YahooProvider:
     async def fetch_daily(self, symbol: str, market: str) -> list[Candle]:
         ticker = f"{symbol}.SA" if market == "B3" else symbol
         params = {"range": "10y", "interval": "1d", "events": "div,splits"}
+        url = URL.format(ticker=quote(ticker, safe=""))  # o ticker é um único segmento do caminho
         try:
             async with httpx.AsyncClient(transport=self._transport, timeout=20, headers=HEADERS) as client:
                 for attempt in range(3):
-                    resp = await client.get(URL.format(ticker=ticker), params=params)
+                    resp = await client.get(url, params=params)
                     if (resp.status_code != 429 and resp.status_code < 500) or attempt == 2:
                         break
                     await asyncio.sleep(self._retry_delay * (attempt + 1))
+        except httpx.InvalidURL as e:  # não é subclasse de httpx.HTTPError
+            raise ProviderError(f"Yahoo: URL inválida: {e}") from e
         except httpx.HTTPError as e:
             raise ProviderError(f"Yahoo indisponível: {e}") from e
         if resp.status_code == 404:

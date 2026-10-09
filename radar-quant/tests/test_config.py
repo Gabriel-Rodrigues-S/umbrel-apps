@@ -28,3 +28,17 @@ def test_get_settings_padroes(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     s = get_settings()
     assert str(s.data_dir) == "/app/data" and s.provider == "live" and s.refresh_hours == 6
+
+
+@pytest.mark.parametrize("symbol,market,esperado", [
+    ("BRK.B", "US", "BRK.B"), ("^BVSP", "B3", "^BVSP"), ("brk-b", "US", "BRK-B"),
+    ("EURUSD=X", "US", "EURUSD=X"), ("A" * 20, "US", "A" * 20)])
+def test_normalize_symbol_aceita_formatos_reais(symbol, market, esperado):
+    assert normalize_symbol(symbol, market) == esperado
+
+
+@pytest.mark.parametrize("symbol", ["AB\x00CD", "../../x", "../../../v1/test?x=1#f", "A" * 100, "A" * 21,
+                                    "AB CD", "PETR4\nX", ".SA", "-X", "AÇÃO", "A/B", "A%2FB"])
+def test_normalize_symbol_rejeita_invalidos(symbol):
+    with pytest.raises(ValueError, match="símbolo inválido"):
+        normalize_symbol(symbol, "US")

@@ -61,6 +61,30 @@ def test_yahoo_us_sem_sufixo():
     assert "/AAPL?" in urls[0] and ".SA" not in urls[0]
 
 
+def test_yahoo_simbolo_nao_escapa_do_caminho():
+    reqs = []
+
+    def h(req):
+        reqs.append(req)
+        return httpx.Response(404)
+
+    for sym in ("../../../v1/test?x=1#f", "AB\x00CD", "^GSPC"):
+        with pytest.raises(UnknownSymbol):
+            run(yahoo(h).fetch_daily(sym, "US"))
+    assert all(r.url.raw_path.startswith(b"/v8/finance/chart/") and r.url.fragment == "" for r in reqs)
+    assert [r.url.raw_path.split(b"?")[0].count(b"/") for r in reqs] == [4, 4, 4]
+    assert all(r.url.params["range"] == "10y" and "x" not in r.url.params for r in reqs)
+    assert b"/%5EGSPC?" in reqs[2].url.raw_path
+
+
+def test_yahoo_url_invalida_vira_provider_error():
+    def h(req):
+        raise httpx.InvalidURL("caractere inválido")
+
+    with pytest.raises(ProviderError, match="Yahoo"):
+        run(yahoo(h).fetch_daily("AAPL", "US"))
+
+
 def test_yahoo_user_agent():
     seen = []
 

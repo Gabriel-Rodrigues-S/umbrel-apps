@@ -65,7 +65,24 @@ def test_unknown_symbol_relanca_e_grava(conn, settings):
     a = db.add_asset(conn, "INVALID1", "US")
     with pytest.raises(UnknownSymbol):
         asyncio.run(service.refresh_asset(conn, db.get_asset(conn, a), settings))
-    assert "INVALID1" in db.get_asset(conn, a)["last_error"]
+    assert db.get_asset(conn, a)["last_error"] == "símbolo não encontrado"
+
+
+class Fixo:
+    def __init__(self, candles):
+        self.candles = candles
+
+    async def fetch_daily(self, symbol, market):
+        return self.candles
+
+
+def test_refresh_descarta_historico_que_saiu_da_janela(conn, settings):
+    # split 10:1 com a janela já andada: as linhas antigas (fator antigo) não podem sobrar
+    a = db.add_asset(conn, "AAPL", "US")
+    db.upsert_candles(conn, a, [Candle(d, 100, 100, 100, 100, 1) for d in ("2024-01-02", "2024-01-03")])
+    novo = Fixo([Candle(d, 10, 10, 10, 10, 1) for d in ("2024-01-04", "2024-01-05")])
+    asyncio.run(service.refresh_asset(conn, db.get_asset(conn, a), settings, provider=novo))
+    assert service.load_frame(conn, a)["close"].tolist() == [10, 10]
 
 
 def test_refresh_all_nao_para_em_unknown_symbol(conn, settings):
@@ -83,7 +100,13 @@ def test_resample_semanal_e_mensal():
     assert len(w) == 2
     assert w.iloc[0]["open"] == 10 and w.iloc[0]["close"] == 104 and w.iloc[0]["volume"] == 5
     assert w.iloc[0]["high"] == 24 and w.iloc[0]["low"] == 0
-    assert len(service.resample(df, "1mo")) == 1
+    # cada balde leva a última data real de pregão, não o fim do período
+    assert [d.strftime("%Y-%m-%d") for d in w.index] == ["2024-01-05", "2024-01-12"]
+    m = service.resample(df, "1mo")
+    assert len(m) == 1 and m.index[0] == idx[-1]
+    parcial = service.resample(df.iloc[:8], "1wk")  # semana corrente ainda na quarta-feira
+    assert len(parcial) == 2 and parcial.index[-1] == idx[7] and parcial.iloc[-1]["close"] == 107
+    assert service.resample(df.iloc[:0], "1wk").empty
     assert service.resample(df, "1d") is df
     with pytest.raises(ValueError):
         service.resample(df, "2h")

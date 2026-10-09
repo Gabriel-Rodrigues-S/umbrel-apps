@@ -23,17 +23,20 @@ def seed_watchlist(conn) -> None:
 
 
 async def refresh_asset(conn, asset: dict, settings: Settings, provider=None) -> None:
-    """Busca e grava os candles. Em falha, mantém os candles antigos e registra o erro."""
+    """Busca e grava a janela de candles (descartando o histórico anterior a ela).
+
+    Em falha, mantém os candles antigos e registra o erro.
+    """
     provider = provider or get_provider(asset["market"], settings)
     try:
         candles = await provider.fetch_daily(asset["symbol"], asset["market"])
-    except UnknownSymbol as e:
-        db.set_refresh_status(conn, asset["id"], str(e))
+    except UnknownSymbol:
+        db.set_refresh_status(conn, asset["id"], "símbolo não encontrado")
         raise
     except ProviderError as e:
         db.set_refresh_status(conn, asset["id"], str(e))
         return
-    db.upsert_candles(conn, asset["id"], candles)
+    db.replace_candles(conn, asset["id"], candles)
     db.set_refresh_status(conn, asset["id"], None)
 
 
@@ -59,12 +62,23 @@ def load_frame(conn, asset_id: int) -> pd.DataFrame:
     return df.drop(columns="asset_id").astype(float)
 
 
+def resample_real_dates(df: pd.DataFrame, rule: str, how) -> pd.DataFrame:
+    """Reamostra rotulando cada balde com a última data real contida nele.
+
+    O rótulo padrão é o fim do período, que num balde parcial ainda não aconteceu.
+    Baldes vazios ficam com data NaT e são descartados.
+    """
+    out = df.resample(rule).agg(how)
+    out.index = pd.DatetimeIndex(df.index.to_series().resample(rule).max())
+    return out[out.index.notna()]
+
+
 def resample(df: pd.DataFrame, interval: str) -> pd.DataFrame:
     if interval == "1d":
         return df
     if interval not in _RESAMPLE_RULE:
         raise ValueError(f"intervalo inválido: {interval}")
-    return df.resample(_RESAMPLE_RULE[interval]).agg(_AGG).dropna(subset=["close"])
+    return resample_real_dates(df, _RESAMPLE_RULE[interval], _AGG).dropna(subset=["close"])
 
 
 def load_rf_series(conn) -> pd.Series:

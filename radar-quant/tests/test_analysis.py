@@ -38,6 +38,10 @@ def test_analyze_ok_cache_e_invalidate(conn):
     assert r["equity"][0]["strategy"] == 1.0
     assert "NaN" not in json.dumps(r)
     assert analysis.analyze_asset(conn, a) is r
+    assert r["equity"][-1]["date"] == "2026-10-07"  # semana parcial: última data real, não a sexta
+    # candle do dia reescrito num refresh: mesma contagem e data, mas a análise é refeita
+    assert analysis.analyze_asset(conn, {**a, "last_refresh": "2026-10-08T00:00:00+00:00"}) is not r
+    r = analysis.analyze_asset(conn, a)
     analysis.invalidate(a["id"])
     assert analysis.analyze_asset(conn, a) is not r
 
@@ -101,6 +105,8 @@ def test_candles_payload(conn):
     wk = analysis.candles_payload(conn, a["id"], "1wk")
     mo = analysis.candles_payload(conn, a["id"], "1mo")
     assert len(mo["candles"]) < len(wk["candles"]) < 1500
+    assert wk["candles"][-1]["time"] == mo["candles"][-1]["time"] == "2026-10-07"
+    assert wk["indicators"]["rsi14"][-1]["time"] == "2026-10-07"
     json.dumps(wk)
     with pytest.raises(ValueError):
         analysis.candles_payload(conn, a["id"], "2h")

@@ -1,5 +1,6 @@
 import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -130,3 +131,63 @@ def test_asset_without_data(client):
     aid = r.json()["id"]
     assert client.get(f"/api/assets/{aid}/candles").status_code == 200
     assert client.get(f"/api/assets/{aid}/analysis").status_code == 200
+
+
+@pytest.mark.parametrize("symbol", ["AB\x00CD", "../../x", "A" * 100])
+def test_create_asset_simbolo_invalido(client, symbol):
+    n = len(client.get("/api/assets").json())
+    r = client.post("/api/assets", json={"symbol": symbol, "market": "US"})
+    assert r.status_code == 422 and r.json()["detail"] == "símbolo inválido"
+    assert len(client.get("/api/assets").json()) == n
+
+
+def test_create_asset_erro_inesperado_apaga_o_ativo(client, monkeypatch):
+    class Explode:
+        async def fetch_daily(self, symbol, market):
+            raise RuntimeError("bug no provedor")
+
+    monkeypatch.setattr(service, "get_provider", lambda market, settings: Explode())
+    n = len(client.get("/api/assets").json())
+    with pytest.raises(RuntimeError):
+        client.post("/api/assets", json={"symbol": "TSLA", "market": "US"})
+    assets = client.get("/api/assets").json()
+    assert len(assets) == n and all(a["symbol"] != "TSLA" for a in assets)
+
+
+def test_static_cache_control(client):
+    for url in ("/", "/app.js", "/style.css"):
+        r = client.get(url)
+        assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
+    assert client.get("/api/assets").headers["cache-control"] == "no-store"
+
+
+def test_candles_semanal_e_mensal_terminam_na_ultima_data_real(client):
+    aid = _id(client, "AAPL")
+    last = {i: client.get(f"/api/assets/{aid}/candles?interval={i}").json()["candles"][-1]["time"]
+            for i in ("1d", "1wk", "1mo")}
+    assert last == {"1d": "2026-10-07", "1wk": "2026-10-07", "1mo": "2026-10-07"}
+    assert client.get(f"/api/assets/{aid}/analysis").json()["equity"][-1]["date"] == "2026-10-07"
+
+
+def test_refresh_em_andamento_nao_agenda_outro(client):
+    client.app.state.refresh_lock = SimpleNamespace(locked=lambda: True)
+    r = client.post("/api/refresh")
+    assert r.status_code == 202 and r.json() == {"status": "em andamento"}
+    assert not client.app.state.tasks
+
+
+@pytest.mark.parametrize("asset_id", ["999999999999999999999", str(2**63), "0", "-1"])
+def test_id_fora_do_intervalo(client, asset_id):
+    assert client.get(f"/api/assets/{asset_id}/analysis").status_code == 422
+    assert client.get(f"/api/assets/{asset_id}/candles").status_code == 422
+    assert client.delete(f"/api/assets/{asset_id}").status_code == 422
+    assert client.get(f"/api/assets/{2**63 - 1}/analysis").status_code == 404
+
+
+def test_espera_do_laco_encurta_quando_ha_erro(client):
+    from app.main import sleep_seconds
+    assert sleep_seconds(client.app) == 6 * 3600
+    aid = client.post("/api/assets", json={"symbol": "FALHA1", "market": "US"}).json()["id"]
+    assert sleep_seconds(client.app) == 600
+    client.delete(f"/api/assets/{aid}")
+    assert sleep_seconds(client.app) == 6 * 3600
