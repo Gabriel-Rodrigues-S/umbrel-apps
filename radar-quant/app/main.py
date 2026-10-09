@@ -22,6 +22,7 @@ STATIC = Path(__file__).parent / "static"
 RETRY_SECONDS = 600  # nova tentativa quando algum ativo ficou com erro
 MAX_SHORT_RETRIES = 3  # esperas curtas seguidas; depois volta ao intervalo normal
 UNIVERSE_CHECK_SECONDS = 600  # de quanto em quanto tempo o laço do universo olha se há passada devida
+UNIVERSE_WAIT_SECONDS = 60  # idem, enquanto o catálogo ainda não tem membros de índice
 AssetId = Annotated[int, PathParam(ge=1, le=2**63 - 1)]  # faixa do INTEGER do SQLite
 Interval = Literal[INTERVALS]  # os doze intervalos do gráfico
 Short = Annotated[str, Query(max_length=32)]  # filtros de texto do screener
@@ -100,14 +101,18 @@ async def loop_universe(app: FastAPI) -> None:
     """Passada diária pelos papéis dos índices; nunca derruba o app nem gira em falso."""
     while True:
         try:
-            if universe.universe_due(app.state.conn, datetime.now(timezone.utc)):
+            if await asyncio.to_thread(universe.universe_due, app.state.conn, datetime.now(timezone.utc)):
                 await universe.refresh_universe(app.state.conn, app.state.settings)
                 await universe.purge_async(app.state.conn, datetime.now(timezone.utc))  # agora, não o de antes da passada
         except asyncio.CancelledError:
             raise
         except Exception:
             log.exception("falha na passada do universo")
-        await asyncio.sleep(UNIVERSE_CHECK_SECONDS)
+        try:
+            has_members = bool(await asyncio.to_thread(db.index_members, app.state.conn))
+        except Exception:
+            has_members = False
+        await asyncio.sleep(UNIVERSE_CHECK_SECONDS if has_members else UNIVERSE_WAIT_SECONDS)
 
 
 @asynccontextmanager

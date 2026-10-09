@@ -462,6 +462,21 @@ def test_loop_universo_sem_passada_devida(client, monkeypatch):
     assert chamadas == [600]
 
 
+def test_loop_universo_intervalo_conforme_membros(client, monkeypatch):
+    esperas = []
+
+    async def fake_sleep(s):
+        esperas.append(s)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(universe, "universe_due", lambda conn, now: False)
+    monkeypatch.setattr(main.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(db, "index_members", lambda conn, index=None: [])
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(main.loop_universe(client.app))
+    assert esperas == [60]
+
+
 def test_refresh_everything_grava_screener_da_watchlist(client):
     db.upsert_screener(client.app.state.conn, _id(client, "AAPL"), "x", {"status": "insuficiente"})
     asyncio.run(main.refresh_everything(client.app))
