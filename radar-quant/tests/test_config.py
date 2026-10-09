@@ -42,3 +42,27 @@ def test_normalize_symbol_aceita_formatos_reais(symbol, market, esperado):
 def test_normalize_symbol_rejeita_invalidos(symbol):
     with pytest.raises(ValueError, match="símbolo inválido"):
         normalize_symbol(symbol, "US")
+
+
+def test_settings_com_tres_argumentos_posicionais():
+    from pathlib import Path
+    from app.config import Settings
+    s = Settings(Path("/x"), "live", 6.0)
+    assert s.universe is True and s.universe_pace == 1.0
+
+
+def test_get_settings_universo(monkeypatch):
+    monkeypatch.setenv("RADAR_UNIVERSE", "0")
+    monkeypatch.setenv("RADAR_UNIVERSE_PACE", "0.2")
+    s = get_settings()
+    assert s.universe is False and s.universe_pace == 0.2
+    monkeypatch.delenv("RADAR_UNIVERSE")
+    monkeypatch.delenv("RADAR_UNIVERSE_PACE")
+    s = get_settings()
+    assert s.universe is True and s.universe_pace == 1.0
+
+
+def test_constantes_de_intervalo():
+    from app.config import INDICES, INTERVALS, INTRADAY, INTRADAY_SECONDS
+    assert set(INTRADAY) <= set(INTERVALS) and set(INTRADAY_SECONDS) == set(INTRADAY)
+    assert INTRADAY_SECONDS["1h"] == 3600 and INDICES["IBOV"] == ("B3", "Ibovespa")
