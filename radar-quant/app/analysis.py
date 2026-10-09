@@ -8,13 +8,15 @@ from app import db, service
 from app.config import CURRENCY, PERIODS_PER_YEAR
 from app.stats import factors as F
 from app.stats.backtest import run_backtest
+from app.providers.base import Bar
 from app.stats.indicators import bollinger, macd, rsi, sma
 from app.stats.portfolio import METHODS, PortfolioError, build_portfolio
+from app.stats.swing import swing_report
 
 PORTFOLIO_WEEKS = 156
 NOTE = "Retornos em moeda local de cada ativo, sem conversão cambial."
 
-_cache: dict[int, tuple[tuple, dict]] = {}  # asset_id -> (assinatura, análise)
+_cache: dict[int, tuple[tuple, dict, dict]] = {}  # asset_id -> (assinatura, análise, pools dos setups)
 _lock = threading.Lock()
 
 
@@ -47,26 +49,29 @@ def _date(ts) -> str:
     return pd.Timestamp(ts).strftime("%Y-%m-%d")
 
 
-def _compute(conn, asset: dict, df: pd.DataFrame) -> dict:
+def _compute(conn, asset: dict, df: pd.DataFrame) -> tuple[dict, dict]:
+    """(análise pública, pools dos setups de swing). Ativo insuficiente: pools vazios."""
     base = {"asset_id": asset["id"], "symbol": asset["symbol"], "market": asset["market"],
             "currency": asset.get("currency") or CURRENCY[asset["market"]], "candles": len(df)}
     insufficient = {**base, "status": "insuficiente", "as_of": _date(df.index[-1]) if len(df) else None}
     if len(df) < F.MIN_CANDLES:
-        return insufficient
+        return insufficient, {}
     close = df["close"]
     score = F.score_series(close)
     last_score = score.iloc[-1]
     if not np.isfinite(last_score):
-        return insufficient
+        return insufficient, {}
     market = asset["market"]
     ppy = PERIODS_PER_YEAR[market]
     try:
         bt = run_backtest(close, score, service.load_rf_series(conn) if market == "B3" else None, ppy)
     except ValueError:
-        return insufficient
+        return insufficient, {}
     frame = F.factor_frame(close)
     raw, norm = frame.iloc[-1], F.normalize(frame).iloc[-1]
     equity = service.resample_real_dates(bt.equity, "W-FRI", "last").dropna()
+    swing = swing_report(df)
+    pools = {x["key"]: x.pop("pool") for x in swing["setups"]}
     return clean({
         **base, "status": "ok", "as_of": _date(df.index[-1]),
         "score": last_score, "verdict": F.verdict(last_score),
@@ -79,31 +84,43 @@ def _compute(conn, asset: dict, df: pd.DataFrame) -> dict:
                      "evidence": bt.evidence},
         "equity": [{"date": _date(d), "strategy": r.strategy, "buy_hold": r.buy_hold}
                    for d, r in equity.iterrows()],
-    })
+        "swing": swing,
+    }), clean(pools)
 
 
-def _analyze(conn, asset: dict, df: pd.DataFrame) -> dict:
+def _analyze_full(conn, asset: dict, df: pd.DataFrame) -> tuple[dict, dict]:
     # last_refresh entra na assinatura: o candle do dia pode ser reescrito sem mudar contagem/data
     sig = (asset["symbol"], asset["market"], len(df), _date(df.index[-1]) if len(df) else None,
            asset.get("last_refresh"))
     with _lock:
         hit = _cache.get(asset["id"])
     if hit and hit[0] == sig:
-        return hit[1]
-    result = _compute(conn, asset, df)  # CPU-bound: fora do lock
+        return hit[1], hit[2]
+    result, pools = _compute(conn, asset, df)  # CPU-bound: fora do lock
     with _lock:
-        _cache[asset["id"]] = (sig, result)
-    return result
+        _cache[asset["id"]] = (sig, result, pools)
+    return result, pools
+
+
+def _analyze(conn, asset: dict, df: pd.DataFrame) -> dict:
+    return _analyze_full(conn, asset, df)[0]
 
 
 def analyze_asset(conn, asset: dict) -> dict:
     return _analyze(conn, asset, service.load_frame(conn, asset["id"]))
 
 
+def swing_pool(conn, asset: dict) -> dict[str, list]:
+    """Excessos por operação de cada setup ({chave: [[mês, excesso]]}), da mesma análise em cache."""
+    return _analyze_full(conn, asset, service.load_frame(conn, asset["id"]))[1]
+
+
 def asset_summary(conn, asset: dict) -> dict:
     df = service.load_frame(conn, asset["id"])
+    entry = db.catalog_entry(conn, asset["symbol"], asset["market"])
     out = {"id": asset["id"], "symbol": asset["symbol"], "market": asset["market"],
-           "currency": asset["currency"], "price": None, "change_pct": None, "score": None,
+           "currency": asset["currency"], "watch": bool(asset.get("watch", 1)),
+           "name": entry["name"] if entry else None, "indices": entry["indices"] if entry else [], "price": None, "change_pct": None, "score": None,
            "verdict": None, "evidence": None, "status": "insuficiente",
            "last_error": asset.get("last_error"), "last_refresh": asset.get("last_refresh")}
     if df.empty:
@@ -156,17 +173,30 @@ def portfolio(conn, method: str, market: str | None = None) -> dict:
                   "note": NOTE})
 
 
-def _points(s: pd.Series) -> list[dict]:
-    return [{"time": _date(t), "value": v} for t, v in s.dropna().items()]
+def _points(s: pd.Series, fmt=_date) -> list[dict]:
+    return [{"time": fmt(t), "value": v} for t, v in s.dropna().items()]
+
+
+def _indicators(close: pd.Series, fmt=_date) -> dict:
+    m, bb = macd(close), bollinger(close)
+    series = {"sma20": sma(close, 20), "sma50": sma(close, 50), "sma200": sma(close, 200),
+              "bb_upper": bb["upper"], "bb_lower": bb["lower"], "rsi14": rsi(close, 14),
+              "macd": m["macd"], "macd_signal": m["signal"], "macd_hist": m["hist"]}
+    return {k: _points(v, fmt) for k, v in series.items()}
 
 
 def candles_payload(conn, asset_id: int, interval: str) -> dict:
     df = service.resample(service.load_frame(conn, asset_id), interval)
-    close, m, bb = df["close"], macd(df["close"]), bollinger(df["close"])
     candles = [{"time": _date(t), "open": r.open, "high": r.high, "low": r.low, "close": r.close,
                 "volume": r.volume} for t, r in df.iterrows()]
-    indicators = {"sma20": sma(close, 20), "sma50": sma(close, 50), "sma200": sma(close, 200),
-                  "bb_upper": bb["upper"], "bb_lower": bb["lower"], "rsi14": rsi(close, 14),
-                  "macd": m["macd"], "macd_signal": m["signal"], "macd_hist": m["hist"]}
-    return clean({"interval": interval,
-                  "candles": candles, "indicators": {k: _points(v) for k, v in indicators.items()}})
+    return clean({"interval": interval, "candles": candles, "indicators": _indicators(df["close"])})
+
+
+def intraday_payload(bars: list[Bar], interval: str, delay_minutes: int | None) -> dict:
+    """Mesmo formato do diário, com `time` em segundos epoch UTC."""
+    close = pd.Series([b.close for b in bars], index=[b.time for b in bars], dtype=float)
+    candles = [{"time": b.time, "open": b.open, "high": b.high, "low": b.low, "close": b.close,
+                "volume": b.volume} for b in bars]
+    return clean({"interval": interval, "intraday": True, "candles": candles,
+                  "indicators": _indicators(close, int),
+                  "last_bar_time": bars[-1].time if bars else None, "delay_minutes": delay_minutes})

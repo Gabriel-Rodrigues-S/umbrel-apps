@@ -6,6 +6,7 @@ import pytest
 
 from app import analysis, db, service
 from app.config import Settings
+from app.providers.base import Bar
 from app.stats.factors import WEIGHTS, verdict
 from app.stats.portfolio import PortfolioError
 
@@ -116,3 +117,81 @@ def test_clean():
     assert analysis.clean({"a": float("nan"), "b": [np.float64(1.5), float("inf")]}) == {"a": None, "b": [1.5, None]}
     assert type(analysis.clean(np.int64(3))) is int
     assert analysis.clean(np.array([1.0, np.nan])) == [1.0, None]
+
+
+# ---------- 1.1: curto prazo, resumo, intervalos e intraday ----------
+
+def test_analyze_tem_swing_sem_pool(conn):
+    r = analysis.analyze_asset(conn, asset(conn, "PETR4"))
+    sw = r["swing"]
+    assert [s["key"] for s in sw["setups"]] == ["reversao", "queda", "rompimento"]
+    assert all("pool" not in s for s in sw["setups"]) and "atr_pct" in sw["context"]
+    assert {"state", "stats", "markers", "description", "position"} <= set(sw["setups"][0])
+    s = json.dumps(r)
+    assert "NaN" not in s and "Infinity" not in s
+
+
+def test_swing_pool_do_mesmo_cache(conn, monkeypatch):
+    a = asset(conn, "PETR4")
+    analysis.analyze_asset(conn, a)
+    monkeypatch.setattr(analysis, "_compute", lambda *x: pytest.fail("recalculou"))
+    pool = analysis.swing_pool(conn, a)
+    assert set(pool) == {"reversao", "queda", "rompimento"}
+    assert all(isinstance(v, list) for v in pool.values())
+    json.dumps(pool)
+
+
+def test_swing_pool_calcula_se_nao_ha_cache(conn):
+    assert set(analysis.swing_pool(conn, asset(conn, "VALE3"))) == {"reversao", "queda", "rompimento"}
+
+
+def test_insuficiente_sem_swing(conn):
+    a = asset(conn, "CURTO1")
+    assert "swing" not in analysis.analyze_asset(conn, a)
+    assert analysis.swing_pool(conn, a) == {}
+
+
+def test_summary_catalogo(conn):
+    db.replace_catalog_market(conn, "US", [("AAPL", "Apple Inc.", "Ação")])
+    db.set_index_members(conn, "SP500", "US", ["AAPL"])
+    db.set_index_members(conn, "NDX", "US", ["AAPL"])
+    s = analysis.asset_summary(conn, asset(conn, "AAPL"))
+    assert s["watch"] is True and s["name"] == "Apple Inc." and s["indices"] == ["SP500", "NDX"]
+    s = analysis.asset_summary(conn, asset(conn, "MSFT"))
+    assert s["name"] is None and s["indices"] == [] and s["watch"] is True
+    off = db.get_asset(conn, db.add_asset(conn, "ZZZ", "US", watch=False))
+    assert analysis.asset_summary(conn, off)["watch"] is False
+
+
+@pytest.mark.parametrize("interval", ["3mo", "6mo", "1y"])
+def test_candles_payload_novos_intervalos(conn, interval):
+    a = asset(conn, "PETR4")
+    p = analysis.candles_payload(conn, a["id"], interval)
+    assert p["interval"] == interval and p["candles"][-1]["time"] == "2026-10-07"
+    assert len(p["candles"]) < len(analysis.candles_payload(conn, a["id"], "1mo")["candles"])
+    json.dumps(p)
+
+
+def _barras(n, step=60, t0=1_700_000_000):
+    return [Bar(t0 + step * i, 10 + i, 11 + i, 9 + i, 10.5 + i, 100.0) for i in range(n)]
+
+
+def test_intraday_payload():
+    bars = _barras(60)
+    p = analysis.intraday_payload(bars, "1m", 15)
+    assert p["intraday"] is True and p["interval"] == "1m" and p["delay_minutes"] == 15
+    assert len(p["candles"]) == 60 and all(type(c["time"]) is int for c in p["candles"])
+    assert p["last_bar_time"] == bars[-1].time == p["candles"][-1]["time"]
+    assert set(p["indicators"]) == {"sma20", "sma50", "sma200", "bb_upper", "bb_lower",
+                                    "rsi14", "macd", "macd_signal", "macd_hist"}
+    assert len(p["indicators"]["sma20"]) == 41 and type(p["indicators"]["sma20"][0]["time"]) is int
+    assert p["indicators"]["sma200"] == []
+    assert p["candles"][0] == {"time": bars[0].time, "open": 10, "high": 11, "low": 9, "close": 10.5,
+                               "volume": 100.0}
+    json.dumps(p, allow_nan=False)
+
+
+def test_intraday_payload_vazio():
+    p = analysis.intraday_payload([], "5m", None)
+    assert p["candles"] == [] and p["last_bar_time"] is None and p["delay_minutes"] is None
+    assert all(v == [] for v in p["indicators"].values())
