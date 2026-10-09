@@ -26,7 +26,7 @@ else
   PORT=8437
   BASE="http://127.0.0.1:$PORT"
   TMP_DATA=$(mktemp -d)
-  RADAR_DATA_DIR="$TMP_DATA" RADAR_PROVIDER=synthetic \
+  RADAR_DATA_DIR="$TMP_DATA" RADAR_PROVIDER=synthetic RADAR_UNIVERSE_PACE=0 \
     .venv/bin/uvicorn app.main:app --port "$PORT" --log-level warning >"$OUT/server.log" 2>&1 &
   SERVER_PID=$!
 fi
@@ -137,6 +137,74 @@ P1=$(js "$Q('#portfolio-weights').textContent")
 agent-browser select "#portfolio-method" "min_variance" >/dev/null
 wait_true "trocar o método muda os pesos" "$Q('#portfolio-weights').textContent !== $(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$P1")"
 agent-browser screenshot "$OUT/03-carteira.png" >/dev/null
+
+# ===================== 1.1 =====================
+setsel() { # seletor, valor — troca um <select> e dispara change
+  agent-browser eval "(() => { const s = $Q('$1'); s.value = '$2'; s.dispatchEvent(new Event('change', {bubbles: true})); })()" >/dev/null
+}
+
+# --- busca no catálogo e ativo fora da watchlist ---
+agent-browser click "#tab-chart" >/dev/null
+agent-browser fill "#add-symbol" "AMZ" >/dev/null
+wait_true "autocompletar encontra AMZN" "!!$Q('#search-results [data-symbol=\"AMZN\"]')"
+agent-browser click '#search-results [data-symbol="AMZN"]' >/dev/null
+wait_true "AMZN aberto pelo catálogo" "$Q('#chart-title').textContent.includes('AMZN') && window.__radar.state.candleCount > 100"
+check "AMZN aberto não entra na watchlist" "$(js "!$Q('#watchlist [data-symbol=\"AMZN\"]')")" "true"
+check "botão indica fora da watchlist" "$(js "$Q('#watch-toggle').dataset.watch")" "false"
+agent-browser click "#watch-toggle" >/dev/null
+wait_true "botão adiciona à watchlist" "!!$Q('#watchlist [data-symbol=\"AMZN\"]') && $Q('#watch-toggle').dataset.watch === 'true'"
+agent-browser eval "window.confirm = () => true" >/dev/null
+agent-browser click "#watch-toggle" >/dev/null
+wait_true "botão tira da watchlist" "!$Q('#watchlist [data-symbol=\"AMZN\"]') && $Q('#watch-toggle').dataset.watch === 'false'"
+check "ativo continua aberto depois de sair da watchlist" "$(js "$Q('#chart-title').textContent.includes('AMZN')")" "true"
+
+# --- doze intervalos ---
+for I in 1m 3m 5m 10m 30m 1h 1wk 1mo 3mo 6mo 1y 1d; do
+  agent-browser click "#interval-$I" >/dev/null
+  wait_true "intervalo $I desenha candles" "window.__radar.state.interval === '$I' && window.__radar.state.candleCount > 0"
+  if [ "$I" = "5m" ]; then
+    wait_true "aviso de intraday visível" "$Q('#intraday-note').offsetParent !== null && $Q('#intraday-note').textContent.trim().length > 0"
+  fi
+done
+check "aviso de intraday some no diário" "$(js "$Q('#intraday-note').offsetParent === null || $Q('#intraday-note').textContent.trim() === ''")" "true"
+Y=$(js "String(window.__radar.state.candleCount)")
+agent-browser click "#interval-1y" >/dev/null
+wait_true "anual tem menos candles que diário" "window.__radar.state.interval === '1y' && window.__radar.state.candleCount < $Y"
+agent-browser click "#interval-1d" >/dev/null
+wait_true "volta ao diário (1.1)" "window.__radar.state.interval === '1d' && window.__radar.state.candleCount === $Y"
+
+# --- curto prazo ---
+agent-browser click "#rec-tab-swing" >/dev/null
+wait_true "três setups de curto prazo" "$QA('#swing-card .swing-setup[data-setup][data-state]').length === 3"
+check "setups esperados" "$(js "[...$QA('#swing-card .swing-setup')].map(e => e.dataset.setup).sort().join(',')")" "queda,reversao,rompimento"
+check "estados válidos" "$(js "[...$QA('#swing-card .swing-setup')].every(e => ['sinal','posicao','nenhum'].includes(e.dataset.state))")" "true"
+check "evidência visível em cada setup" "$(js "[...$QA('#swing-card .swing-setup')].every(e => /evidência|amostra/i.test(e.textContent))")" "true"
+check "contexto de curto prazo" "$(js "$Q('#swing-context').textContent.trim().length > 0")" "true"
+agent-browser click '#swing-card .swing-setup[data-setup="reversao"]' >/dev/null
+wait_true "setup selecionado" "$Q('#swing-card .swing-setup[data-setup=\"reversao\"]').getAttribute('aria-pressed') === 'true' || !!$Q('#swing-card .swing-setup[data-setup=\"reversao\"] [aria-pressed=\"true\"]')"
+agent-browser screenshot "$OUT/06-curto-prazo.png" >/dev/null
+agent-browser click "#rec-tab-position" >/dev/null
+wait_true "volta à aba Posição" "$Q('#rec-verdict').offsetParent !== null"
+
+# --- notícias ---
+wait_true "notícias do ativo" "$QA('#news-list a[data-news]').length > 0"
+check "links de notícia são http(s)" "$(js "[...$QA('#news-list a[data-news]')].every(a => /^https?:\\/\\//.test(a.getAttribute('href') || ''))")" "true"
+check "links abrem em nova aba com noopener" "$(js "[...$QA('#news-list a[data-news]')].every(a => a.target === '_blank' && /noopener/.test(a.rel))")" "true"
+
+# --- screener ---
+agent-browser click "#tab-ranking" >/dev/null
+setsel "#screener-scope" "SP500"
+wait_true "screener do S&P 500 com linhas" "$QA('#ranking-table tbody tr[data-asset-id]').length > 0"
+wait_true "resumo do índice" "$Q('#screener-summary').textContent.trim().length > 0"
+check "paginação informada" "$(js "$Q('#screener-page').textContent.trim().length > 0")" "true"
+agent-browser screenshot "$OUT/07-screener.png" >/dev/null
+SN=$(curl -sf "$BASE/api/screener?scope=SP500&verdict=comprar" | python3 -c 'import json,sys; print(json.load(sys.stdin)["total"])')
+setsel "#screener-verdict" "comprar"
+wait_true "filtro de veredito bate com a API ($SN)" "(() => { const n = $QA('#ranking-table tbody tr[data-asset-id]').length; return $SN > 50 ? n === 50 : n === $SN; })()"
+setsel "#screener-verdict" ""
+setsel "#screener-scope" "watchlist"
+wait_true "screener volta à watchlist" "$QA('#ranking-table tbody tr[data-asset-id]').length === $N_OK"
+agent-browser click "#tab-chart" >/dev/null
 
 # --- tema ---
 TH=$(js "document.documentElement.dataset.theme || ''")
