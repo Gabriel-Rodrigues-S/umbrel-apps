@@ -80,9 +80,10 @@ def test_refresh_descarta_historico_que_saiu_da_janela(conn, settings):
     # split 10:1 com a janela já andada: as linhas antigas (fator antigo) não podem sobrar
     a = db.add_asset(conn, "AAPL", "US")
     db.upsert_candles(conn, a, [Candle(d, 100, 100, 100, 100, 1) for d in ("2024-01-02", "2024-01-03")])
-    novo = Fixo([Candle(d, 10, 10, 10, 10, 1) for d in ("2024-01-04", "2024-01-05")])
+    dias = pd.bdate_range("2024-01-04", periods=300).strftime("%Y-%m-%d")
+    novo = Fixo([Candle(d, 10, 10, 10, 10, 1) for d in dias])
     asyncio.run(service.refresh_asset(conn, db.get_asset(conn, a), settings, provider=novo))
-    assert service.load_frame(conn, a)["close"].tolist() == [10, 10]
+    assert service.load_frame(conn, a)["close"].tolist() == [10] * 300
 
 
 def test_refresh_all_nao_para_em_unknown_symbol(conn, settings):
