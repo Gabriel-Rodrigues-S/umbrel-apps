@@ -19,7 +19,7 @@
   </div>
   <nav class="tabs" role="tablist" aria-label="Seções">
     <button id="tab-chart" class="tab" role="tab" aria-selected="true" aria-controls="view-chart">Gráfico</button>
-    <button id="tab-ranking" class="tab" role="tab" aria-selected="false" aria-controls="view-ranking">Ranking</button>
+    <button id="tab-ranking" class="tab" role="tab" aria-selected="false" aria-controls="view-ranking">Screener</button>
     <button id="tab-portfolio" class="tab" role="tab" aria-selected="false" aria-controls="view-portfolio">Carteira</button>
   </nav>
   <div class="topbar-actions">
@@ -42,13 +42,14 @@
   <section id="view-chart" class="view" role="tabpanel" aria-labelledby="tab-chart">
     <aside class="panel watch-panel" aria-label="Watchlist">
       <form id="add-form" class="add-form" autocomplete="off">
-        <input id="add-symbol" type="text" placeholder="Símbolo (ex.: PETR4)" aria-label="Símbolo" maxlength="20" spellcheck="false" autocapitalize="characters" required>
+        <input id="add-symbol" type="text" placeholder="Buscar símbolo ou nome" aria-label="Buscar ativo por símbolo ou nome" maxlength="64" spellcheck="false" autocapitalize="off" role="combobox" aria-autocomplete="list" aria-controls="search-results" aria-expanded="false" required>
         <select id="add-market" aria-label="Mercado">
           <option value="B3">B3</option>
           <option value="US">EUA</option>
           <option value="CRYPTO">Cripto</option>
         </select>
-        <button id="add-submit" class="btn btn-primary" type="submit" title="Adicionar à watchlist">Adicionar</button>
+        <button id="add-submit" class="btn btn-primary" type="submit" title="Adicionar o símbolo digitado à watchlist">Adicionar</button>
+        <ul id="search-results" class="search-results" role="listbox" aria-label="Resultados da busca" hidden></ul>
       </form>
       <p id="add-error" class="form-error" role="alert" hidden></p>
       <div id="watchlist" class="watchlist" aria-busy="true">
@@ -63,6 +64,9 @@
           <h1 id="chart-title">—</h1>
           <span id="chart-market" class="tag"></span>
           <span id="chart-alert" class="alert-icon" hidden>⚠</span>
+          <span id="chart-name" class="chart-name"></span>
+          <span id="chart-indices" class="chart-indices"></span>
+          <button id="watch-toggle" class="btn btn-small watch-toggle" type="button" data-watch="false" aria-pressed="false" hidden>Adicionar à watchlist</button>
         </div>
         <div class="chart-quote">
           <span id="chart-price" class="quote-price"></span>
@@ -70,10 +74,23 @@
           <span id="chart-asof" class="muted"></span>
         </div>
         <div class="chart-tools">
-          <div class="seg" role="group" aria-label="Intervalo">
-            <button id="interval-1d" type="button" aria-pressed="true" title="Diário">D</button>
-            <button id="interval-1wk" type="button" aria-pressed="false" title="Semanal">S</button>
-            <button id="interval-1mo" type="button" aria-pressed="false" title="Mensal">M</button>
+          <div class="intervals" role="group" aria-label="Intervalo">
+            <div class="seg" title="Intraday">
+              <button id="interval-1m" type="button" aria-pressed="false" title="1 minuto">1m</button>
+              <button id="interval-3m" type="button" aria-pressed="false" title="3 minutos">3m</button>
+              <button id="interval-5m" type="button" aria-pressed="false" title="5 minutos">5m</button>
+              <button id="interval-10m" type="button" aria-pressed="false" title="10 minutos">10m</button>
+              <button id="interval-30m" type="button" aria-pressed="false" title="30 minutos">30m</button>
+              <button id="interval-1h" type="button" aria-pressed="false" title="1 hora">1h</button>
+            </div>
+            <div class="seg">
+              <button id="interval-1d" type="button" aria-pressed="true" title="Diário">D</button>
+              <button id="interval-1wk" type="button" aria-pressed="false" title="Semanal">S</button>
+              <button id="interval-1mo" type="button" aria-pressed="false" title="Mensal">M</button>
+              <button id="interval-3mo" type="button" aria-pressed="false" title="Trimestral">3M</button>
+              <button id="interval-6mo" type="button" aria-pressed="false" title="Semestral">6M</button>
+              <button id="interval-1y" type="button" aria-pressed="false" title="Anual">1A</button>
+            </div>
           </div>
           <div class="seg seg-toggle" role="group" aria-label="Indicadores sobre o preço">
             <button id="toggle-sma20" type="button" data-overlay="sma20" aria-pressed="true"><i class="swatch" data-color="sma20"></i>SMA 20</button>
@@ -83,6 +100,8 @@
           </div>
         </div>
       </div>
+
+      <p id="intraday-note" class="intraday-note" role="status" hidden></p>
 
       <div class="chart-stack" id="chart-stack">
         <div class="pane">
@@ -102,14 +121,21 @@
     </div>
 
     <aside id="rec-card" class="panel rec-card" aria-label="Recomendação estatística" aria-busy="true">
-      <h2 class="panel-title">Recomendação estatística</h2>
+      <div class="rec-head">
+        <h2 class="panel-title">Recomendação estatística</h2>
+        <div class="seg rec-tabs" role="tablist" aria-label="Horizonte da recomendação">
+          <button id="rec-tab-position" type="button" role="tab" aria-selected="true" aria-controls="rec-position">Posição</button>
+          <button id="rec-tab-swing" type="button" role="tab" aria-selected="false" aria-controls="swing-card">Curto prazo</button>
+        </div>
+      </div>
+      <p id="rec-source-error" class="rec-message rec-warn" hidden></p>
 
+      <div id="rec-position" role="tabpanel" aria-labelledby="rec-tab-position">
       <div class="rec-hero">
         <div id="rec-verdict" class="verdict" data-verdict="">—</div>
         <div id="rec-evidence" class="evidence" data-evidence="">—</div>
       </div>
       <p id="rec-message" class="rec-message" hidden></p>
-      <p id="rec-source-error" class="rec-message rec-warn" hidden></p>
 
       <div class="score-block">
         <div class="score-line">
@@ -145,14 +171,46 @@
         </h3>
         <div id="equity-chart" class="chart chart-equity"></div>
       </div>
+      </div>
+
+      <div id="swing-card" class="swing-card" role="tabpanel" aria-labelledby="rec-tab-swing" hidden>
+        <p class="muted small swing-intro">Três setups de compra de 1 a 10 pregões, sobre candles diários. O estado é o de hoje; a evidência é o histórico do próprio ativo. Clique num setup para ver entradas e saídas no gráfico diário.</p>
+        <p id="swing-message" class="rec-message" hidden></p>
+        <div id="swing-setups" class="swing-setups"></div>
+        <p id="swing-markers-note" class="muted small" hidden></p>
+        <div id="swing-context-block">
+          <h3 class="sub-title">Contexto de curto prazo</h3>
+          <dl id="swing-context" class="kv kv-2 swing-context"></dl>
+        </div>
+      </div>
     </aside>
+
+    <section id="news-panel" class="panel news-panel" aria-label="Notícias do ativo" hidden>
+      <div class="panel-head news-head">
+        <h2 class="panel-title">Notícias <span id="news-symbol"></span></h2>
+        <span id="news-stale" class="news-stale" hidden>pode estar desatualizado</span>
+        <span class="muted small">só título, fonte e link — abre em nova aba</span>
+      </div>
+      <p id="news-loading" class="muted" hidden>Carregando notícias…</p>
+      <p id="news-empty" class="muted" hidden>Nenhuma notícia encontrada para este ativo.</p>
+      <ul id="news-list" class="news-list"></ul>
+    </section>
   </section>
 
   <!-- ===================== Ranking ===================== -->
   <section id="view-ranking" class="view view-single" role="tabpanel" aria-labelledby="tab-ranking" hidden>
     <div class="panel">
-      <div class="panel-head">
-        <h2 class="panel-title">Ranking por score</h2>
+      <div class="panel-head screener-head">
+        <h2 class="panel-title">Screener</h2>
+        <label class="field">Escopo
+          <select id="screener-scope">
+            <option value="watchlist">Minha watchlist</option>
+            <option value="IBOV">Ibovespa</option>
+            <option value="IBRA">IBrA</option>
+            <option value="SP500">S&amp;P 500</option>
+            <option value="NDX">Nasdaq-100</option>
+          </select>
+        </label>
         <label class="field">Mercado
           <select id="ranking-market">
             <option value="">Todos</option>
@@ -161,7 +219,33 @@
             <option value="CRYPTO">Cripto</option>
           </select>
         </label>
+        <label class="field">Veredito
+          <select id="screener-verdict">
+            <option value="">Todos</option>
+            <option value="comprar">Comprar</option>
+            <option value="manter">Manter</option>
+            <option value="vender">Vender</option>
+          </select>
+        </label>
+        <label class="field">Evidência
+          <select id="screener-evidence">
+            <option value="">Todas</option>
+            <option value="favoravel">Favorável</option>
+            <option value="contraria">Contrária</option>
+            <option value="sem_evidencia">Sem evidência</option>
+          </select>
+        </label>
+        <label class="field">Setup ativo
+          <select id="screener-setup">
+            <option value="">Qualquer</option>
+            <option value="reversao">Reversão rápida</option>
+            <option value="queda">Queda extrema</option>
+            <option value="rompimento">Rompimento</option>
+          </select>
+        </label>
       </div>
+      <p id="screener-progress" class="screener-progress" role="status" hidden></p>
+      <div id="screener-summary" class="screener-summary" hidden></div>
       <p id="ranking-note" class="muted small"></p>
       <div class="table-scroll">
         <table id="ranking-table" class="data-table">
@@ -169,10 +253,14 @@
             <tr>
               <th class="num" scope="col">#</th>
               <th scope="col"><button type="button" data-sort="symbol">Ativo</button></th>
-              <th scope="col"><button type="button" data-sort="market">Mercado</button></th>
+              <th scope="col">Nome</th>
+              <th scope="col">Mercado</th>
+              <th class="num" scope="col"><button type="button" data-sort="price">Preço</button></th>
+              <th class="num" scope="col"><button type="button" data-sort="change_pct">Var. dia</button></th>
               <th class="num" scope="col"><button type="button" data-sort="score">Score</button></th>
-              <th scope="col"><button type="button" data-sort="verdict">Veredito</button></th>
-              <th scope="col"><button type="button" data-sort="evidence">Evidência</button></th>
+              <th scope="col">Veredito</th>
+              <th scope="col">Evidência</th>
+              <th scope="col">Setups ativos</th>
               <th class="num" scope="col"><button type="button" data-sort="momentum">Momentum</button></th>
               <th class="num" scope="col"><button type="button" data-sort="trend">Tendência</button></th>
               <th class="num" scope="col"><button type="button" data-sort="dist_sma200">Dist. SMA 200</button></th>
@@ -181,8 +269,13 @@
               <th class="num" scope="col"><button type="button" data-sort="drawdown">Drawdown</button></th>
             </tr>
           </thead>
-          <tbody><tr><td class="empty" colspan="12">Carregando…</td></tr></tbody>
+          <tbody><tr><td class="empty" colspan="16">Carregando…</td></tr></tbody>
         </table>
+      </div>
+      <div class="pager">
+        <button id="screener-prev" class="btn btn-small" type="button" disabled>‹ Anterior</button>
+        <span id="screener-page" class="muted" aria-live="polite"></span>
+        <button id="screener-next" class="btn btn-small" type="button" disabled>Próxima ›</button>
       </div>
     </div>
   </section>
