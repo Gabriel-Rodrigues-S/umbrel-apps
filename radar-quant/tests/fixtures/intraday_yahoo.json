@@ -1,0 +1,6 @@
+{"chart": {"result": [{"meta": {"symbol": "PETR4.SA", "gmtoffset": -10800, "exchangeDataDelayedBy": 15},
+ "timestamp": [1791378000, 1791378060, 1791378120, 1791378180, 1791378240, 1791378300],
+ "indicators": {
+  "quote": [{"open": [10.0, 10.1, null, 10.3, 10.4, 10.5], "high": [10.2, 10.3, null, 10.5, 10.6, 10.7],
+             "low": [9.9, 10.0, null, 10.2, 10.3, 10.4], "close": [10.1, 10.2, null, 10.4, 10.5, 10.6],
+             "volume": [1000, 1100, null, 900, null, 1200]}]}}], "error": null}}
