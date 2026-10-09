@@ -1,5 +1,7 @@
 import sqlite3
 
+import pytest
+
 from app import db
 from app.providers.base import Candle
 
@@ -72,6 +74,36 @@ def test_migracao_idempotente(tmp_path):
     antes = _estado(db.connect(p))
     depois = _estado(db.connect(p))
     assert antes == depois
+
+
+def test_migracao_nao_desfaz_escolha_do_usuario(tmp_path):
+    p = tmp_path / "radar.db"
+    _banco_100(p)
+    conn = db.connect(p)
+    conn.execute("UPDATE assets SET watch = 0 WHERE symbol = 'AAPL'")
+    conn.commit()
+    conn.close()
+    conn = db.connect(p)
+    assert {a["symbol"]: a["watch"] for a in db.list_assets(conn, None)} == {"PETR4": 1, "AAPL": 0}
+
+
+def test_falha_no_meio_da_migracao_nao_deixa_rastro(tmp_path, monkeypatch):
+    p = tmp_path / "radar.db"
+    _banco_100(p)
+    boa = db._MIGRATION_1
+    monkeypatch.setattr(db, "_MIGRATION_1", boa[:2] + ("CREATE TABLE ruim (",) + boa[2:])
+    with pytest.raises(sqlite3.Error):
+        db.connect(p)
+    raw = sqlite3.connect(p)
+    assert raw.execute("PRAGMA user_version").fetchone()[0] == 0
+    assert "watch" not in {r[1] for r in raw.execute("PRAGMA table_info(assets)")}
+    assert not {"catalog", "screener", "news", "meta"} & {
+        r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    raw.close()
+    monkeypatch.setattr(db, "_MIGRATION_1", boa)
+    conn = db.connect(p)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert [a["watch"] for a in db.list_assets(conn, None)] == [1, 1]
 
 
 def test_banco_novo_tem_mesmo_schema_final(tmp_path):
