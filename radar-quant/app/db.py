@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS rf_rates (
 """
 _UPSERT_CANDLE = ("INSERT OR REPLACE INTO candles (asset_id, date, open, high, low, close, volume) "
                   "VALUES (?, ?, ?, ?, ?, ?, ?)")
+MIN_TRIM_CANDLES = 250  # lote menor que isso não é uma janela confiável para apagar histórico
 
 
 class DuplicateAsset(Exception):
@@ -115,14 +116,16 @@ def replace_candles(conn, asset_id: int, candles: Iterable[Candle]) -> int:
     """Grava a janela recebida e apaga o que ficou antes dela.
 
     A fonte reajusta o histórico inteiro a cada dividendo/split; linhas que já saíram
-    da janela ficariam com o fator antigo. Lista vazia não apaga nada.
+    da janela ficariam com o fator antigo. Lote curto (resposta parcial da fonte) ou
+    vazio não apaga nada: só faz o upsert.
     """
     rows = _candle_rows(asset_id, candles)
     if not rows:
         return 0
     with _write(conn):
-        conn.execute("DELETE FROM candles WHERE asset_id = ? AND date < ?",
-                     (asset_id, min(r[1] for r in rows)))
+        if len(rows) >= MIN_TRIM_CANDLES:
+            conn.execute("DELETE FROM candles WHERE asset_id = ? AND date < ?",
+                         (asset_id, min(r[1] for r in rows)))
         conn.executemany(_UPSERT_CANDLE, rows)
     return len(rows)
 

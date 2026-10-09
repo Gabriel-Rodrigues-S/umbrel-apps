@@ -19,6 +19,7 @@ from app.stats.portfolio import PortfolioError
 log = logging.getLogger("radar")
 STATIC = Path(__file__).parent / "static"
 RETRY_SECONDS = 600  # nova tentativa quando algum ativo ficou com erro
+MAX_SHORT_RETRIES = 3  # esperas curtas seguidas; depois volta ao intervalo normal
 AssetId = Annotated[int, PathParam(ge=1, le=2**63 - 1)]  # faixa do INTEGER do SQLite
 
 
@@ -43,17 +44,28 @@ async def refresh_safely(app: FastAPI) -> None:
         log.exception("falha no refresh em segundo plano")
 
 
-def sleep_seconds(app: FastAPI) -> float:
-    """Espera até o próximo refresh; curta se algum ativo ficou com erro (ex.: rede fora na subida)."""
-    normal = app.state.settings.refresh_hours * 3600
-    failed = any(a["last_error"] for a in db.list_assets(app.state.conn))
-    return min(RETRY_SECONDS, normal) if failed else normal
+def next_sleep(has_errors: bool, short_retries: int, refresh_hours: float) -> tuple[float, int]:
+    """(espera em segundos, novo contador de esperas curtas).
+
+    Com ativo em erro (ex.: rede fora na subida) a espera é curta, mas só por
+    MAX_SHORT_RETRIES vezes seguidas: um ticker morto não pode fazer a watchlist
+    inteira ser buscada a cada 10 minutos para sempre. Refresh sem erro zera o contador.
+    """
+    normal = refresh_hours * 3600
+    if not has_errors:
+        return normal, 0
+    if short_retries >= MAX_SHORT_RETRIES:
+        return normal, short_retries
+    return min(RETRY_SECONDS, normal), short_retries + 1
 
 
 async def loop_refresh(app: FastAPI) -> None:
+    short_retries = 0
     while True:
         await refresh_safely(app)
-        await asyncio.sleep(sleep_seconds(app))
+        has_errors = any(a["last_error"] for a in db.list_assets(app.state.conn))
+        seconds, short_retries = next_sleep(has_errors, short_retries, app.state.settings.refresh_hours)
+        await asyncio.sleep(seconds)
 
 
 @asynccontextmanager

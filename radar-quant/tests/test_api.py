@@ -5,9 +5,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app import analysis, service
+from app import analysis, main, service
 from app.config import get_settings
-from app.main import create_app
+from app.main import create_app, next_sleep
 
 
 @pytest.fixture
@@ -184,10 +184,29 @@ def test_id_fora_do_intervalo(client, asset_id):
     assert client.get(f"/api/assets/{2**63 - 1}/analysis").status_code == 404
 
 
-def test_espera_do_laco_encurta_quando_ha_erro(client):
-    from app.main import sleep_seconds
-    assert sleep_seconds(client.app) == 6 * 3600
-    aid = client.post("/api/assets", json={"symbol": "FALHA1", "market": "US"}).json()["id"]
-    assert sleep_seconds(client.app) == 600
-    client.delete(f"/api/assets/{aid}")
-    assert sleep_seconds(client.app) == 6 * 3600
+def test_next_sleep_limita_esperas_curtas():
+    n, esperas = 0, []
+    for _ in range(5):  # erro persistente: 3 esperas curtas, depois o intervalo normal
+        s, n = next_sleep(True, n, 6)
+        esperas.append(s)
+    assert esperas == [600, 600, 600, 6 * 3600, 6 * 3600] and n == 3
+    assert next_sleep(False, n, 6) == (6 * 3600, 0)  # refresh limpo zera o contador
+    assert next_sleep(False, 0, 6) == (6 * 3600, 0)
+    assert next_sleep(True, 0, 6) == (600, 1)
+    assert next_sleep(True, 0, 0.1) == (360, 1)  # intervalo configurado menor que a espera curta
+
+
+def test_laco_usa_espera_curta_e_depois_volta_ao_normal(client, monkeypatch):
+    client.post("/api/assets", json={"symbol": "FALHA1", "market": "US"})
+    esperas = []
+
+    async def fake_sleep(s):
+        esperas.append(s)
+        if len(esperas) == 5:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(main.asyncio, "sleep", fake_sleep)
+    client.app.state.refresh_lock = asyncio.Lock()
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(main.loop_refresh(client.app))
+    assert esperas == [600, 600, 600, 6 * 3600, 6 * 3600]
