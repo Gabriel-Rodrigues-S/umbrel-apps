@@ -5,7 +5,8 @@ import pytest
 
 from app import db, service
 from app.config import DEFAULT_WATCHLIST, Settings
-from app.providers.base import Candle, ProviderError, UnknownSymbol
+from app.providers.base import Bar, Candle, ProviderError, UnknownSymbol
+from app.providers.synthetic import SyntheticProvider
 
 
 @pytest.fixture
@@ -118,3 +119,213 @@ def test_load_rf_series(conn):
     db.upsert_rf(conn, [("2024-01-03", 0.0004), ("2024-01-02", 0.0005)])
     rf = service.load_rf_series(conn)
     assert isinstance(rf.index, pd.DatetimeIndex) and rf.iloc[0] == 0.0005
+
+
+# ---------- 1.1: intervalos derivados do diário ----------
+
+def _tres_anos():
+    idx = pd.bdate_range("2022-01-03", "2024-12-31")
+    n = len(idx)
+    return pd.DataFrame({"open": range(n), "high": [x + 5 for x in range(n)], "low": [x - 5 for x in range(n)],
+                         "close": [x + 1 for x in range(n)], "volume": [2.0] * n}, index=idx)
+
+
+@pytest.mark.parametrize("interval,n", [("3mo", 12), ("6mo", 6), ("1y", 3)])
+def test_resample_civil(interval, n):
+    df = _tres_anos()
+    r = service.resample(df, interval)
+    assert len(r) == n and r.index[-1] == df.index[-1]
+    assert r.iloc[0]["open"] == df.iloc[0]["open"] and r.iloc[-1]["close"] == df.iloc[-1]["close"]
+    primeiro = df[df.index.year == 2022] if interval == "1y" else df[df.index <= r.index[0]]
+    assert r.index[0] == primeiro.index[-1] and r.iloc[0]["volume"] == 2.0 * len(primeiro)
+    assert r.iloc[0]["high"] == primeiro["high"].max() and r.iloc[0]["low"] == primeiro["low"].min()
+    assert service.resample(df.iloc[:0], interval).empty
+
+
+def test_resample_semestre_fecha_em_junho():
+    r = service.resample(_tres_anos(), "6mo")
+    assert [d.month for d in r.index[:2]] == [6, 12]
+
+
+def test_resample_intraday_invalido():
+    with pytest.raises(ValueError):
+        service.resample(_tres_anos(), "5m")
+
+
+# ---------- 1.1: agregação e intraday ----------
+
+def _bar(t, o, h, l, c, v):
+    return Bar(t, o, h, l, c, v)
+
+
+def test_aggregate_bars():
+    bars = [_bar(1260 + 60 * i, 10 + i, 20 + i, 5 - i, 11 + i, 1.0) for i in range(6)]  # 1260 = 7 * 180
+    a, b = service.aggregate_bars(bars, 180)
+    assert (a.time, a.open, a.high, a.low, a.close, a.volume) == (1260, 10, 22, 3, 13, 3.0)
+    assert (b.time, b.open, b.high, b.low, b.close, b.volume) == (1440, 13, 25, 0, 16, 3.0)
+
+
+def test_aggregate_bars_buraco():
+    bars = [_bar(1260, 1, 2, 0, 1, 1), _bar(1320, 1, 3, 0, 2, 1), _bar(1620, 5, 6, 4, 5, 1)]  # pula 1380..1560
+    out = service.aggregate_bars(bars, 180)
+    assert [b.time for b in out] == [1260, 1620] and out[0].volume == 2
+
+
+class Contador:
+    """Provider de teste: conta chamadas e só entrega nativamente o que `native` diz."""
+    def __init__(self, native=("1m", "5m", "30m", "1h"), erro=None):
+        self.NATIVE_INTRADAY = frozenset(native)
+        self.calls = []
+        self.erro = erro
+
+    async def fetch_intraday(self, symbol, market, interval):
+        self.calls.append((symbol, interval))
+        if self.erro:
+            raise self.erro
+        step = {"1m": 60, "3m": 180, "5m": 300, "30m": 1800, "1h": 3600}[interval]
+        return [Bar(1260 + step * i, 1.0 + i, 2.0 + i, 0.5, 1.5 + i, 10.0) for i in range(12)], 15
+
+
+@pytest.fixture(autouse=True)
+def _limpa_intraday():
+    service.clear_intraday_cache()
+    yield
+    service.clear_intraday_cache()
+
+
+def _ativo(i, symbol="PETR4", market="B3"):
+    return {"id": i, "symbol": symbol, "market": market}
+
+
+def test_load_intraday_nativo_e_ttl(settings, monkeypatch):
+    t = [100.0]
+    monkeypatch.setattr(service, "_clock", lambda: t[0])
+    p = Contador()
+    r = asyncio.run(service.load_intraday(_ativo(1), "1m", settings, provider=p))
+    assert len(r["bars"]) == 12 and r["delay_minutes"] == 15 and r["fetched_at"]
+    asyncio.run(service.load_intraday(_ativo(1), "1m", settings, provider=p))
+    assert len(p.calls) == 1
+    t[0] += 56  # TTL do 1m = 55 s
+    asyncio.run(service.load_intraday(_ativo(1), "1m", settings, provider=p))
+    assert len(p.calls) == 2
+    asyncio.run(service.load_intraday(_ativo(1), "30m", settings, provider=p))
+    t[0] += 299
+    asyncio.run(service.load_intraday(_ativo(1), "30m", settings, provider=p))
+    assert len(p.calls) == 3
+
+
+def test_load_intraday_sintetico(settings):
+    r = asyncio.run(service.load_intraday(_ativo(1), "1m", settings))
+    assert len(r["bars"]) == 1500 and r["delay_minutes"] is None
+
+
+def test_load_intraday_deriva_3m_e_10m(settings):
+    p = Contador()
+    r = asyncio.run(service.load_intraday(_ativo(1), "3m", settings, provider=p))
+    assert p.calls == [("PETR4", "1m")] and len(r["bars"]) == 4
+    assert all(b.time % 180 == 0 for b in r["bars"])
+    r = asyncio.run(service.load_intraday(_ativo(1), "10m", settings, provider=p))
+    assert p.calls[-1] == ("PETR4", "5m") and all(b.time % 600 == 0 for b in r["bars"])
+
+
+def test_load_intraday_chave_separa_ativo_e_intervalo(settings):
+    p = Contador()
+    for a, i in ((1, "1m"), (2, "1m"), (1, "5m"), (1, "1m")):
+        asyncio.run(service.load_intraday(_ativo(a), i, settings, provider=p))
+    assert len(p.calls) == 3
+
+
+def test_load_intraday_erro_nao_cacheia(settings):
+    p = Contador(erro=ProviderError("fora"))
+    for _ in range(2):
+        with pytest.raises(ProviderError):
+            asyncio.run(service.load_intraday(_ativo(1), "1m", settings, provider=p))
+    assert len(p.calls) == 2
+    p = Contador(erro=UnknownSymbol("x"))
+    with pytest.raises(UnknownSymbol):
+        asyncio.run(service.load_intraday(_ativo(2), "1m", settings, provider=p))
+
+
+def test_load_intraday_intervalo_invalido(settings):
+    with pytest.raises(ValueError):
+        asyncio.run(service.load_intraday(_ativo(1), "1d", settings, provider=Contador()))
+
+
+def test_load_intraday_limite_de_64(settings):
+    p = Contador()
+    for i in range(65):
+        asyncio.run(service.load_intraday(_ativo(i), "1m", settings, provider=p))
+    assert len(service._intraday_cache) == 64
+    n = len(p.calls)
+    asyncio.run(service.load_intraday(_ativo(0), "1m", settings, provider=p))  # a mais antiga saiu
+    assert len(p.calls) == n + 1
+    asyncio.run(service.load_intraday(_ativo(64), "1m", settings, provider=p))  # a mais nova ficou
+    assert len(p.calls) == n + 1
+
+
+# ---------- 1.1: abrir ativo ----------
+
+class DiarioContado:
+    def __init__(self):
+        self.n = 0
+        self.inner = SyntheticProvider()
+
+    async def fetch_daily(self, symbol, market):
+        self.n += 1
+        return await self.inner.fetch_daily(symbol, market)
+
+
+def test_open_asset_cria_watch0_e_nao_refaz(conn, settings, monkeypatch):
+    p = DiarioContado()
+    monkeypatch.setattr(service, "get_provider", lambda market, s: p)
+    a = asyncio.run(service.open_asset(conn, " tsla ", "US", settings))
+    assert a["symbol"] == "TSLA" and a["watch"] == 0 and a["last_viewed"]
+    assert len(db.load_candles(conn, a["id"])) == 1500 and p.n == 1
+    visto = a["last_viewed"]
+    b = asyncio.run(service.open_asset(conn, "TSLA", "US", settings))
+    assert p.n == 1 and b["id"] == a["id"] and b["last_viewed"] >= visto
+
+
+def test_open_asset_atualiza_se_velho_ou_sem_candles(conn, settings, monkeypatch):
+    p = DiarioContado()
+    monkeypatch.setattr(service, "get_provider", lambda market, s: p)
+    a = asyncio.run(service.open_asset(conn, "TSLA", "US", settings))
+    conn.execute("UPDATE assets SET last_refresh = '2020-01-01T00:00:00+00:00' WHERE id = ?", (a["id"],))
+    conn.commit()
+    asyncio.run(service.open_asset(conn, "TSLA", "US", settings))
+    assert p.n == 2
+
+
+def test_open_asset_watchlist_continua_watch1(conn, settings, monkeypatch):
+    monkeypatch.setattr(service, "get_provider", lambda market, s: DiarioContado())
+    db.add_asset(conn, "PETR4", "B3")
+    a = asyncio.run(service.open_asset(conn, "petr4", "B3", settings))
+    assert a["watch"] == 1 and a["last_viewed"]
+
+
+def test_open_asset_invalido_nao_grava(conn, settings):
+    with pytest.raises(UnknownSymbol):
+        asyncio.run(service.open_asset(conn, "INVALIDO", "US", settings))
+    assert db.find_asset(conn, "INVALIDO", "US") is None
+
+
+def test_open_asset_erro_inesperado_apaga(conn, settings, monkeypatch):
+    class Bomba:
+        async def fetch_daily(self, symbol, market):
+            raise RuntimeError("bum")
+    monkeypatch.setattr(service, "get_provider", lambda market, s: Bomba())
+    with pytest.raises(RuntimeError):
+        asyncio.run(service.open_asset(conn, "TSLA", "US", settings))
+    assert db.find_asset(conn, "TSLA", "US") is None
+
+
+def test_open_asset_simbolo_malformado(conn, settings):
+    with pytest.raises(ValueError):
+        asyncio.run(service.open_asset(conn, "a/b", "US", settings))
+
+
+def test_refresh_all_so_watchlist(conn, settings):
+    w = db.add_asset(conn, "PETR4", "B3")
+    c = db.add_asset(conn, "TSLA", "US", watch=False)
+    asyncio.run(service.refresh_all(conn, settings))
+    assert len(db.load_candles(conn, w)) == 1500 and db.load_candles(conn, c) == []
