@@ -48,6 +48,19 @@ Agregador de notícias e cotações do mercado financeiro, atualizado em segundo
 
 ---
 
+### 📊 Radar Quant
+Radar estatístico de ações e cripto, com gráficos e recomendações baseadas em evidência.
+
+- Gráficos interativos de ações (B3 e EUA) e criptomoedas
+- Score por ativo calculado a partir de indicadores estatísticos, sempre acompanhado da evidência que o sustenta
+- Ranking dos ativos monitorados e acompanhamento de carteira
+- Análises apenas informativas: não é recomendação profissional de investimento
+
+**Imagem Docker:** `ghcr.io/gabriel-rodrigues-s/radar-quant:latest`
+**Porta:** 8430
+
+---
+
 ### ⛏️ Terraria
 Servidor dedicado oficial do Terraria (vanilla) sempre ligado, com painel de controle.
 

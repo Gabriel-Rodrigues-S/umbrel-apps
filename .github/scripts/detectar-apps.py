@@ -61,6 +61,12 @@ APPS = {
         "manifest": "garod004-apps-painel-mercado",
         "paths": ["painel-mercado/"],
     },
+    "radar-quant": {
+        "image": "radar-quant",
+        "context": "./radar-quant",
+        "manifest": "garod004-apps-radar-quant",
+        "paths": ["radar-quant/"],
+    },
     "terraria": {
         "image": "terraria",
         "context": "./terraria",
