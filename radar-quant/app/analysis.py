@@ -1,6 +1,6 @@
 """Orquestra o motor estatístico por ativo: análise, ranking, carteira e candles."""
 import threading
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -15,6 +15,7 @@ from app.stats.portfolio import METHODS, PortfolioError, build_portfolio
 from app.stats.swing import swing_report
 
 PORTFOLIO_WEEKS = 156
+SESSION_CLOSE_UTC = 21  # fechamento da B3 ~20:55 UTC e dos EUA 20:00/21:00 UTC conforme o horário de verão
 NOTE = "Retornos em moeda local de cada ativo, sem conversão cambial."
 
 _cache: dict[int, tuple[tuple, dict, dict]] = {}  # asset_id -> (assinatura, análise, pools dos setups)
@@ -50,15 +51,17 @@ def _date(ts) -> str:
     return pd.Timestamp(ts).strftime("%Y-%m-%d")
 
 
-def _today() -> date:  # trocável nos testes
-    return datetime.now(timezone.utc).date()
+def _now() -> datetime:  # relógio UTC, trocável nos testes
+    return datetime.now(timezone.utc)
 
 
-def session_open(market: str, as_of: str | None, today: date | None = None) -> bool:
-    """O último candle diário é de um pregão em andamento (data = hoje, em UTC)?
+def session_open(market: str, as_of: str | None, now: datetime | None = None) -> bool:
+    """O último candle diário é de um pregão em andamento (data = hoje em UTC, antes de SESSION_CLOSE_UTC)?
 
     A fonte de ações mantém o candle do dia em formação; a de cripto já o descarta."""
-    return market != "CRYPTO" and as_of is not None and as_of == (today or _today()).isoformat()
+    now = now or _now()
+    return (market != "CRYPTO" and as_of is not None and as_of == now.date().isoformat()
+            and now.hour < SESSION_CLOSE_UTC)
 
 
 def _compute(conn, asset: dict, df: pd.DataFrame) -> tuple[dict, dict]:

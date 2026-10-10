@@ -197,17 +197,6 @@
     return two(d.getUTCDate()) + "/" + two(d.getUTCMonth() + 1) + " " + two(d.getUTCHours()) + ":" + two(d.getUTCMinutes());
   }
 
-  // Segundos epoch reais -> "HH:MM" na hora local; inclui o dia quando não é hoje.
-  function fmtClock(epoch) {
-    var d = new Date(epoch * 1000);
-    if (isNaN(d.getTime())) return DASH;
-    var clock = new Intl.DateTimeFormat(LOCALE, { hour: "2-digit", minute: "2-digit" }).format(d);
-    var now = new Date();
-    var today = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-    if (today) return clock;
-    return clock + " de " + new Intl.DateTimeFormat(LOCALE, { day: "2-digit", month: "2-digit" }).format(d);
-  }
-
   // Idade do último candle intraday: "há 15 min", "há 1 h 05 min".
   function fmtAge(seconds) {
     var min = Math.max(0, Math.round(seconds / 60));

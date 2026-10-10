@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import date
+from datetime import datetime, timezone
 
 import pytest
 
@@ -336,9 +336,11 @@ def test_query_session_open(conn, monkeypatch):
     for a in (b3, us, btc):
         put(conn, a)
     assert [r["session_open"] for r in screener.query(conn)["rows"]] == [False] * 3
-    monkeypatch.setattr(analysis, "_today", lambda: date(2026, 10, 7))  # `as_of` das linhas
+    monkeypatch.setattr(analysis, "_now", lambda: datetime(2026, 10, 7, 15, tzinfo=timezone.utc))  # dia do `as_of`
     got = {r["symbol"]: r["session_open"] for r in screener.query(conn)["rows"]}
     assert got == {"PETR4": True, "AAPL": True, "BTC": False}
+    monkeypatch.setattr(analysis, "_now", lambda: datetime(2026, 10, 7, 21, 30, tzinfo=timezone.utc))
+    assert [r["session_open"] for r in screener.query(conn)["rows"]] == [False] * 3  # depois do fechamento
     assert "session_open" not in db.load_screener(conn, [b3["id"]])[0]["payload"]  # calculado na consulta
 
 
