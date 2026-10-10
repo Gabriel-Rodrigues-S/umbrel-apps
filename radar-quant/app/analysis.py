@@ -1,5 +1,6 @@
 """Orquestra o motor estatístico por ativo: análise, ranking, carteira e candles."""
 import threading
+from datetime import date, datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -47,6 +48,17 @@ def invalidate(asset_id: int | None = None) -> None:
 
 def _date(ts) -> str:
     return pd.Timestamp(ts).strftime("%Y-%m-%d")
+
+
+def _today() -> date:  # trocável nos testes
+    return datetime.now(timezone.utc).date()
+
+
+def session_open(market: str, as_of: str | None, today: date | None = None) -> bool:
+    """O último candle diário é de um pregão em andamento (data = hoje, em UTC)?
+
+    A fonte de ações mantém o candle do dia em formação; a de cripto já o descarta."""
+    return market != "CRYPTO" and as_of is not None and as_of == (today or _today()).isoformat()
 
 
 def _compute(conn, asset: dict, df: pd.DataFrame) -> tuple[dict, dict]:
@@ -107,7 +119,10 @@ def _analyze(conn, asset: dict, df: pd.DataFrame) -> dict:
 
 
 def analyze_asset(conn, asset: dict) -> dict:
-    return _analyze(conn, asset, service.load_frame(conn, asset["id"]))
+    a = _analyze(conn, asset, service.load_frame(conn, asset["id"]))
+    if a["status"] == "ok":  # depende do relógio: recalculado a cada leitura, fora da assinatura do cache
+        a["session_open"] = session_open(a["market"], a["as_of"])
+    return a
 
 
 def swing_pool(conn, asset: dict) -> dict[str, list]:
@@ -123,12 +138,13 @@ def asset_summary(conn, asset: dict) -> dict:
            "watch": bool(asset.get("watch", 1)),
            "name": entry["name"] if entry else None,
            "indices": entry["indices"] if entry else [], "price": None, "change_pct": None, "score": None,
-           "verdict": None, "evidence": None, "status": "insuficiente",
+           "verdict": None, "evidence": None, "status": "insuficiente", "session_open": False,
            "last_error": asset.get("last_error"), "last_refresh": asset.get("last_refresh")}
     if df.empty:
         return clean(out)
     close = df["close"]
     out["price"] = close.iloc[-1]
+    out["session_open"] = session_open(asset["market"], _date(df.index[-1]))
     if len(close) > 1:
         out["change_pct"] = close.iloc[-1] / close.iloc[-2] - 1
     a = _analyze(conn, asset, df)

@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import date
 
 import pytest
 
@@ -107,7 +108,8 @@ def test_store_row_grava_e_apaga_linha_insuficiente(tmp_path, conn):
     put(conn, curto)  # linha antiga que a análise atual já não sustenta
     assert screener.progress(conn, "watchlist")["ready"] == 2
     assert screener.store_row(conn, curto) is False
-    assert screener.progress(conn, "watchlist")["ready"] == 1
+    assert screener.progress(conn, "watchlist") == {"scope": "watchlist", "total": 2, "ready": 2,
+                                                    "insufficient": 1, "failed": 0}
     assert [r["symbol"] for r in screener.query(conn)["rows"]] == ["PETR4"]
 
 
@@ -123,12 +125,30 @@ def test_scope_assets(uni):
 
 def test_progress(tmp_path, conn):
     universe.ensure_assets(conn)
-    assert screener.progress(conn, "IBOV") == {"scope": "IBOV", "total": 5, "ready": 0}
+    assert screener.progress(conn, "IBOV") == {"scope": "IBOV", "total": 5, "ready": 0, "insufficient": 0, "failed": 0}
     for sym in ("PETR4", "VALE3"):
         a = add_existing(conn, sym, tmp_path)
         assert screener.store_row(conn, a)
     assert screener.progress(conn, "IBOV")["ready"] == 2
     assert screener.progress(conn, "SP500")["ready"] == 0
+
+
+def test_progress_conta_insuficiente_e_falha_como_processados(tmp_path, conn):
+    universe.ensure_assets(conn)
+    ids = {a["symbol"]: a for a in screener.scope_assets(conn, "IBOV")}
+    assert screener.store_row(conn, add_existing(conn, "PETR4", tmp_path))  # linha válida
+    db.upsert_screener(conn, ids["VALE3"]["id"], "", {"status": "insuficiente"})  # menos de 300 candles
+    db.set_refresh_status(conn, ids["ITUB4"]["id"], "símbolo não encontrado")  # falha na fonte, sem linha
+    assert screener.progress(conn, "IBOV") == {"scope": "IBOV", "total": 5, "ready": 3, "insufficient": 1, "failed": 1}
+    # falha num ativo que já tem linha válida: segue pronto, não conta como falha
+    db.set_refresh_status(conn, ids["PETR4"]["id"], "fonte fora")
+    # falha num ativo com marcador: processado uma vez só
+    db.set_refresh_status(conn, ids["VALE3"]["id"], "fonte fora")
+    assert screener.progress(conn, "IBOV") == {"scope": "IBOV", "total": 5, "ready": 3, "insufficient": 1, "failed": 2}
+    for sym in ("BBAS3", "WEGE3"):
+        assert screener.store_row(conn, add_existing(conn, sym, tmp_path))
+    p = screener.progress(conn, "IBOV")
+    assert p["ready"] == p["total"] == 5  # a montagem termina
 
 
 def add_existing(conn, symbol, tmp_path):
@@ -287,3 +307,51 @@ def test_build_row_above_nulo_quando_bruto_nulo(uni, monkeypatch):
         return out
     monkeypatch.setattr(analysis, "analyze_asset", fake)
     assert screener.build_row(uni, a)["above_sma200"] is None
+
+
+# ---------- revisão final: nome, pregão em andamento e linhas atrasadas ----------
+
+def test_query_preenche_nome_nulo_pelo_catalogo(conn):
+    universe.ensure_assets(conn)
+    a, b = db.find_asset(conn, "PETR4", "B3"), db.find_asset(conn, "VALE3", "B3")
+    put(conn, a, name=None, score=2.0)  # gravada antes de o catálogo chegar
+    put(conn, b, name=None, score=1.0)
+    assert [r["name"] for r in screener.query(conn, scope="IBOV")["rows"]] == ["Petrobras PN", "Vale ON"]
+    assert db.load_screener(conn, [a["id"]])[0]["payload"]["name"] is None  # só a resposta é completada
+    seen = []
+    real = db.catalog_entry
+    try:
+        db.catalog_entry = lambda c, s, m: seen.append(s) or real(c, s, m)
+        rows = screener.query(conn, scope="IBOV", page_size=1)["rows"]
+    finally:
+        db.catalog_entry = real
+    assert [r["name"] for r in rows] == ["Petrobras PN"] and seen == ["PETR4"]  # só as linhas da página
+    fora = add(conn, "ZZZZ3")  # fora do catálogo: segue nulo
+    put(conn, fora, name=None)
+    assert screener.query(conn)["rows"][0]["name"] is None
+
+
+def test_query_session_open(conn, monkeypatch):
+    b3, us, btc = add(conn, "PETR4"), add(conn, "AAPL", "US"), add(conn, "BTC", "CRYPTO")
+    for a in (b3, us, btc):
+        put(conn, a)
+    assert [r["session_open"] for r in screener.query(conn)["rows"]] == [False] * 3
+    monkeypatch.setattr(analysis, "_today", lambda: date(2026, 10, 7))  # `as_of` das linhas
+    got = {r["symbol"]: r["session_open"] for r in screener.query(conn)["rows"]}
+    assert got == {"PETR4": True, "AAPL": True, "BTC": False}
+    assert "session_open" not in db.load_screener(conn, [b3["id"]])[0]["payload"]  # calculado na consulta
+
+
+def test_query_stale_rows(conn):
+    a, b, c = (add(conn, s) for s in ("AAA1", "BBB1", "CCC1"))
+    for x in (a, b, c):
+        put(conn, x)
+    assert screener.query(conn)["stale_rows"] == 0
+    put(conn, a, as_of="2026-10-06")
+    put(conn, b, as_of="2026-10-02")
+    assert screener.query(conn)["stale_rows"] == 2
+    assert screener.query(conn, verdict="comprar")["stale_rows"] == 2  # do escopo, não do filtro
+    assert screener.query(conn, page_size=1)["stale_rows"] == 2
+    # cripto negocia todo dia: o candle mais novo dela não torna atrasadas as ações
+    put(conn, add(conn, "BTC", "CRYPTO"), as_of="2026-10-08")
+    assert screener.query(conn)["stale_rows"] == 2

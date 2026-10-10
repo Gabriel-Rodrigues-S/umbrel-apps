@@ -8,13 +8,13 @@ from app.providers.base import UnknownSymbol
 
 log = logging.getLogger("radar.universe")
 
-STALE_HOURS = 20
 MAX_FAILS = 5  # falhas seguidas que abortam a passada
 PURGE_DAYS = 30
 WINDOW = range(5, 9)  # horas UTC (madrugada em Manaus)
 META_KEY = "universe_refreshed_at"
 ATTEMPT_KEY = "universe_attempt_at"  # início da última passada, completa ou não
 RETRY_HOURS = 2  # espera mínima após qualquer tentativa (evita martelar a fonte depois de um aborto)
+cutoff = service.cutoff  # corte fixo das 05:00 UTC, o mesmo de `service.open_asset`
 
 
 def _utc(dt: datetime) -> datetime:
@@ -39,9 +39,10 @@ def ensure_assets(conn) -> int:
 
 
 def universe_due(conn, now: datetime) -> bool:
-    """Nunca rodou, ou última passada completa há mais de STALE_HOURS e estamos na janela da madrugada.
+    """Nunca rodou, ou estamos na janela da madrugada e a última passada completa é anterior ao corte.
 
-    Nunca antes de RETRY_HOURS desde a última tentativa, qualquer que seja o resultado dela,
+    O corte fixo (e não uma idade) garante a passada da madrugada mesmo quando a anterior terminou
+    no meio do pregão, com candles ainda em formação. Nunca antes de RETRY_HOURS desde a última tentativa, qualquer que seja o resultado dela,
     e nunca sem membros de índice no catálogo (ele ainda não chegou)."""
     if not db.index_members(conn):
         return False
@@ -55,15 +56,16 @@ def universe_due(conn, now: datetime) -> bool:
         last = _utc(datetime.fromisoformat(db.get_meta(conn, META_KEY) or ""))
     except ValueError:
         return True
-    return now - last > timedelta(hours=STALE_HOURS) and now.hour in WINDOW
+    return now.hour in WINDOW and last < cutoff(now)
 
 
 def _stale(asset: dict, now: datetime) -> bool:
+    """Nunca atualizado, ou atualizado antes do último corte (o candle podia estar em formação)."""
     try:
         last = _utc(datetime.fromisoformat(asset["last_refresh"] or ""))
     except ValueError:
         return True
-    return now - last > timedelta(hours=STALE_HOURS)
+    return last < cutoff(now)
 
 
 def _universe_assets(conn) -> list[dict]:
@@ -84,11 +86,15 @@ async def _refresh_one(conn, asset: dict, settings) -> bool:
     if (db.get_asset(conn, asset["id"]) or {}).get("last_error") is not None:
         return False
     analysis.invalidate(asset["id"])
+    fresh = asset | (db.get_asset(conn, asset["id"]) or {})
     try:
-        await asyncio.to_thread(screener.store_row, conn, asset | (db.get_asset(conn, asset["id"]) or {}))
+        await asyncio.to_thread(screener.store_row, conn, fresh)
     except Exception as e:  # noqa: BLE001
         log.warning("falha ao gravar a linha do screener de %s: %s", asset["symbol"], e)
         return False
+    finally:
+        if not fresh.get("watch"):  # centenas de análises em memória à toa; ao abrir o ativo ela é refeita
+            analysis.invalidate(asset["id"])
     return True
 
 

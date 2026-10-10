@@ -284,7 +284,14 @@ def test_refresh_live_preserva_o_que_falhou(conn, tmp_path):
     assert len(db.index_members(conn, "NDX")) == 100
     assert len(db.index_members(conn, "SP500")) == 503
     assert db.catalog_count(conn, "CRYPTO") == 20
+    # falha parcial: sem carimbo de 7 dias; nova tentativa só 6 h depois (não a cada ciclo do laço)
+    assert db.get_meta(conn, "catalog_refreshed_at") is None
+    attempt = datetime.fromisoformat(db.get_meta(conn, "catalog_attempt_at"))
     assert not catalog.catalog_is_stale(conn)
+    db.set_meta(conn, "catalog_attempt_at", (attempt - timedelta(hours=5, minutes=50)).isoformat())
+    assert not catalog.catalog_is_stale(conn)
+    db.set_meta(conn, "catalog_attempt_at", (attempt - timedelta(hours=6, minutes=1)).isoformat())
+    assert catalog.catalog_is_stale(conn)
 
 
 def test_refresh_live_tudo_fora_do_ar_nao_marca_atualizado(conn, tmp_path):
@@ -293,6 +300,7 @@ def test_refresh_live_tudo_fora_do_ar_nao_marca_atualizado(conn, tmp_path):
                                       httpx.MockTransport(lambda r: httpx.Response(500))))
     assert len(out["errors"]) == 6 and out["markets"] == {"CRYPTO": 20}
     assert db.catalog_entry(conn, "PETR4", "B3") is not None
+    assert db.get_meta(conn, "catalog_refreshed_at") is None and db.get_meta(conn, "catalog_attempt_at")
 
 
 def test_refresh_nao_substitui_indice_que_encolheu_a_menos_da_metade(conn, tmp_path):
@@ -310,3 +318,20 @@ def test_refresh_nao_substitui_indice_que_encolheu_a_menos_da_metade(conn, tmp_p
     h2 = lambda req: httpx.Response(200, text=b3idx(60)) if "b3.com.br" in str(req.url) else httpx.Response(500)
     run(catalog.refresh_catalog(conn, settings(tmp_path), httpx.MockTransport(h2)))
     assert len(db.index_members(conn, "IBOV")) == 60
+
+
+def test_falha_parcial_depois_de_carimbo_valido_e_sucesso_seguinte(conn, tmp_path):
+    run(catalog.refresh_catalog(conn, settings(tmp_path, "synthetic")))
+    assert db.get_meta(conn, "catalog_attempt_at") is None and not catalog.catalog_is_stale(conn)
+    stamp = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()  # completa há 2 dias
+    db.set_meta(conn, "catalog_refreshed_at", stamp)
+    out = run(catalog.refresh_catalog(conn, settings(tmp_path), httpx.MockTransport(lambda r: httpx.Response(500))))
+    assert out["errors"] and db.get_meta(conn, "catalog_refreshed_at") == stamp  # carimbo antigo intacto
+    old = (datetime.now(timezone.utc) - timedelta(hours=7)).isoformat()
+    db.set_meta(conn, "catalog_attempt_at", old)
+    assert catalog.catalog_is_stale(conn)  # tentativa com falha há mais de 6 h
+    db.set_meta(conn, "catalog_attempt_at", "lixo")
+    assert not catalog.catalog_is_stale(conn)  # tentativa ilegível: vale o carimbo
+    db.set_meta(conn, "catalog_attempt_at", old)
+    run(catalog.refresh_catalog(conn, settings(tmp_path, "synthetic")))  # sucesso completo
+    assert not catalog.catalog_is_stale(conn)

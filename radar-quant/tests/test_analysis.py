@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import date
 
 import numpy as np
 import pytest
@@ -195,3 +196,22 @@ def test_intraday_payload_vazio():
     p = analysis.intraday_payload([], "5m", None)
     assert p["candles"] == [] and p["last_bar_time"] is None and p["delay_minutes"] is None
     assert all(v == [] for v in p["indicators"].values())
+
+
+def test_session_open(conn, monkeypatch):
+    assert analysis.session_open("B3", "2026-10-07", date(2026, 10, 7)) is True
+    assert analysis.session_open("US", "2026-10-07", date(2026, 10, 8)) is False
+    assert analysis.session_open("CRYPTO", "2026-10-07", date(2026, 10, 7)) is False  # a Binance descarta o dia corrente
+    assert analysis.session_open("B3", None, date(2026, 10, 7)) is False
+    a, btc = asset(conn, "PETR4"), asset(conn, "BTC")
+    r = analysis.analyze_asset(conn, a)
+    assert r["session_open"] is False and analysis.asset_summary(conn, a)["session_open"] is False
+    monkeypatch.setattr(analysis, "_today", lambda: date(2026, 10, 7))  # dia do último candle sintético
+    assert analysis.analyze_asset(conn, a) is r and r["session_open"] is True and r["as_of"] == "2026-10-07"
+    assert analysis.asset_summary(conn, a)["session_open"] is True
+    assert analysis.analyze_asset(conn, btc)["session_open"] is False
+    assert analysis.asset_summary(conn, btc)["session_open"] is False
+    curto = analysis.asset_summary(conn, asset(conn, "CURTO1"))
+    assert curto["status"] == "insuficiente" and curto["session_open"] is True
+    monkeypatch.setattr(analysis, "_today", lambda: date(2026, 10, 8))
+    assert analysis.analyze_asset(conn, a)["session_open"] is False

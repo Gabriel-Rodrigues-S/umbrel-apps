@@ -148,7 +148,7 @@ def test_asset_without_data(client):
     assert r.status_code == 200 and r.json()["status"] == "insuficiente"
 
 
-@pytest.mark.parametrize("symbol", ["AB\x00CD", "../../x", "A" * 100])
+@pytest.mark.parametrize("symbol", ["AB\x00CD", "../../x", "A" * 32])  # acima de 32 o modelo recusa antes
 def test_create_asset_simbolo_invalido(client, symbol):
     n = len(client.get("/api/assets").json())
     r = client.post("/api/assets", json={"symbol": symbol, "market": "US"})
@@ -367,6 +367,7 @@ def test_screener_summary_e_progress(client):
     assert client.get("/api/screener/summary?scope=XX").status_code == 422
     r = client.get("/api/screener/progress?scope=IBRA")
     assert r.status_code == 200 and r.json()["total"] == 8
+    assert set(r.json()) == {"scope", "total", "ready", "insufficient", "failed"}
     assert client.get("/api/screener/progress?scope=XX").status_code == 422
 
 
@@ -505,3 +506,32 @@ def test_loop_universo(client, monkeypatch):
 
 def test_catalogo_sintetico_na_subida(client):
     assert db.catalog_count(client.app.state.conn) > 0
+
+
+# ---------- revisão final ----------
+
+def test_campos_novos_nas_rotas(client):
+    aid = _id(client, "PETR4")
+    assert client.get(f"/api/assets/{aid}/analysis").json()["session_open"] is False
+    assert all(a["session_open"] is False for a in client.get("/api/assets").json())
+    r = client.get("/api/screener").json()
+    assert r["stale_rows"] == 0 and all(row["session_open"] is False for row in r["rows"])
+    assert all(row["name"] for row in r["rows"])
+
+
+@pytest.mark.parametrize("route", ["/api/assets", "/api/assets/open"])
+def test_new_asset_limita_tamanho(client, route):
+    r = client.post(route, json={"symbol": "A" * 33, "market": "US"})
+    assert r.status_code == 422 and r.json()["detail"][0]["type"] == "string_too_long"
+    r = client.post(route, json={"symbol": "AMZN", "market": "U" * 9})
+    assert r.status_code == 422 and r.json()["detail"][0]["type"] == "string_too_long"
+    assert client.post(route, json={"symbol": "A" * 32, "market": "US"}).json()["detail"] == "símbolo inválido"
+
+
+@pytest.mark.parametrize("route", ["/api/assets", "/api/assets/open"])
+def test_ativo_some_entre_abrir_e_resumir(client, monkeypatch, route):
+    async def fantasma(conn, symbol, market, settings):
+        return {"id": 987654, "symbol": "AMZN", "market": "US", "last_refresh": None}
+    monkeypatch.setattr(service, "open_asset", fantasma)
+    r = TestClient(client.app, raise_server_exceptions=False).post(route, json={"symbol": "AMZN", "market": "US"})
+    assert r.status_code == 502 and r.json()["detail"] == "ativo removido durante a abertura"

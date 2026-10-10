@@ -10,7 +10,7 @@ from typing import Annotated, Literal
 from fastapi import FastAPI, HTTPException, Path as PathParam, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app import analysis, catalog, db, news, screener, service, universe
 from app.config import INTERVALS, INTRADAY, MARKETS, get_settings, normalize_symbol
@@ -29,8 +29,8 @@ Short = Annotated[str, Query(max_length=32)]  # filtros de texto do screener
 
 
 class NewAsset(BaseModel):
-    symbol: str
-    market: str
+    symbol: str = Field(max_length=32)
+    market: str = Field(max_length=8)
 
 
 def store_rows(conn, assets: list[dict]) -> None:
@@ -206,6 +206,8 @@ def create_app() -> FastAPI:
         """Resumo do ativo; só recalcula a análise e a linha do screener se houve refresh ou falta linha válida."""
         c = conn(request)
         asset = db.get_asset(c, asset_id)
+        if asset is None:  # apagado por outra rotina entre abrir e resumir
+            raise HTTPException(502, "ativo removido durante a abertura")
         rows = db.load_screener(c, [asset_id])
         if refreshed or not rows or rows[0]["payload"].get("status") == "insuficiente":
             analysis.invalidate(asset_id)
