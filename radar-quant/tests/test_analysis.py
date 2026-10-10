@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import date
+from datetime import datetime, timezone
 
 import numpy as np
 import pytest
@@ -199,19 +199,27 @@ def test_intraday_payload_vazio():
 
 
 def test_session_open(conn, monkeypatch):
-    assert analysis.session_open("B3", "2026-10-07", date(2026, 10, 7)) is True
-    assert analysis.session_open("US", "2026-10-07", date(2026, 10, 8)) is False
-    assert analysis.session_open("CRYPTO", "2026-10-07", date(2026, 10, 7)) is False  # a Binance descarta o dia corrente
-    assert analysis.session_open("B3", None, date(2026, 10, 7)) is False
+    t = lambda d, h, m=0: datetime(2026, 10, d, h, m, tzinfo=timezone.utc)  # noqa: E731
+    for market in ("B3", "US"):
+        assert analysis.session_open(market, "2026-10-07", t(7, 15)) is True
+        assert analysis.session_open(market, "2026-10-07", t(7, 20, 59)) is True
+        assert analysis.session_open(market, "2026-10-07", t(7, 21)) is False  # pregão já fechado
+        assert analysis.session_open(market, "2026-10-07", t(7, 21, 30)) is False
+        assert analysis.session_open(market, "2026-10-07", t(8, 15)) is False  # candle de ontem
+    assert analysis.session_open("CRYPTO", "2026-10-07", t(7, 15)) is False  # a Binance descarta o dia corrente
+    assert analysis.session_open("B3", None, t(7, 15)) is False
     a, btc = asset(conn, "PETR4"), asset(conn, "BTC")
     r = analysis.analyze_asset(conn, a)
     assert r["session_open"] is False and analysis.asset_summary(conn, a)["session_open"] is False
-    monkeypatch.setattr(analysis, "_today", lambda: date(2026, 10, 7))  # dia do último candle sintético
+    monkeypatch.setattr(analysis, "_now", lambda: t(7, 15))  # dia do último candle sintético
     assert analysis.analyze_asset(conn, a) is r and r["session_open"] is True and r["as_of"] == "2026-10-07"
     assert analysis.asset_summary(conn, a)["session_open"] is True
     assert analysis.analyze_asset(conn, btc)["session_open"] is False
     assert analysis.asset_summary(conn, btc)["session_open"] is False
     curto = analysis.asset_summary(conn, asset(conn, "CURTO1"))
     assert curto["status"] == "insuficiente" and curto["session_open"] is True
-    monkeypatch.setattr(analysis, "_today", lambda: date(2026, 10, 8))
+    monkeypatch.setattr(analysis, "_now", lambda: t(7, 21, 30))  # mesmo dia, depois do fechamento
+    assert analysis.analyze_asset(conn, a)["session_open"] is False
+    assert analysis.asset_summary(conn, a)["session_open"] is False
+    monkeypatch.setattr(analysis, "_now", lambda: t(8, 15))
     assert analysis.analyze_asset(conn, a)["session_open"] is False
