@@ -46,6 +46,7 @@
   var VIEW_SPAN = { "1d": 180, "1wk": 156, "1mo": 120, "3mo": 80, "6mo": 60, "1y": 40 };
   var INTRADAY_SPAN = 200;
   var INTRADAY_RELOAD_MS = 60000;
+  var INTRADAY_FRESH_S = 6 * 3600;   // último candle mais velho que isto: mercado fechado
   var INDEX_LABEL = { IBOV: "Ibovespa", IBRA: "IBrA", SP500: "S&P 500", NDX: "Nasdaq-100" };
   var MARKET_ORDER = ["B3", "US", "CRYPTO"];
   var MARKET_LABEL = { B3: "B3", US: "EUA", CRYPTO: "Cripto" };
@@ -167,6 +168,18 @@
     return m ? m[3] + "/" + m[2] + "/" + m[1] : iso;
   }
 
+  // "07/10" — data curta do candle diário nos selos e no cartão de curto prazo.
+  function fmtDay(iso) {
+    var m = typeof iso === "string" ? /^\d{4}-(\d{2})-(\d{2})/.exec(iso) : null;
+    return m ? m[2] + "/" + m[1] : "";
+  }
+
+  // Onde a tela dizia "hoje"/"fechamento": o último candle diário pode ser de um pregão em andamento.
+  function candleText(asOf, short) {
+    var day = short ? fmtDay(asOf) : (typeof asOf === "string" && asOf ? fmtDate(asOf) : "");
+    return day ? "candle de " + day : "último candle";
+  }
+
   function fmtDateTime(iso) {
     if (typeof iso !== "string" || !iso) return "";  // new Date(null) é o epoch 0, não uma data inválida
     var d = new Date(iso);
@@ -193,6 +206,13 @@
     var today = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
     if (today) return clock;
     return clock + " de " + new Intl.DateTimeFormat(LOCALE, { day: "2-digit", month: "2-digit" }).format(d);
+  }
+
+  // Idade do último candle intraday: "há 15 min", "há 1 h 05 min".
+  function fmtAge(seconds) {
+    var min = Math.max(0, Math.round(seconds / 60));
+    if (min < 60) return "há " + min + " min";
+    return "há " + Math.floor(min / 60) + " h " + String(min % 60).padStart(2, "0") + " min";
   }
 
   // "há 3 h" — tempo relativo curto para as notícias.
@@ -1080,8 +1100,13 @@
     return dot;
   }
 
-  function swingStateText(s) {
-    if (s.state === "sinal") return "Sinal hoje — compra na próxima abertura";
+  function swingStateText(s, analysis) {
+    if (s.state === "sinal") {
+      var where = "Sinal no " + candleText(analysis && analysis.as_of, true);
+      return analysis && analysis.session_open === true
+        ? where + " — pregão em andamento — o sinal só vale no fechamento"
+        : where + " — compra na próxima abertura";
+    }
     if (s.state === "posicao") {
       var p = s.position || {};
       var days = isNum(p.days) ? fmtNum(p.days, 0) + (p.days === 1 ? " pregão" : " pregões") : "alguns pregões";
@@ -1100,7 +1125,8 @@
 
   // Um bloco por setup. É um <button>: clicar seleciona o setup e desenha as
   // marcações no gráfico diário. Estado e evidência têm o mesmo peso visual.
-  function swingBlock(s, currency) {
+  function swingBlock(s, analysis) {
+    var currency = analysis.currency;
     var stats = s.stats || {};
     var block = el("button", "swing-setup");
     block.type = "button";
@@ -1116,7 +1142,7 @@
     if (s.description) top.appendChild(el("span", "swing-desc", s.description));
     block.appendChild(top);
 
-    block.appendChild(el("span", "swing-state", swingStateText(s)));
+    block.appendChild(el("span", "swing-state", swingStateText(s, analysis)));
     if (block.dataset.state === "posicao" && s.position) {
       var p = s.position, bits = [];
       if (p.entry_date) bits.push("entrada em " + fmtDate(String(p.entry_date)) + (isNum(p.entry_price) ? " a " + fmtMoney(p.entry_price, currency) : ""));
@@ -1175,7 +1201,7 @@
     }
     msg.hidden = true;
     if (state.swingSetup && !currentSetup()) state.swingSetup = null;
-    swing.setups.forEach(function (s) { if (s) root.appendChild(swingBlock(s, analysis.currency)); });
+    swing.setups.forEach(function (s) { if (s) root.appendChild(swingBlock(s, analysis)); });
 
     var c = swing.context || {};
     contextItem(ctx, "ATR (14)", fmtShare(c.atr_pct, 1), "do preço");
@@ -1270,12 +1296,24 @@
     if (errorText) { note.textContent = errorText; note.dataset.kind = "error"; return; }
     if (!payload) { note.textContent = "Carregando intraday…"; note.dataset.kind = "plain"; return; }
     var parts = [];
-    if (isNum(payload.last_bar_time)) parts.push("último candle " + fmtClock(payload.last_bar_time));
     var crypto = !!asset && asset.market === "CRYPTO";
+    // A fonte não informa o atraso: a idade do último candle é o que o mostra.
+    if (isNum(payload.last_bar_time)) {
+      var age = Date.now() / 1000 - payload.last_bar_time;
+      var bar = new Date(payload.last_bar_time * 1000);
+      var clock = new Intl.DateTimeFormat(LOCALE, { hour: "2-digit", minute: "2-digit" }).format(bar);
+      if (age < INTRADAY_FRESH_S) {
+        parts.push("último candle " + clock + " (" + fmtAge(age) + ")");
+      } else {
+        parts.push("último candle " + new Intl.DateTimeFormat(LOCALE, { day: "2-digit", month: "2-digit" }).format(bar) + " " + clock);
+        parts.push(crypto ? "sem candles recentes" : "mercado fechado");
+      }
+    }
     if (!crypto) {
       var delay = isNum(payload.delay_minutes) && payload.delay_minutes > 0
         ? " (atraso informado: " + fmtNum(payload.delay_minutes, 0) + " min)" : "";
       parts.push("Cotação pode vir com atraso" + delay);
+      if (asset && asset.market === "B3") parts.push("atraso típico de 15 min na B3");
       parts.push("Preços intraday sem ajuste por proventos");
     }
     parts.push("atualiza a cada 60 s");
@@ -1409,7 +1447,10 @@
 
       if (a.ok) {
         renderRec(a.value, now);
-        $("chart-asof").textContent = a.value && a.value.as_of ? "fechamento de " + fmtDate(a.value.as_of) : "";
+        // Análise insuficiente não traz `session_open`: vale o do resumo do ativo.
+        var live = !!a.value && (a.value.status === "ok" ? a.value.session_open === true : !!now && now.session_open === true);
+        $("chart-asof").textContent = a.value && a.value.as_of
+          ? candleText(a.value.as_of) + (live ? " (pregão em andamento)" : "") : "";
       } else {
         report(a.error);
         if (newAsset) { renderRec(null, now); $("chart-asof").textContent = ""; }
@@ -1488,6 +1529,8 @@
   var screenerReady = null;   // "ready" do último progresso visto (índice sendo montado)
   var SCREENER_COLS = 16;
   var SCREENER_POLL_MS = 5000;
+  var SCREENER_METHOD = "Evidência agregada usa a composição atual do índice (viés de sobrevivência) e trata classes "
+    + "do mesmo emissor como papéis separados. Com três setups em centenas de papéis, alguns saem 'favoráveis' por acaso.";
 
   function screenerScope() { return $("screener-scope").value || "watchlist"; }
 
@@ -1499,7 +1542,10 @@
     tr.appendChild(el("td", "num" + (colored ? " " + signClass(value) : ""), text));
   }
 
-  function setupChips(td, setups) {
+  function setupChips(td, row) {
+    var setups = row.setups;
+    var signalText = "sinal no " + candleText(row.as_of, true)
+      + (row.session_open === true ? " (pregão em andamento — o sinal só vale no fechamento)" : "");
     var any = false;
     Object.keys(SETUP_SHORT).concat(Object.keys(setups || {}).filter(function (k) { return !SETUP_SHORT[k]; })).forEach(function (key) {
       var info = setups && setups[key];
@@ -1511,7 +1557,7 @@
       chip.dataset.setup = key;
       chip.dataset.state = info.state;
       chip.dataset.evidence = evidence;
-      chip.title = (SETUP_SHORT[key] || key) + ": " + (info.state === "sinal" ? "sinal hoje" : "em posição") + " — " + evText + " neste ativo";
+      chip.title = (SETUP_SHORT[key] || key) + ": " + (info.state === "sinal" ? signalText : "em posição") + " — " + evText + " neste ativo";
       chip.appendChild(el("span", "", SETUP_SHORT[key] || key));
       chip.appendChild(el("small", "", SETUP_STATE_SHORT[info.state]));
       // Evidência escrita ao lado do sinal (não só um ponto colorido nem só no title).
@@ -1583,7 +1629,7 @@
       eTd.dataset.evidence = EVIDENCE_LABEL[r.evidence] ? r.evidence : "";
       tr.appendChild(eTd);
       var sTd = el("td", "setups");
-      setupChips(sTd, r.setups);
+      setupChips(sTd, r);
       tr.appendChild(sTd);
       numCell(tr, r.momentum, fmtSigned(r.momentum, 2), true);
       numCell(tr, r.trend, fmtSigned(r.trend, 2), true);
@@ -1650,20 +1696,27 @@
         + " operações no escopo · " + fmtShare(pooled.win_rate, 0) + " acima de segurar"));
       root.appendChild(card);
     });
+    root.appendChild(el("p", "sum-method", SCREENER_METHOD));
   }
 
   function renderScreenerProgress(p) {
     var node = $("screener-progress");
+    // `ready` conta todo membro já processado (com linha, sem histórico ou com falha): chega a `total` e a consulta para.
     var building = !!p && isNum(p.total) && isNum(p.ready) && p.ready < p.total;
-    node.textContent = building
-      ? "montando o índice: " + fmtNum(p.ready, 0) + " de " + fmtNum(p.total, 0)
-        + " papéis — a tabela e o resumo crescem conforme os papéis são analisados."
-      : "";
-    node.hidden = !building;
+    var parts = [];
+    if (building) {
+      parts.push("montando o índice: " + fmtNum(p.ready, 0) + " de " + fmtNum(p.total, 0)
+        + " papéis — a tabela e o resumo crescem conforme os papéis são analisados.");
+    }
+    if (p && isNum(p.insufficient) && p.insufficient > 0) parts.push(fmtNum(p.insufficient, 0) + " sem histórico suficiente");
+    if (p && isNum(p.failed) && p.failed > 0) parts.push(fmtNum(p.failed, 0) + " com falha na fonte");
+    node.textContent = parts.join(" · ");
+    node.dataset.state = building ? "building" : "done";
+    node.hidden = !parts.length;
     return building;
   }
 
-  function renderScreenerNote(scope, updatedAt, errorText) {
+  function renderScreenerNote(scope, updatedAt, errorText, staleRows) {
     var note = $("ranking-note");
     clear(note);
     if (errorText) { note.textContent = errorText; return; }
@@ -1682,6 +1735,9 @@
     var tail = [];
     var when = updatedAt ? fmtDateTime(updatedAt) : "";
     if (when) tail.push("Análise de " + when + ".");
+    if (isNum(staleRows) && staleRows > 0) {
+      tail.push(fmtNum(staleRows, 0) + (staleRows === 1 ? " papel" : " papéis") + " com dados do pregão anterior.");
+    }
     if (scope === "watchlist") {
       var market = $("ranking-market").value;
       var out = state.assets.filter(function (a) { return (!market || a.market === market) && a.status !== "ok"; });
@@ -1744,7 +1800,7 @@
           : building ? "Nenhum papel analisado ainda — o índice está sendo montado."
           : isIndex ? "Nenhum papel analisado neste índice ainda. A composição é carregada em segundo plano."
           : "Nenhum ativo da watchlist com dados suficientes.");
-        renderScreenerNote(scope, data.updated_at, "");
+        renderScreenerNote(scope, data.updated_at, "", data.stale_rows);
       } else {
         report(rows.error);
         if (!isNetworkFailure(rows.error)) {
@@ -1902,24 +1958,28 @@
   }
 
   var openedToken = 0;
+  var openedBusy = false;  // reabertura em voo: não empilha outra por cima
 
   // O ativo aberto fora da watchlist não vem em /api/assets: o resumo dele (preço,
   // variação, veredito) é renovado reabrindo-o. Só troca o resumo; não mexe em
   // seleção, busca nem sobreposições, e desiste se o usuário mudou algo no meio.
   function refreshOpened() {
     var o = state.opened;
-    if (!o || state.selectedId !== o.id || state.opening) return Promise.resolve(false);
+    if (!o || state.selectedId !== o.id || state.opening || openedBusy) return Promise.resolve(false);
+    if (o.status === "insuficiente") return Promise.resolve(false);  // reabrir refaria a análise a cada ciclo, à toa
     var token = ++openedToken, guard = openToken;
+    openedBusy = true;
     return api("/api/assets/open", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ symbol: o.symbol, market: o.market }),
     }).then(function (summary) {
+      openedBusy = false;
       if (token !== openedToken || guard !== openToken || state.opened !== o || state.selectedId !== o.id) return false;
       if (!summary || summary.id !== o.id || summary.watch) return false;  // promovido em outra aba: /api/assets cuida
       state.opened = summary;
       return true;
-    }, function () { return false; });  // falha aqui fica calada: o resumo antigo continua valendo
+    }, function () { openedBusy = false; return false; });  // falha aqui fica calada: o resumo antigo continua valendo
   }
 
   function autoRefresh() {
@@ -1961,6 +2021,7 @@
     var input = $("add-symbol"), btn = $("add-submit");
     var symbol = input.value.trim();
     if (!symbol) { showAddError("Informe um símbolo."); input.focus(); return; }
+    if (symbol.length > 32) { showAddError("símbolo inválido"); input.focus(); return; }  // limite da API
     if (btn.disabled) return;
     cancelSearch();
     showAddError("");

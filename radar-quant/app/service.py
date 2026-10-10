@@ -3,7 +3,7 @@ import asyncio
 import logging
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -104,13 +104,27 @@ def load_rf_series(conn) -> pd.Series:
 # ---------- abrir ativo fora da watchlist ----------
 
 OPEN_STALE_HOURS = 6
+CUTOFF_HOUR = 5  # UTC: pregões da B3 e dos EUA já fechados, candle diário definitivo
 
 
-def _stale(last_refresh: str | None) -> bool:
+def _utc(dt: datetime) -> datetime:
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
+
+def cutoff(now: datetime) -> datetime:
+    """O mais recente 05:00 UTC que seja <= now: dado buscado antes dele pode ter candle em formação."""
+    now = _utc(now)
+    at = now.replace(hour=CUTOFF_HOUR, minute=0, second=0, microsecond=0)
+    return at if now >= at else at - timedelta(days=1)
+
+
+def _stale(last_refresh: str | None, now: datetime | None = None) -> bool:
+    """Sem refresh, com mais de OPEN_STALE_HOURS ou anterior ao último corte."""
     if not last_refresh:
         return True
-    age = datetime.now(timezone.utc) - datetime.fromisoformat(last_refresh)
-    return age.total_seconds() > OPEN_STALE_HOURS * 3600
+    now = _utc(now or datetime.now(timezone.utc))
+    last = _utc(datetime.fromisoformat(last_refresh))
+    return now - last > timedelta(hours=OPEN_STALE_HOURS) or last < cutoff(now)
 
 
 _open_locks: dict[tuple[str, str], list] = {}  # (símbolo, mercado) -> [lock, nº de interessados]

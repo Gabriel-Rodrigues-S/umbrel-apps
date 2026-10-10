@@ -278,6 +278,22 @@ def test_fronteira_entrada_no_fechamento_da_saida_por_limite(monkeypatch):
     assert len(t) == 1 and t[0].exit_date == sim_df().index[13]
 
 
+def test_sinal_no_candle_da_saida_por_limite_nao_e_sinal(monkeypatch):
+    # entrada em 19 -> compra em 20 -> 10º pregão em 29 (último candle), com novo sinal de entrada em 29
+    fake_signals(monkeypatch, 30, entries=[19, 29])
+    trades, pos = swing.simulate(sim_df(), "reversao")
+    assert pos is None and trades[-1].days == 10 and trades[-1].exit_date == sim_df().index[-1]
+    assert swing.setup_report(sim_df(), "reversao")["state"] == "nenhum"  # a simulação ignora essa entrada
+    # sem a saída por limite no mesmo candle, o sinal vale
+    fake_signals(monkeypatch, 30, entries=[29])
+    assert swing.setup_report(sim_df(), "reversao")["state"] == "sinal"
+    # saída por sinal na abertura do último candle (não por limite): a entrada do fechamento vale
+    fake_signals(monkeypatch, 30, entries=[20, 29], exits=[28])
+    trades, pos = swing.simulate(sim_df(), "reversao")
+    assert pos is None and trades[-1].exit_date == sim_df().index[-1] and trades[-1].days < 10
+    assert swing.setup_report(sim_df(), "reversao")["state"] == "sinal"
+
+
 def test_fronteira_saida_no_10o_pregao_limite_prevalece(monkeypatch):
     fake_signals(monkeypatch, 30, entries=[3], exits=[13])
     t = swing.simulate(sim_df(), "reversao")[0][0]

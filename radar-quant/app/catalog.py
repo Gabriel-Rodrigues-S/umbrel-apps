@@ -193,20 +193,32 @@ def synthetic_catalog():
              "NDX": ["AAPL", "MSFT", "NVDA", "TSLA"]})
 
 
+STAMP_KEY = "catalog_refreshed_at"  # última atualização completa (sem erro em nenhuma fonte)
+ATTEMPT_KEY = "catalog_attempt_at"  # última atualização com alguma fonte em falha
+RETRY_HOURS = 6  # espera depois de uma atualização com falha
+
+
+def _meta_time(conn, key: str) -> datetime | None:
+    try:
+        at = datetime.fromisoformat(db.get_meta(conn, key) or "")
+    except ValueError:
+        return None
+    return at.replace(tzinfo=timezone.utc) if at.tzinfo is None else at
+
+
 def catalog_is_stale(conn, days: int = 7) -> bool:
+    """Vazio, sem atualização completa nos últimos `days` dias, ou falha parcial há mais de RETRY_HOURS."""
     if db.catalog_count(conn) == 0:
         return True
-    try:
-        at = datetime.fromisoformat(db.get_meta(conn, "catalog_refreshed_at") or "")
-    except ValueError:
-        return True
-    if at.tzinfo is None:
-        at = at.replace(tzinfo=timezone.utc)
-    return datetime.now(timezone.utc) - at > timedelta(days=days)
+    now = datetime.now(timezone.utc)
+    at, attempt = _meta_time(conn, STAMP_KEY), _meta_time(conn, ATTEMPT_KEY)
+    if attempt and (at is None or attempt > at):  # a última atualização teve falha: tentar de novo, sem martelar
+        return now - attempt > timedelta(hours=RETRY_HOURS)
+    return at is None or now - at > timedelta(days=days)
 
 
-def _stamp(conn) -> None:
-    db.set_meta(conn, "catalog_refreshed_at", datetime.now(timezone.utc).isoformat())
+def _stamp(conn, key: str = STAMP_KEY) -> None:
+    db.set_meta(conn, key, datetime.now(timezone.utc).isoformat())
 
 
 async def refresh_catalog(conn, settings, transport=None) -> dict:
@@ -220,14 +232,12 @@ async def refresh_catalog(conn, settings, transport=None) -> dict:
             out["indices"][i] = db.set_index_members(conn, i, INDICES[i][0], syms)
         _stamp(conn)
         return out
-    fetched = False
     for market, fetch in (("US", fetch_us), ("B3", fetch_b3)):
         try:
             rows = await fetch(transport)
             if len(rows) < MIN_ROWS[market]:
                 raise CatalogError(f"{market}: só {len(rows)} linhas (mínimo {MIN_ROWS[market]})")
             out["markets"][market] = db.replace_catalog_market(conn, market, rows)
-            fetched = True
         except Exception as e:  # noqa: BLE001 - uma fonte ruim não derruba as outras
             out["errors"].append(f"{market}: {e}")
     out["markets"]["CRYPTO"] = db.replace_catalog_market(conn, "CRYPTO", CRYPTO_CATALOG)
@@ -240,6 +250,6 @@ async def refresh_catalog(conn, settings, transport=None) -> dict:
             out["indices"][index] = db.set_index_members(conn, index, market, syms)
         except Exception as e:  # noqa: BLE001
             out["errors"].append(f"{index}: {e}")
-    if fetched:
-        _stamp(conn)
+    # falha parcial não vale por 7 dias: sem a brapi ou a API da B3, a busca ou um índice ficaria vazio
+    _stamp(conn, ATTEMPT_KEY if out["errors"] else STAMP_KEY)
     return out

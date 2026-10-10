@@ -70,10 +70,13 @@ def scope_assets(conn, scope: str) -> list[dict]:
 
 
 def progress(conn, scope: str) -> dict:
+    """`ready` = membros já processados: linha válida, marcador de histórico insuficiente ou falha na fonte."""
     assets = scope_assets(conn, scope)
     total = len(assets) if scope == "watchlist" else len(db.index_members(conn, scope))
-    ready = sum(_valid(r["payload"]) for r in db.load_screener(conn, [a["id"] for a in assets]))
-    return {"scope": scope, "total": total, "ready": ready}
+    stored = {r["asset_id"]: _valid(r["payload"]) for r in db.load_screener(conn, [a["id"] for a in assets])}
+    failed = {a["id"] for a in assets if a["last_error"] and not stored.get(a["id"])}
+    return {"scope": scope, "total": total, "ready": len(stored.keys() | failed),
+            "insufficient": sum(not ok for ok in stored.values()), "failed": len(failed)}
 
 
 def _scope_rows(conn, scope: str) -> list[dict]:
@@ -98,6 +101,25 @@ def _updated_at(recs: list[dict]) -> str | None:
     return max((r["updated_at"] for r in recs), default=None)
 
 
+def _stale_rows(rows: list[dict]) -> int:
+    """Linhas com `as_of` anterior ao mais recente do escopo (por mercado: cripto negocia todo dia)."""
+    newest: dict[str, str] = {}
+    for r in rows:
+        if r.get("as_of") and r["as_of"] > newest.get(r["market"], ""):
+            newest[r["market"]] = r["as_of"]
+    return sum(bool(r.get("as_of")) and r["as_of"] < newest[r["market"]] for r in rows)
+
+
+def _public(conn, row: dict) -> dict:
+    """Linha da resposta: sem `pool`, com o nome que faltava (gravada antes do catálogo) e `session_open`."""
+    out = {k: v for k, v in row.items() if k != "pool"}
+    if out.get("name") is None:
+        entry = db.catalog_entry(conn, row["symbol"], row["market"])
+        out["name"] = entry["name"] if entry else None
+    out["session_open"] = analysis.session_open(row["market"], row.get("as_of"))
+    return out
+
+
 def query(conn, scope="watchlist", market=None, verdict=None, evidence=None, setup=None,
           sort="score", order="desc", page=1, page_size=50) -> dict:
     _check_scope(scope)
@@ -113,6 +135,7 @@ def query(conn, scope="watchlist", market=None, verdict=None, evidence=None, set
         raise ScreenerError(f"paginação inválida: page={page}, page_size={page_size} (máx. {MAX_PAGE_SIZE})")
     recs = _scope_rows(conn, scope)
     rows = [r["payload"] for r in recs]
+    stale_rows = _stale_rows(rows)
     rows = [r for r in rows
             if (market is None or r["market"] == market) and (verdict is None or r["verdict"] == verdict)
             and (evidence is None or r["evidence"] == evidence)
@@ -123,8 +146,8 @@ def query(conn, scope="watchlist", market=None, verdict=None, evidence=None, set
     rows = have + [r for r in rows if r.get(sort) is None]  # None sempre por último
     start = (page - 1) * page_size
     return {"scope": scope, "total": len(rows), "page": page, "page_size": page_size,
-            "rows": [{k: v for k, v in r.items() if k != "pool"} for r in rows[start:start + page_size]],
-            "updated_at": _updated_at(recs)}
+            "rows": [_public(conn, r) for r in rows[start:start + page_size]],
+            "updated_at": _updated_at(recs), "stale_rows": stale_rows}
 
 
 def summary(conn, scope: str) -> dict:

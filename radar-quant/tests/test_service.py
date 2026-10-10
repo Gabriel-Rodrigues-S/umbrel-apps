@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 
 import pandas as pd
 import pytest
@@ -294,6 +295,25 @@ def test_open_asset_atualiza_se_velho_ou_sem_candles(conn, settings, monkeypatch
     conn.commit()
     asyncio.run(service.open_asset(conn, "TSLA", "US", settings))
     assert p.n == 2
+
+
+def test_stale_por_idade_e_por_corte():
+    t = lambda d, h, m=0: datetime(2026, 10, d, h, m, tzinfo=timezone.utc)  # noqa: E731
+    assert service._stale(None, t(9, 12)) is True
+    assert service._stale(t(8, 15).isoformat(), t(9, 5, 30)) is True  # aberto no pregão, lido depois do corte
+    assert service._stale(t(9, 3).isoformat(), t(9, 5, 30)) is True  # 2 h 30, mas anterior ao corte das 05:00
+    assert service._stale(t(9, 3).isoformat(), t(9, 4, 59)) is False
+    assert service._stale(t(9, 5, 10).isoformat(), t(9, 5, 30)) is False
+    assert service._stale(t(9, 5, 10).isoformat(), t(9, 11, 9)) is False
+    assert service._stale(t(9, 5, 10).isoformat(), t(9, 11, 11)) is True  # mais de 6 h
+    assert service._stale(t(9, 15).isoformat()) in (True, False)  # sem `now`: relógio real
+
+
+def test_cutoff():
+    t = lambda d, h, m=0: datetime(2026, 10, d, h, m, tzinfo=timezone.utc)  # noqa: E731
+    assert service.cutoff(t(9, 4, 59)) == t(8, 5)
+    assert service.cutoff(t(9, 5)) == t(9, 5)
+    assert service.cutoff(t(9, 23, 59)) == t(9, 5)
 
 
 def test_open_asset_watchlist_continua_watch1(conn, settings, monkeypatch):

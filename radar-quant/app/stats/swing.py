@@ -161,7 +161,9 @@ def setup_report(df, key) -> dict:
                "days": pos["days"], "ret": _num(pos["ret"]), "exit_pending": pos["exit_pending"]}
         state = "posicao"
     else:
-        state = "sinal" if len(ent) and bool(ent.iloc[-1]) else "nenhum"
+        # saída pelo limite no último candle: a simulação ignora a entrada desse mesmo fechamento
+        capped = bool(trades) and trades[-1].exit_date == df.index[-1] and trades[-1].days >= MAX_HOLD
+        state = "sinal" if len(ent) and bool(ent.iloc[-1]) and not capped else "nenhum"
     marks = []
     for t in trades:
         marks.append({"time": t.entry_date.isoformat(), "type": "entry", "price": _num(t.entry_price)})

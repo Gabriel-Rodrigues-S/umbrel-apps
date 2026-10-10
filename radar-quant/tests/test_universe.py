@@ -81,7 +81,7 @@ def test_refresh_universe_completo(conn, settings):
     assert db.get_meta(conn, "universe_refreshed_at")
     assert sl.calls and set(sl.calls) == {0.25}
     assert len(sl.calls) == 15  # entre ativos, não antes do primeiro
-    assert screener.progress(conn, "IBRA") == {"scope": "IBRA", "total": 8, "ready": 8}
+    assert screener.progress(conn, "IBRA") == {"scope": "IBRA", "total": 8, "ready": 8, "insufficient": 0, "failed": 0}
     assert screener.progress(conn, "SP500")["ready"] == 8
     out2 = run(universe.refresh_universe(conn, settings, sleep=sl))
     assert out2 == {"updated": 0, "skipped": 16, "failed": 0, "aborted": False}
@@ -104,7 +104,7 @@ def test_refresh_universe_limit_e_parcial(conn, settings):
 
 def test_refresh_universe_pula_atualizados_e_reprocessa_velhos(conn, settings):
     run(universe.refresh_universe(conn, settings, sleep=Sleeps()))
-    old = (datetime.now(timezone.utc) - timedelta(hours=21)).isoformat()
+    old = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()  # sempre anterior ao último corte
     a = db.find_asset(conn, "PETR4", "B3")
     conn.execute("UPDATE assets SET last_refresh = ? WHERE id = ?", (old, a["id"]))
     conn.commit()
@@ -140,17 +140,54 @@ def test_refresh_universe_falhas_intercaladas_nao_abortam(conn, settings, monkey
 
 # ---------- universe_due ----------
 
+def _t(h, m=0, day=9):
+    return datetime(2026, 10, day, h, m, tzinfo=timezone.utc)
+
+
+def test_cutoff_bordas():
+    assert universe.cutoff(_t(4, 59)) == _t(5, day=8)
+    assert universe.cutoff(_t(5, 0)) == _t(5)
+    assert universe.cutoff(_t(23, 59)) == _t(5)
+    assert universe.cutoff(datetime(2026, 10, 9, 4, 59)) == _t(5, day=8)  # sem fuso: tratado como UTC
+    assert universe.cutoff is service.cutoff
+
+
 def test_universe_due(conn):
-    t = lambda h: datetime(2026, 10, 9, h, 0, tzinfo=timezone.utc)  # noqa: E731
-    assert universe.universe_due(conn, t(6)) is True  # nunca rodou
-    db.set_meta(conn, "universe_refreshed_at", (t(6) - timedelta(hours=2)).isoformat())
-    assert universe.universe_due(conn, t(6)) is False
-    db.set_meta(conn, "universe_refreshed_at", (t(6) - timedelta(hours=21)).isoformat())
-    assert universe.universe_due(conn, t(6)) is True
-    db.set_meta(conn, "universe_refreshed_at", (t(14) - timedelta(hours=21)).isoformat())
-    assert universe.universe_due(conn, t(14)) is False  # fora da janela 05–09 UTC
+    assert universe.universe_due(conn, _t(6)) is True  # nunca rodou
+    assert universe.universe_due(conn, _t(14)) is True  # nunca rodou: a qualquer hora
+    db.set_meta(conn, "universe_refreshed_at", _t(5, 30).isoformat())
+    assert universe.universe_due(conn, _t(6)) is False  # já completou depois do corte de hoje
+    db.set_meta(conn, "universe_refreshed_at", _t(4, 0).isoformat())
+    assert universe.universe_due(conn, _t(6)) is True  # completa, mas anterior ao corte
+    assert universe.universe_due(conn, _t(14)) is False  # fora da janela 05–09 UTC
+    assert universe.universe_due(conn, _t(4, 30)) is False
     db.set_meta(conn, "universe_refreshed_at", "lixo")
-    assert universe.universe_due(conn, t(14)) is True
+    assert universe.universe_due(conn, _t(14)) is True
+
+
+def test_universe_due_primeira_passada_durante_o_pregao(conn):
+    db.set_meta(conn, "universe_attempt_at", _t(14, 25, day=8).isoformat())
+    db.set_meta(conn, "universe_refreshed_at", _t(14, 40, day=8).isoformat())
+    assert universe.universe_due(conn, _t(20, day=8)) is False
+    assert universe.universe_due(conn, _t(4, 59)) is False
+    assert universe.universe_due(conn, _t(6)) is True  # antes: 15 h 20 < 20 h e a janela do dia era pulada
+    assert universe.universe_due(conn, _t(8, 59)) is True
+    assert universe.universe_due(conn, _t(9)) is False
+    db.set_meta(conn, "universe_attempt_at", _t(5, 5).isoformat())
+    assert universe.universe_due(conn, _t(6)) is False  # tentativa há menos de RETRY_HOURS
+    db.set_meta(conn, "universe_refreshed_at", _t(5, 20).isoformat())
+    assert universe.universe_due(conn, _t(8)) is False
+    assert universe.universe_due(conn, _t(6, day=10)) is True
+
+
+def test_ativo_atualizado_no_pregao_fica_desatualizado_no_corte():
+    a = {"last_refresh": _t(15, day=8).isoformat()}
+    assert universe._stale(a, _t(23, day=8)) is False
+    assert universe._stale(a, _t(4, 59)) is False
+    assert universe._stale(a, _t(5, 30)) is True  # antes: 14 h 30 < 20 h e o candle parcial ficava
+    assert universe._stale({"last_refresh": _t(5, 10).isoformat()}, _t(5, 30)) is False
+    assert universe._stale({"last_refresh": None}, _t(5, 30)) is True
+    assert universe._stale({"last_refresh": "lixo"}, _t(5, 30)) is True
 
 
 # ---------- purge ----------
@@ -182,13 +219,22 @@ def test_universe_due_espera_apos_aborto(conn, settings, monkeypatch):
     assert universe.universe_due(conn, now + timedelta(hours=2, minutes=1)) is True  # nunca completou
 
 
-def test_universe_due_passada_completa_mantem_regra_de_20h(conn, settings):
+def test_universe_due_depois_de_passada_completa(conn, settings):
     run(universe.refresh_universe(conn, settings, sleep=Sleeps()))
     now = datetime.now(timezone.utc)
-    assert universe.universe_due(conn, now + timedelta(hours=3)) is False
+    assert universe.universe_due(conn, now + timedelta(minutes=30)) is False
     t = (now + timedelta(days=2)).replace(hour=6, minute=0)
     assert universe.universe_due(conn, t) is True
     assert universe.universe_due(conn, t.replace(hour=14)) is False
+
+
+def test_passada_solta_da_memoria_a_analise_de_quem_nao_e_watchlist(conn, settings):
+    aid = db.add_asset(conn, "PETR4", "B3", watch=True)
+    run(universe.refresh_universe(conn, settings, sleep=Sleeps()))
+    assert len(db.load_screener(conn)) == 16
+    assert set(analysis._cache) == {aid}  # os demais são recalculados sob demanda ao abrir
+    other = db.find_asset(conn, "VALE3", "B3")
+    assert analysis.analyze_asset(conn, other)["status"] == "ok"
 
 
 def test_refresh_universe_falha_no_store_row_conta_falha_e_segue(conn, settings, monkeypatch):
