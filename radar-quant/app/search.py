@@ -3,6 +3,7 @@
 A fonte do catálogo da B3 abrevia os nomes ("BCO BRASIL S.A."): o índice expande as abreviações e a busca
 on-line ensina o nome completo (`alias`). O que vem da rede é de terceiros: símbolos filtrados, nomes saneados."""
 import asyncio
+import functools
 import json
 import logging
 import re
@@ -18,11 +19,16 @@ log = logging.getLogger("radar.search")
 
 YAHOO_URL = "https://query1.finance.yahoo.com/v1/finance/search"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; RadarQuantBot/1.0)"}
-TIMEOUT = 4  # segundos
+TIMEOUT = 4  # segundos (aprendizado de nomes, em segundo plano)
+SEARCH_TIMEOUT = 2  # teto da ida à rede na busca interativa: alguém está esperando a resposta
+BREAKER_SECONDS = 60  # sem rede depois de falha (rede, timeout, status, corpo ruim)
+BREAKER_429_SECONDS = 15 * 60  # idem depois de HTTP 429: o host é o mesmo dos preços
+MAX_QUOTES = 10  # itens de `quotes` considerados por resposta (pedimos 8)
+MAX_INSERTS = 3  # papéis novos que uma consulta pode pôr no catálogo
+QUOTE_KINDS = {"EQUITY": "Ação", "ETF": "ETF"}  # só estes tipos entram no catálogo
 MAX_BODY = 1_000_000
 MAX_NAME = 80
 MIN_REMOTE_CHARS = 3  # consulta menor que isso não vai à rede
-MIN_LOCAL = 5  # com menos resultados locais que isso, consulta a rede
 CACHE_SECONDS = 24 * 3600
 CACHE_MAX = 256
 SCORE_EXACT, SCORE_PREFIX, SCORE_REMOTE, SCORE_NAME = 1000, 600, 450, 300
@@ -44,14 +50,20 @@ _B3_RE = re.compile(r"[A-Z0-9]{4,6}[0-9]{1,2}")
 _FRACTION_RE = re.compile(r"[A-Z0-9]{4}[0-9]{1,2}F")  # PETR4F: mercado fracionário
 _US_RE = re.compile(r"[A-Z]{1,5}(-[A-Z])?")
 _NOT_WORD_RE = re.compile(r"[^a-z0-9]+")
+_CLASS_RE = re.compile(r"([A-Z0-9]{4})(\d{1,2})")  # código da B3: empresa + classe
+_CLASS_ORDER = {"4": 0, "3": 1, "11": 2}  # PN antes de ON antes de unit; o resto depois
+_DROP = ("Cs", "Co", "Cn")  # substitutos solitários, uso privado, não atribuídos: o SQLite nem codifica
 
 _lock = threading.Lock()
-_state: tuple | None = None  # (conexão, entradas do índice)
+_state: tuple | None = None  # (conexão, geração, entradas do índice)
+_generation = 0  # sobe a cada `invalidate()`; índice de geração antiga é refeito na próxima busca
 _remote_cache: dict[str, tuple[float, list[dict]]] = {}  # consulta normalizada -> (instante, acertos)
+_pending: dict[str, asyncio.Future] = {}  # consultas em voo: quem chega depois espera a mesma requisição
+_blocked_until = 0.0  # disjuntor: até este instante (`_now()`) a busca não vai à rede
 
 
 class SearchError(Exception):
-    pass
+    status: int | None = None  # status HTTP, quando a falha foi essa
 
 
 def _now() -> float:  # relógio trocável nos testes
@@ -74,29 +86,36 @@ def normalize(text: str) -> list[str]:
 
 
 def clean_name(value) -> str:
-    """Nome vindo de terceiros: sem caracteres de controle/formatação, espaços colapsados, até MAX_NAME."""
+    """Nome vindo de terceiros: sem controle/formatação nem o que não se codifica em UTF-8, espaços
+    colapsados, até MAX_NAME."""
     if not isinstance(value, str):
         return ""
-    return " ".join("".join(" " if unicodedata.category(c) in ("Cc", "Cf") else c for c in value).split())[:MAX_NAME]
+    kept = ((c, unicodedata.category(c)) for c in value)
+    text = "".join(" " if cat in ("Cc", "Cf") else c for c, cat in kept if cat not in _DROP)
+    return " ".join(text.encode("utf-8", "ignore").decode().split())[:MAX_NAME]
 
 
 # ---------- índice em memória ----------
 
 def invalidate() -> None:
-    """Derruba o índice; a próxima busca o reconstrói. Chamar quando o catálogo ou um alias mudar."""
-    global _state
-    with _lock:
-        _state = None
+    """Marca o índice como velho; a próxima busca o reconstrói (numa thread). Chamar quando o catálogo ou um
+    alias mudar. Não espera o lock: pode ser chamada do event loop com uma reconstrução em curso."""
+    global _generation
+    _generation += 1
 
 
 def _entry(row: dict) -> tuple:
+    code = _words(row["symbol"])
     names = [_words(n) for n in (row["name"], row["alias"] or "")]
     tokens = frozenset(t for words in names for w in words for t in _variants(w))
     firsts = tuple({t for words in names for w in words[:1] for t in _variants(w)})
-    blob = " " + " ".join(_words(row["symbol"]) + sorted(tokens))  # " tok": prefixo de token = substring
-    # para a cobertura: as palavras distintas de cada nome (cru e alias), cada uma com suas variantes
-    cover = tuple(tuple(_variants(w) for w in dict.fromkeys(words) if w not in NAME_NOISE) for words in names)
-    item = {"symbol": row["symbol"], "market": row["market"], "name": row["alias"] or row["name"],
+    blob = " " + " ".join(code + sorted(tokens))  # " tok": prefixo de token = substring
+    # para a cobertura: as palavras distintas de cada nome (cru e alias), cada uma com suas variantes;
+    # nome que é o próprio código (FIIs, ETFs e BDRs na fonte da B3) não cobre nada
+    cover = tuple(tuple(_variants(w) for w in dict.fromkeys(words) if w not in NAME_NOISE)
+                  for words in names if words != code)
+    item = {"symbol": row["symbol"], "market": row["market"],
+            "name": db.display_name(row["symbol"], row["name"], row["alias"]),
             "kind": row["kind"], "indices": row["indices"]}
     bonus = (INDEX_POINTS * len(row["indices"]) + HOME_POINTS * (row["market"] in HOME_MARKETS)
              + STOCK_POINTS * (row["kind"] == "Ação"))
@@ -128,14 +147,31 @@ def _coverage(cover: tuple, wanted: tuple[str, ...]) -> float:
 def _index(conn) -> list[tuple]:
     global _state
     with _lock:
-        if _state is None or _state[0] is not conn:
-            _state = (conn, [_entry(r) for r in db.all_catalog(conn)])
-        return _state[1]
+        if _state is None or _state[0] is not conn or _state[1] != _generation:
+            generation = _generation  # lida antes do catálogo: invalidação durante a obra vale para a próxima
+            _state = (conn, generation, [_entry(r) for r in db.all_catalog(conn)])
+        return _state[2]
+
+
+@functools.lru_cache(maxsize=32768)
+def _tie(symbol: str, market: str) -> tuple:
+    """Desempate: símbolo mais curto, depois ordem alfabética; classes da mesma empresa na B3 ficam juntas,
+    PN (4) antes de ON (3) antes de unit (11) antes das demais."""
+    m = _CLASS_RE.fullmatch(symbol) if market == "B3" else None
+    if m:
+        return 5, m[1], _CLASS_ORDER.get(m[2], 3), symbol, market
+    return len(symbol), symbol, 0, symbol, market
 
 
 def _order(scored: tuple[float, float, dict]):
     score, coverage, item = scored
-    return -score, -coverage, len(item["symbol"]), item["symbol"], item["market"]
+    return -score, -coverage, *_tie(item["symbol"], item["market"])
+
+
+def _code(q: str) -> str:
+    """A consulta como código de papel: maiúsculas, sem um sufixo `.SA`."""
+    code = q.strip().upper()
+    return code[:-3] if code.endswith(".SA") else code
 
 
 def _rank(conn, q: str) -> list[tuple[float, float, dict]]:
@@ -146,8 +182,7 @@ def _rank(conn, q: str) -> list[tuple[float, float, dict]]:
     words = _words(q)
     groups = [_variants(w) for w in ([w for w in words if w not in STOPWORDS] or words)]
     needles = [tuple(" " + v for v in g) for g in groups]
-    code = q.strip().upper()
-    code = code[:-3] if code.endswith(".SA") else code
+    code = _code(q)
     if not code:
         return []
     wanted = tuple(v for g in groups for v in g)
@@ -179,17 +214,25 @@ def search_local(conn, q: str, limit: int = 12) -> list[dict]:
 # ---------- reforço on-line ----------
 
 def clear_remote_cache() -> None:
+    """Esquece o cache, as consultas em voo e o disjuntor (testes)."""
+    global _blocked_until
     _remote_cache.clear()
+    _pending.clear()
+    _blocked_until = 0.0
 
 
-async def yahoo_quotes(q: str, transport: httpx.AsyncBaseTransport | None = None) -> list[dict]:
-    """Itens de `quotes` da busca do Yahoo. Levanta em qualquer falha (rede, status, tamanho, JSON)."""
+async def yahoo_quotes(q: str, transport: httpx.AsyncBaseTransport | None = None,
+                       timeout: float = TIMEOUT) -> list[dict]:
+    """Os primeiros MAX_QUOTES itens de `quotes` da busca do Yahoo. Levanta em qualquer falha (rede, status,
+    tamanho, JSON)."""
     async def fetch() -> bytes:
-        async with httpx.AsyncClient(transport=transport, timeout=TIMEOUT, headers=HEADERS) as client:
+        async with httpx.AsyncClient(transport=transport, timeout=timeout, headers=HEADERS) as client:
             async with client.stream("GET", YAHOO_URL,
                                      params={"q": q, "quotesCount": 8, "newsCount": 0}) as resp:
                 if resp.status_code != 200:
-                    raise SearchError(f"HTTP {resp.status_code}")
+                    error = SearchError(f"HTTP {resp.status_code}")
+                    error.status = resp.status_code
+                    raise error
                 body = b""
                 async for chunk in resp.aiter_bytes():
                     body += chunk
@@ -197,16 +240,17 @@ async def yahoo_quotes(q: str, transport: httpx.AsyncBaseTransport | None = None
                         raise SearchError("resposta grande demais")
         return body
 
-    data = json.loads(await asyncio.wait_for(fetch(), TIMEOUT))  # teto para a chamada inteira
+    data = json.loads(await asyncio.wait_for(fetch(), timeout))  # teto para a chamada inteira
     quotes = data.get("quotes") if isinstance(data, dict) else None
     if not isinstance(quotes, list):
         raise SearchError("JSON inesperado")
-    return [x for x in quotes if isinstance(x, dict)]
+    return [x for x in quotes[:MAX_QUOTES] if isinstance(x, dict)]
 
 
 def _map(quote: dict) -> dict | None:
-    """Item do Yahoo -> {symbol, market, name}; None para outras bolsas, fracionário e OTC."""
-    symbol, exchange = quote.get("symbol"), quote.get("exchange")
+    """Item do Yahoo -> {symbol, market, name, kind}; None para outras bolsas, fracionário e OTC.
+    `kind` só vem para ação e ETF: é o que autoriza inserir o papel no catálogo."""
+    symbol, exchange, quote_type = quote.get("symbol"), quote.get("exchange"), quote.get("quoteType")
     if not isinstance(symbol, str):
         return None
     if symbol.endswith(".SA") and exchange == "SAO":
@@ -218,47 +262,87 @@ def _map(quote: dict) -> dict | None:
     else:
         return None
     return {"symbol": symbol, "market": market,
-            "name": clean_name(quote.get("longname")) or clean_name(quote.get("shortname")) or None}
+            "name": clean_name(quote.get("longname")) or clean_name(quote.get("shortname")) or None,
+            "kind": QUOTE_KINDS.get(quote_type) if isinstance(quote_type, str) else None}
+
+
+async def _fetch_remote(key: str, transport) -> list[dict]:
+    """Uma ida à rede: mapeia, guarda no cache e registra; falha abre o disjuntor e devolve lista vazia."""
+    global _blocked_until
+    started = time.monotonic()
+    try:
+        found = {}
+        for quote in await yahoo_quotes(key, transport, SEARCH_TIMEOUT):
+            mapped = _map(quote)
+            if mapped:
+                found.setdefault((mapped["symbol"], mapped["market"]), mapped)
+    except Exception as e:  # noqa: BLE001 - rede, status, tamanho, JSON, recursão: a busca local segue valendo
+        pause = BREAKER_429_SECONDS if getattr(e, "status", None) == 429 else BREAKER_SECONDS
+        _blocked_until = _now() + pause
+        log.warning("busca on-line de %r falhou (%s: %s); sem rede por %d s", key, type(e).__name__, e, pause)
+        return []
+    hits = list(found.values())
+    _remote_cache.pop(key, None)
+    _remote_cache[key] = (_now(), hits)
+    while len(_remote_cache) > CACHE_MAX:
+        del _remote_cache[next(iter(_remote_cache))]  # a mais antiga
+    log.info("busca on-line de %r: %d acerto(s) em %.2f s", key, len(hits), time.monotonic() - started)
+    return hits
 
 
 async def search_remote(q: str, transport: httpx.AsyncBaseTransport | None = None) -> list[dict]:
-    """Acertos da busca do Yahoo já mapeados e filtrados; nunca levanta (falha = lista vazia, sem cache)."""
+    """Acertos da busca do Yahoo já mapeados e filtrados; nunca levanta (falha = lista vazia, sem cache).
+
+    Resposta boa (mesmo vazia) vale por CACHE_SECONDS; depois de uma falha o disjuntor pula a rede por um
+    tempo; consultas iguais em voo compartilham a mesma requisição."""
     key = " ".join(q.lower().split())
     if len(key) < MIN_REMOTE_CHARS:
         return []
     hit = _remote_cache.get(key)
     if hit and _now() - hit[0] < CACHE_SECONDS:
         return [dict(h) for h in hit[1]]
-    try:
-        found = {}
-        for quote in await yahoo_quotes(key, transport):
-            mapped = _map(quote)
-            if mapped:
-                found.setdefault((mapped["symbol"], mapped["market"]), mapped)
-    except Exception as e:  # noqa: BLE001 - rede, status, tamanho, JSON, recursão: a busca local segue valendo
-        log.warning("busca on-line de %r falhou: %s: %s", key, type(e).__name__, e)
+    flying = _pending.get(key)
+    if flying is not None:
+        return [dict(h) for h in await asyncio.shield(flying)]  # shield: desistir de esperar não cancela a dos outros
+    if _now() < _blocked_until:
         return []
-    _remote_cache.pop(key, None)
-    _remote_cache[key] = (_now(), list(found.values()))
-    while len(_remote_cache) > CACHE_MAX:
-        del _remote_cache[next(iter(_remote_cache))]  # a mais antiga
-    return [dict(h) for h in found.values()]
+    future = _pending[key] = asyncio.get_running_loop().create_future()
+    hits: list[dict] = []
+    try:
+        hits = await _fetch_remote(key, transport)
+    finally:  # também no cancelamento: quem esperava segue só com o resultado local
+        _pending.pop(key, None)
+        future.set_result(hits)
+    return [dict(h) for h in hits]
 
 
 def _learn(conn, ranked: list[tuple[float, float, dict]], hits: list[dict]) -> list[tuple[float, float, dict]]:
-    """Grava o que a rede ensinou (alias de quem não tinha, papel fora do catálogo) e junta aos locais."""
+    """Grava o que a rede ensinou e junta os acertos aos locais.
+
+    Alias para quem não tinha; papel fora do catálogo só entra com nome e tipo conhecidos (ação ou ETF), no
+    máximo MAX_INSERTS por consulta. Falha ao gravar um papel não impede os demais nem a resposta."""
     best = {(r[2]["symbol"], r[2]["market"]): r for r in ranked}
     missing = {(s, m) for m in {h["market"] for h in hits}
                for s in db.missing_alias(conn, m, [h["symbol"] for h in hits if h["market"] == m])}
-    learned = False
+    learned, inserted = False, 0
     for h in hits:
         key = (h["symbol"], h["market"])
-        if db.catalog_entry(conn, *key) is None:
-            db.upsert_catalog_entry(conn, *key, h["name"] or h["symbol"], "Ação")
-            learned = True
-        elif h["name"] and key in missing:
-            learned |= db.set_alias(conn, *key, h["name"])
-        entry = db.catalog_entry(conn, *key)
+        entry = None
+        try:
+            entry = db.catalog_entry(conn, *key)
+            if entry is None:
+                if h["name"] and h["kind"] and inserted < MAX_INSERTS:
+                    db.upsert_catalog_entry(conn, *key, h["name"], h["kind"])
+                    inserted += 1
+                    learned = True
+            elif h["name"] and key in missing:
+                learned |= db.set_alias(conn, *key, db.pretty_name(h["name"]))
+            entry = db.catalog_entry(conn, *key)
+        except Exception:  # noqa: BLE001
+            log.exception("falha ao gravar o que a busca on-line trouxe sobre %s", h["symbol"])
+            if entry is None and h["name"] and h["kind"]:  # não entrou no catálogo, mas a busca o mostra
+                entry = {"symbol": h["symbol"], "market": h["market"], "kind": h["kind"], "indices": [],
+                         "name": db.display_name(h["symbol"], h["name"])}
         if entry:
             score, coverage, _ = best.get(key, (0, 0.0, None))
             best[key] = (max(SCORE_REMOTE, score), coverage, entry)
@@ -267,15 +351,29 @@ def _learn(conn, ranked: list[tuple[float, float, dict]], hits: list[dict]) -> l
     return sorted(best.values(), key=_order)
 
 
-async def search(conn, q: str, limit: int, settings, transport: httpx.AsyncBaseTransport | None = None) -> list[dict]:
-    """Busca local; se ela for fraca (e fora do modo sintético), reforça com a busca on-line e aprende.
+def _weak(ranked: list[tuple[float, float, dict]], q: str) -> bool:
+    """O catálogo não resolve a consulta: nenhum nome coberto por inteiro, nenhum resultado na faixa de
+    prefixo de símbolo (ou acima) e nenhum símbolo exato que baste. Símbolo exato basta quando a consulta tem
+    dígito ou o papel é da B3/cripto: "vivo" (EUA) ainda pode ser a marca da VIVT3."""
+    code = _code(q)
+    digit = any(c.isdigit() for c in code)
+    for score, coverage, item in ranked:
+        if item["symbol"] == code:
+            if digit or item["market"] in HOME_MARKETS:
+                return False
+        elif coverage >= FULL_COVERAGE or score >= SCORE_PREFIX:
+            return False
+    return True
 
-    Fraca = sem acerto de símbolo exato e (menos de MIN_LOCAL resultados ou nenhum nome coberto por inteiro)."""
+
+async def search(conn, q: str, limit: int, settings, transport: httpx.AsyncBaseTransport | None = None) -> list[dict]:
+    """Busca local; só se o catálogo não resolver (e fora do modo sintético) reforça com a busca on-line."""
     ranked = await asyncio.to_thread(_rank, conn, q)
-    exact = bool(ranked) and ranked[0][0] >= SCORE_EXACT
-    weak = not exact and (len(ranked) < MIN_LOCAL or not any(r[1] >= FULL_COVERAGE for r in ranked))
-    if settings.provider != "synthetic" and len(q.strip()) >= MIN_REMOTE_CHARS and weak:
+    if settings.provider != "synthetic" and len(q.strip()) >= MIN_REMOTE_CHARS and _weak(ranked, q):
         hits = await search_remote(q, transport)
         if hits:
-            ranked = await asyncio.to_thread(_learn, conn, ranked, hits)
+            try:
+                ranked = await asyncio.to_thread(_learn, conn, ranked, hits)
+            except Exception:  # noqa: BLE001 - o que o catálogo já tinha continua valendo
+                log.exception("falha ao juntar os acertos da busca on-line de %r", q)
     return _public(ranked, limit)

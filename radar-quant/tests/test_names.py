@@ -122,3 +122,37 @@ def test_learn_names_sem_nome_na_fonte_nao_trava_a_fila(conn):
     assert run(names.learn_names(conn, "B3", lote, pace=0, sleep=Sleep(), transport=t)) == 0
     assert calls == ["ZZZZ3.SA", "BBAS3.SA"]
     assert db.missing_alias(conn, "B3", ["ZZZZ3"]) == ["ZZZZ3"]
+
+
+# ---------- rodada final ----------
+
+def test_learn_names_falha_ao_gravar_pula_o_papel_e_segue(conn, monkeypatch):
+    real, calls = db.set_alias, []
+
+    def set_alias(c, symbol, market, alias):
+        if symbol == "BBAS3":
+            raise UnicodeEncodeError("utf-8", "\ud800", 0, 1, "surrogates not allowed")
+        return real(c, symbol, market, alias)
+
+    monkeypatch.setattr(db, "set_alias", set_alias)
+    t, lote = transport(calls), ["BBAS3", "PETR4", "VALE3"]
+    assert run(names.learn_names(conn, "B3", lote, pace=0, sleep=Sleep(), transport=t)) == 2
+    assert calls == ["BBAS3.SA", "PETR4.SA", "VALE3.SA"] and db.missing_alias(conn, "B3", lote) == ["BBAS3"]
+    assert run(names.learn_names(conn, "B3", lote, pace=0, sleep=Sleep(), transport=t)) == 0
+    assert len(calls) == 3  # o papel que não grava não é tentado de novo neste processo
+
+
+def test_learn_names_saneia_substituto_e_deixa_o_nome_legivel(conn):
+    import json
+    nomes = {"BBAS3.SA": "BCO\ud800 BRASIL S.A.", "PETR4.SA": "PETROLEO BRASILEIRO S.A. PETROBRAS"}
+
+    def handler(request):
+        q = request.url.params["q"]
+        body = json.dumps({"quotes": [{"symbol": q, "longname": nomes[q]}]})
+        return httpx.Response(200, content=body.encode())
+
+    n = run(names.learn_names(conn, "B3", ["BBAS3", "PETR4"], pace=0, sleep=Sleep(),
+                              transport=httpx.MockTransport(handler)))
+    assert n == 2
+    assert {c["symbol"]: c["alias"] for c in db.all_catalog(conn) if c["alias"]} == {
+        "BBAS3": "Bco Brasil S.A.", "PETR4": "Petroleo Brasileiro S.A. Petrobras"}

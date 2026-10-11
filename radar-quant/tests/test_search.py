@@ -106,8 +106,8 @@ def test_local_codigo(conn, q):
 
 
 def test_local_prefixo_de_codigo_antes_de_nome(conn):
-    assert syms(search.search_local(conn, "petr")) == ["PETR3", "PETR4", "PBR", "PBR.A", "PRIO3", "RPMG3"]
-    assert syms(search.search_local(conn, "petroleo")) == ["PETR3", "PETR4", "PBR", "PBR.A", "RPMG3"]
+    assert syms(search.search_local(conn, "petr")) == ["PETR4", "PETR3", "PBR", "PBR.A", "PRIO3", "RPMG3"]
+    assert syms(search.search_local(conn, "petroleo")) == ["PETR4", "PETR3", "PBR", "PBR.A", "RPMG3"]
     assert syms(search.search_local(conn, "bbdc")) == ["BBDC4", "BBDC3", "BBDC1"]
 
 
@@ -191,7 +191,7 @@ def test_ordem_bradesco_direitos_por_ultimo(conn):
 def test_ordem_itau_e_petrobras(conn):
     itau = syms(search.search_local(conn, "itau"))
     assert itau[0] == "ITUB4" and itau.index("ITUB4") < itau.index("ITUB3")
-    assert syms(search.search_local(conn, "petrobras")) == ["PETR3", "PETR4", "PBR", "PBR.A"]  # B3 antes dos ADRs
+    assert syms(search.search_local(conn, "petrobras")) == ["PETR4", "PETR3", "PBR", "PBR.A"]  # B3 antes dos ADRs
 
 
 def test_penalidade_de_direitos_so_nos_sufixos_1_2_9_10(conn):
@@ -227,21 +227,18 @@ def test_desempate_por_cobertura(conn):
 # ---------- search_remote ----------
 
 QUOTES = [
-    {"symbol": "BBAS3.SA", "exchange": "SAO", "longname": "Banco do Brasil S.A.", "shortname": "BRASIL ON NM"},
+    {"symbol": "BBAS3.SA", "exchange": "SAO", "longname": "Banco do Brasil S.A.", "shortname": "BRASIL ON NM",
+     "quoteType": "EQUITY"},
     {"symbol": "PETR4F.SA", "exchange": "SAO", "longname": "Petróleo Brasileiro S.A. - Petrobras"},
     {"symbol": "BBAS.BA", "exchange": "BUE", "longname": "Banco do Brasil BA"},
     {"symbol": "BZLA.F", "exchange": "FRA", "longname": "Banco do Brasil F"},
     {"symbol": "BDORY", "exchange": "PNK", "longname": "Banco do Brasil ADR"},
-    {"symbol": "BDORY2", "exchange": "OID", "longname": "Outro OTC"},
     {"symbol": "ITUB", "exchange": "NYQ", "shortname": "Itau  Unibanco\tBanco\x00 Holding SA"},
-    {"symbol": "BRK-B", "exchange": "NYQ", "longname": "Berkshire Hathaway Inc."},
-    {"symbol": "AAPL", "exchange": "NMS", "longname": "A" * 200},
-    {"symbol": "BBAS3.SA", "exchange": "FRA", "longname": "bolsa errada"},
-    {"symbol": "abc", "exchange": "NYQ", "longname": "minúsculo"},
-    {"symbol": "TOOLONG", "exchange": "NMS", "longname": "seis letras"},
+    {"symbol": "BRK-B", "exchange": "NYQ", "longname": "Berkshire Hathaway Inc.", "quoteType": ["EQUITY"]},
+    {"symbol": "AAPL", "exchange": "NMS", "longname": "A" * 200, "quoteType": "ETF"},
     {"symbol": 123, "exchange": "NMS"},
     "lixo",
-]
+]  # 10 itens: é o teto do que se lê de uma resposta
 
 
 def transport(quotes=QUOTES, calls=None, status=200, body=None):
@@ -258,10 +255,14 @@ def test_remote_mapeia_e_filtra():
     calls = []
     out = run(search.search_remote("banco do brasil", transport(calls=calls)))
     assert out == [
-        {"symbol": "BBAS3", "market": "B3", "name": "Banco do Brasil S.A."},
-        {"symbol": "ITUB", "market": "US", "name": "Itau Unibanco Banco Holding SA"},
-        {"symbol": "BRK.B", "market": "US", "name": "Berkshire Hathaway Inc."},
-        {"symbol": "AAPL", "market": "US", "name": "A" * 80}]
+        {"symbol": "BBAS3", "market": "B3", "name": "Banco do Brasil S.A.", "kind": "Ação"},
+        {"symbol": "ITUB", "market": "US", "name": "Itau Unibanco Banco Holding SA", "kind": None},
+        {"symbol": "BRK.B", "market": "US", "name": "Berkshire Hathaway Inc.", "kind": None},
+        {"symbol": "AAPL", "market": "US", "name": "A" * 80, "kind": "ETF"}]
+    for lixo in ({"symbol": "BDORY2", "exchange": "OID"}, {"symbol": "BBAS3.SA", "exchange": "FRA"},
+                 {"symbol": "abc", "exchange": "NYQ"}, {"symbol": "TOOLONG", "exchange": "NMS"},
+                 {"symbol": "PETR4F.SA", "exchange": "SAO"}, {"symbol": "X.SA", "exchange": "SAO"}):
+        assert search._map(lixo) is None
     req = calls[0]
     assert req.url.host == "query1.finance.yahoo.com" and req.url.path == "/v1/finance/search"
     assert dict(req.url.params) == {"q": "banco do brasil", "quotesCount": "8", "newsCount": "0"}
@@ -279,6 +280,7 @@ def test_remote_falhas_devolvem_lista_vazia(caplog):
                            transport(body=b"[1, 2]"), transport(body=b'{"quotes": [' + b" " * 2_000_000 + b"]}"),
                            transport(body=b"[" * 100_000), httpx.MockTransport(timeout),
                            httpx.MockTransport(caiu)]):
+        search.clear_remote_cache()  # fecha o disjuntor que a falha anterior abriu
         with caplog.at_level("WARNING", logger="radar.search"):
             assert run(search.search_remote(f"consulta {i}", t)) == []
     assert len([r for r in caplog.records if r.name == "radar.search"]) == 8
@@ -293,9 +295,11 @@ def test_remote_cache_e_consulta_curta():
     assert len(calls) == 1
 
 
-def test_remote_falha_nao_fica_em_cache():
-    calls = []
+def test_remote_falha_nao_fica_em_cache(monkeypatch):
+    agora, calls = [1000.0], []
+    monkeypatch.setattr(search, "_now", lambda: agora[0])
     assert run(search.search_remote("itau", transport(calls=calls, status=500))) == []
+    agora[0] += search.BREAKER_SECONDS + 1  # passado o disjuntor, a mesma consulta volta à rede
     assert syms(run(search.search_remote("itau", transport(calls=calls)))) == ["BBAS3", "ITUB", "BRK.B", "AAPL"]
     assert len(calls) == 2
 
@@ -329,49 +333,37 @@ def test_search_local_fraco_aprende_alias(conn, tmp_path):
 
 
 def test_search_nao_troca_alias_existente(conn, tmp_path):
-    db.set_alias(conn, "BBAS3", "B3", "Nome já aprendido")
-    quotes = [{"symbol": "BBAS3.SA", "exchange": "SAO", "longname": "Banco do Brasil S.A."}]
-    out = run(search.search(conn, "banco do brasil", 12, settings(tmp_path), transport(quotes)))
-    assert (out[0]["symbol"], out[0]["name"]) == ("BBAS3", "Nome já aprendido")
+    db.set_alias(conn, "BOVA11", "B3", "Nome já aprendido")
+    search.invalidate()
+    calls = []
+    quotes = [eq("BOVA11.SA", "iShares Ibovespa Fundo de Índice", kind="ETF")]
+    out = run(search.search(conn, "ishares", 12, settings(tmp_path), transport(quotes, calls=calls)))
+    assert [(r["symbol"], r["name"]) for r in out] == [("BOVA11", "Nome já aprendido")] and len(calls) == 1
 
 
 def test_search_insere_papel_fora_do_catalogo(conn, tmp_path):
-    quotes = [{"symbol": "WEGE3.SA", "exchange": "SAO", "longname": "WEG S.A."},
-              {"symbol": "MSFT", "exchange": "NMS", "shortname": "Microsoft Corporation"}]
+    quotes = [eq("WEGE3.SA", "WEG S.A."),
+              {"symbol": "MSFT", "exchange": "NMS", "shortname": "Microsoft Corporation", "quoteType": "EQUITY"}]
     out = run(search.search(conn, "weg", 12, settings(tmp_path), transport(quotes)))
     assert out == [{"symbol": "MSFT", "market": "US", "name": "Microsoft Corporation", "kind": "Ação", "indices": []},
-                   {"symbol": "WEGE3", "market": "B3", "name": "WEG S.A.", "kind": "Ação", "indices": []}]
-    assert db.catalog_entry(conn, "WEGE3", "B3")["name"] == "WEG S.A."
+                   {"symbol": "WEGE3", "market": "B3", "name": "Weg S.A.", "kind": "Ação", "indices": []}]
+    assert db.catalog_entry(conn, "WEGE3", "B3")["name"] == "Weg S.A."
     assert syms(search.search_local(conn, "wege3")) == ["WEGE3"]
 
 
 def test_search_ordem_e_duplicatas(conn, tmp_path):
-    # ITUB4 já vem do local (625 pontos): não duplica e fica acima do acerto só remoto (450); limit corta no fim
-    quotes = [{"symbol": "ITUB4.SA", "exchange": "SAO", "longname": "Itaú Unibanco Holding S.A."},
-              {"symbol": "ITUB", "exchange": "NYQ", "longname": "Itaú Unibanco Holding S.A. ADR"}]
-    out = run(search.search(conn, "itau", 12, settings(tmp_path), transport(quotes)))
-    assert [(r["symbol"], r["market"]) for r in out] == [("ITUB4", "B3"), ("ITSA4", "B3"), ("ITUB3", "B3"),
-                                                         ("ITUB", "US")]
-    assert out[0]["name"] == "Itaú Unibanco Holding S.A."  # o nome recém-aprendido já aparece
-    assert len(run(search.search(conn, "itau", 2, settings(tmp_path), transport(quotes)))) == 2
+    # SANB11 já vem do local (480 pontos): não duplica e fica acima do acerto só remoto (450); limit corta no fim
+    quotes = [eq("SANB11.SA", "Banco Santander (Brasil) S.A."), eq("SAN", "Banco Santander, S.A.", "NYQ")]
+    out = run(search.search(conn, "santander", 12, settings(tmp_path), transport(quotes)))
+    assert [(r["symbol"], r["market"]) for r in out] == [("SANB11", "B3"), ("SAN", "US"), ("BSBR", "US")]
+    assert out[0]["name"] == "Banco Santander (Brasil) S.A."  # o nome recém-aprendido já aparece
+    assert len(run(search.search(conn, "santander", 2, settings(tmp_path), transport(quotes)))) == 2
 
 
 def test_search_sintetico_nunca_chama_o_transporte(conn, tmp_path):
     calls = []
     out = run(search.search(conn, "banco do brasil", 12, settings(tmp_path, "synthetic"), transport(calls=calls)))
     assert syms(out)[0] == "BBAS3" and calls == []
-
-
-def test_search_so_vai_a_rede_quando_o_local_e_fraco(conn, tmp_path):
-    calls = []
-    t = transport([], calls=calls)
-    assert len(run(search.search(conn, "s", 12, settings(tmp_path), t))) == 12  # 1 caractere
-    assert syms(run(search.search(conn, "bitcoin", 12, settings(tmp_path), t)))[0] == "BTC"  # 5 locais, 1 nome inteiro
-    assert calls == []
-    assert syms(run(search.search(conn, "apple", 12, settings(tmp_path), t))) == ["AAPL", "APLE"]  # só 2 locais
-    assert len(calls) == 1
-    assert len(run(search.search(conn, "banco s.a.", 12, settings(tmp_path), t))) == 6  # 6 locais, nenhum inteiro
-    assert len(calls) == 2
 
 
 @pytest.mark.parametrize("q", ["BBAS3", "bbas3", "bbas3.sa", "vale", "BBDC1"])
@@ -382,6 +374,217 @@ def test_search_simbolo_exato_nao_vai_a_rede(conn, tmp_path, q):
 
 
 def test_search_remoto_fora_do_ar_devolve_os_locais(conn, tmp_path):
-    out = run(search.search(conn, "banco do brasil", 12, settings(tmp_path), transport(status=500)))
-    assert syms(out) == ["BBAS3", "ABCB4", "SANB11", "BSBR"]
+    calls = []
+    out = run(search.search(conn, "santander", 12, settings(tmp_path), transport(calls=calls, status=500)))
+    assert syms(out) == ["SANB11", "BSBR"] and len(calls) == 1
     assert run(search.search(conn, "", 12, settings(tmp_path), transport(status=500))) == []
+
+
+# ---------- rodada final: rede só quando o catálogo não resolve; teto e saneamento; nomes legíveis ----------
+
+def eq(symbol, name, exchange="SAO", kind="EQUITY"):
+    return {"symbol": symbol, "exchange": exchange, "longname": name, "quoteType": kind}
+
+
+def clock(monkeypatch, start=1000.0):
+    agora = [start]
+    monkeypatch.setattr(search, "_now", lambda: agora[0])
+    return agora
+
+
+def test_reforco_so_quando_o_local_e_fraco(conn, tmp_path, caplog):
+    db.upsert_catalog_entry(conn, "WEGE3", "B3", "WEG S.A.", "Ação")
+    db.set_alias(conn, "PETR4", "B3", "Petrobras")
+    search.invalidate()
+    calls, live = [], settings(tmp_path)
+    t = transport([], calls=calls)
+    for q in ("petrobras",  # nome coberto por inteiro
+              "apple", "weg",  # idem ("weg" também é prefixo de WEGE3)
+              "PETR", "petr", "bbd", "itu",  # faixa de prefixo de símbolo
+              "itau",  # 625 pontos: já está na faixa de cima
+              "bbas3", "btc"):  # símbolo exato com dígito / de cripto
+        assert run(search.search(conn, q, 12, live, t)), q
+        assert calls == [], q
+    with caplog.at_level("INFO", logger="radar.search"):
+        assert run(search.search(conn, "inexistente", 12, live, t)) == []  # lista local vazia é fraca
+        assert syms(run(search.search(conn, "santander", 12, live, t))) == ["SANB11", "BSBR"]  # 2 parciais
+        assert len(run(search.search(conn, "brasil", 12, live, t))) == 8  # 8 locais, nenhum resolve
+    assert [c.url.params["q"] for c in calls] == ["inexistente", "santander", "brasil"]
+    infos = [r.getMessage() for r in caplog.records if r.name == "radar.search" and r.levelname == "INFO"]
+    assert len(infos) == 3 and "'santander'" in infos[1] and "0 acerto" in infos[1]
+
+
+def test_simbolo_exato_dos_eua_sem_digito_nao_suprime_o_reforco(conn, tmp_path):
+    db.upsert_catalog_entry(conn, "VIVO", "US", "VivoPower International PLC", "Ação")
+    db.upsert_catalog_entry(conn, "VIVT3", "B3", "TELEF BRASIL S.A.", "Ação")
+    search.invalidate()
+    calls, live = [], settings(tmp_path)
+    t = transport([eq("VIVT3.SA", "Telefônica Brasil S.A.")], calls=calls)
+    out = run(search.search(conn, "vivo", 12, live, t))
+    assert [(r["symbol"], r["name"]) for r in out] == [("VIVO", "VivoPower International PLC"),
+                                                       ("VIVT3", "Telefônica Brasil S.A.")]
+    assert len(calls) == 1
+    assert syms(run(search.search(conn, "vivt3", 12, live, t))) == ["VIVT3"] and len(calls) == 1  # tem dígito
+
+
+def test_disjuntor_depois_de_falha_e_de_429(monkeypatch):
+    agora, calls = clock(monkeypatch), []
+    ok = transport([eq("BBAS3.SA", "Banco do Brasil S.A.")], calls=calls)
+    assert run(search.search_remote("consulta um", transport(calls=calls, status=503))) == []
+    assert run(search.search_remote("consulta dois", ok)) == [] and len(calls) == 1  # 60 s sem rede
+    agora[0] += 59
+    assert run(search.search_remote("consulta dois", ok)) == [] and len(calls) == 1
+    agora[0] += 2
+    assert syms(run(search.search_remote("consulta dois", ok))) == ["BBAS3"] and len(calls) == 2
+    assert run(search.search_remote("consulta tres", transport(calls=calls, status=429))) == []
+    agora[0] += 14 * 60
+    assert run(search.search_remote("consulta quatro", ok)) == [] and len(calls) == 3  # 15 min sem rede
+    agora[0] += 61
+    assert syms(run(search.search_remote("consulta quatro", ok))) == ["BBAS3"] and len(calls) == 4
+
+
+def test_disjuntor_tambem_em_falha_de_rede_e_nao_em_resposta_vazia(monkeypatch):
+    clock(monkeypatch)
+    calls = []
+
+    def caiu(request):
+        calls.append(request)
+        raise httpx.ConnectError("fora do ar", request=request)
+
+    vazio = transport([], calls=calls)
+    assert run(search.search_remote("nada aqui", vazio)) == []
+    assert run(search.search_remote("nada aqui", vazio)) == [] and len(calls) == 1  # vazio legítimo: cache
+    assert run(search.search_remote("outra coisa", httpx.MockTransport(caiu))) == [] and len(calls) == 2
+    assert run(search.search_remote("mais uma", vazio)) == [] and len(calls) == 2  # disjuntor aberto
+
+
+def test_busca_interativa_tem_teto_de_tempo(conn, tmp_path, monkeypatch):
+    assert search.SEARCH_TIMEOUT == 2 and search.TIMEOUT == 4
+
+    async def lento(request):
+        await asyncio.sleep(30)
+        return httpx.Response(200, json={"quotes": []})
+
+    monkeypatch.setattr(search, "SEARCH_TIMEOUT", 0.05)
+    t0 = time.perf_counter()
+    out = run(search.search(conn, "santander", 12, settings(tmp_path), httpx.MockTransport(lento)))
+    assert syms(out) == ["SANB11", "BSBR"] and time.perf_counter() - t0 < 1  # devolve o que o catálogo tem
+
+
+def test_consultas_identicas_em_voo_compartilham_a_requisicao():
+    calls = []
+
+    async def handler(request):
+        calls.append(request)
+        await asyncio.sleep(0.05)
+        return httpx.Response(200, json={"quotes": [eq("BBAS3.SA", "Banco do Brasil S.A.")]})
+
+    async def tres():
+        t = httpx.MockTransport(handler)
+        return await asyncio.gather(search.search_remote("banco do brasil", t),
+                                    search.search_remote(" Banco do  Brasil", t),
+                                    search.search_remote("banco do brasil", t))
+
+    a, b, c = run(tres())
+    assert len(calls) == 1 and syms(a) == syms(b) == syms(c) == ["BBAS3"]
+    assert a is not b and a[0] is not b[0]  # cada chamador recebe a sua cópia
+
+
+def test_teto_de_itens_e_de_insercoes(conn, tmp_path):
+    antes = db.catalog_count(conn)
+    quotes = [eq(f"NOVA{i}.SA", f"Empresa Nova {i} S.A.") for i in range(3, 9)] * 3  # 18 itens, 6 símbolos
+    quotes = quotes[:9] + [eq("ZETA3.SA", "Zeta S.A.")] + [eq("FORA3.SA", "Fora dos dez primeiros S.A.")]
+    hits = run(search.search_remote("empresa nova", transport(quotes)))
+    assert syms(hits) == ["NOVA3", "NOVA4", "NOVA5", "NOVA6", "NOVA7", "NOVA8", "ZETA3"]  # só os 10 primeiros itens
+    out = run(search.search(conn, "empresa nova", 12, settings(tmp_path), transport(quotes)))
+    assert syms(out) == ["NOVA4", "NOVA3", "NOVA5"] and db.catalog_count(conn) == antes + 3  # 3 inserções
+
+
+def test_so_insere_acao_ou_etf_com_nome(conn, tmp_path):
+    quotes = [{"symbol": "SEMN3.SA", "exchange": "SAO", "quoteType": "EQUITY"},  # sem nome
+              eq("FUND3.SA", "Fundo Mútuo", kind="MUTUALFUND"), eq("OPCA3.SA", "Opção", kind="OPTION"),
+              {"symbol": "SEMT3.SA", "exchange": "SAO", "longname": "Sem tipo S.A."},
+              eq("IVVB11.SA", "iShares S&P 500 FIC FI", kind="ETF"), eq("XYZ", "Xyz Corp", "NYQ")]
+    antes = db.catalog_count(conn)
+    out = run(search.search(conn, "termo novo", 12, settings(tmp_path), transport(quotes)))
+    assert out == [{"symbol": "XYZ", "market": "US", "name": "Xyz Corp", "kind": "Ação", "indices": []},
+                   {"symbol": "IVVB11", "market": "B3", "name": "iShares S&P 500 FIC FI", "kind": "ETF",
+                    "indices": []}]
+    assert db.catalog_count(conn) == antes + 2
+
+
+def test_clean_name_descarta_substitutos_e_uso_privado():
+    assert search.clean_name("Banco\ud800 do Brasil￿ S.A.\udfff") == "Banco do Brasil S.A."
+    search.clean_name("\ud800x\ud800").encode("utf-8")  # sempre codificável
+
+
+def test_nome_com_substituto_solitario_nao_derruba_a_busca(conn, tmp_path):
+    body = json.dumps({"quotes": [eq("BOVA11.SA", "iShares \ud800Ibovespa"), eq("NOVO3.SA", "Novo\udc00 S.A.")]})
+    assert "\\ud800" in body
+    for _ in range(2):  # a segunda vem do cache: também não pode falhar
+        out = run(search.search(conn, "ishares", 12, settings(tmp_path), transport(body=body.encode())))
+        assert [(r["symbol"], r["name"]) for r in out] == [("BOVA11", "iShares Ibovespa"), ("NOVO3", "Novo S.A.")]
+    assert db.catalog_entry(conn, "BOVA11", "B3")["name"] == "iShares Ibovespa"
+
+
+def test_falha_ao_gravar_nao_derruba_a_busca(conn, tmp_path, monkeypatch, caplog):
+    def boom(*a, **k):
+        raise UnicodeEncodeError("utf-8", "\ud800", 0, 1, "surrogates not allowed")
+
+    monkeypatch.setattr(db, "set_alias", boom)
+    monkeypatch.setattr(db, "upsert_catalog_entry", boom)
+    quotes = [eq("SANB11.SA", "Banco Santander (Brasil) S.A."), eq("SAN", "Banco Santander, S.A.", "NYQ")]
+    with caplog.at_level("ERROR", logger="radar.search"):
+        out = run(search.search(conn, "santander", 12, settings(tmp_path), transport(quotes)))
+    assert [(r["symbol"], r["market"]) for r in out] == [("SANB11", "B3"), ("SAN", "US"), ("BSBR", "US")]
+    assert out[1] == {"symbol": "SAN", "market": "US", "name": "Banco Santander, S.A.", "kind": "Ação", "indices": []}
+    assert any(r.name == "radar.search" and r.exc_info for r in caplog.records)
+    assert db.catalog_entry(conn, "SAN", "US") is None
+
+
+def test_cobertura_zero_quando_o_nome_e_o_proprio_codigo(conn):
+    db.replace_catalog_market(conn, "B3", [("GOLL4", "GOL LINHAS AEREAS INTELIGENTES S.A.", "Ação"),
+                                           ("GOLB11", "GOLB11", "FII"), ("GOLD11", "GOLD11", "ETF"),
+                                           ("VISA34", "VISA34", "BDR")])
+    db.replace_catalog_market(conn, "US", [("V", "Visa Inc.", "Ação")])
+    db.set_index_members(conn, "SP500", "US", ["V"])
+    search.invalidate()
+    assert syms(search.search_local(conn, "gol")) == ["GOLL4", "GOLB11", "GOLD11"]
+    assert syms(search.search_local(conn, "visa")) == ["V", "VISA34"]
+    assert {r[2]["symbol"]: r[1] for r in search._rank(conn, "gol")}["GOLB11"] == 0
+
+
+def test_nomes_em_maiusculas_saem_legiveis(conn, tmp_path):
+    por = {r["symbol"]: r["name"] for r in search.search_local(conn, "banco", limit=25)}
+    assert por["SANB11"] == "Bco Santander (Brasil) S.A." and por["ABCB4"] == "Bco ABC Brasil S.A."
+    assert por["BBAS3"] == "Banco do Brasil S.A." and por["BSBR"].startswith("Banco Santander Brasil SA American")
+    assert search.search_local(conn, "bova")[0]["name"] == "BOVA11"  # nome igual ao código fica como está
+    assert syms(search.search_local(conn, "BCO SANTANDER")) == syms(search.search_local(conn, "bco santander"))
+    quotes = [eq("BOVA11.SA", "ISHARES IBOVESPA CLASSE DE ÍNDICE - RESPONSABILIDADE LIMITADA", kind="ETF")]
+    out = run(search.search(conn, "ishares", 12, settings(tmp_path), transport(quotes)))
+    assert out[0]["name"] == "Ishares Ibovespa Classe de Índice"
+    assert next(c for c in db.all_catalog(conn) if c["symbol"] == "BOVA11")["alias"] == out[0]["name"]  # gravado assim
+
+
+def test_desempate_entre_classes_da_mesma_empresa(conn):
+    assert syms(search.search_local(conn, "petr"))[:2] == ["PETR4", "PETR3"]
+    assert syms(search.search_local(conn, "petrobras"))[:2] == ["PETR4", "PETR3"]
+    db.replace_catalog_market(conn, "B3", [(s, "CIA XIS S.A.", "Ação") for s in (
+        "XISA5", "XISA11", "XISA3", "XISA4", "XISA6", "AAAA5", "ZZZZ4")])
+    search.invalidate()
+    assert syms(search.search_local(conn, "cia")) == ["AAAA5", "XISA4", "XISA3", "XISA11", "XISA5", "XISA6", "ZZZZ4"]
+    assert syms(search.search_local(conn, "xis"))[:5] == ["XISA4", "XISA3", "XISA11", "XISA5", "XISA6"]
+
+
+def test_invalidate_nao_espera_reconstrucao_em_curso(conn):
+    import threading
+    assert syms(search.search_local(conn, "bova")) == ["BOVA11"]
+    with search._lock:  # como se outra thread estivesse reconstruindo o índice
+        th = threading.Thread(target=search.invalidate, daemon=True)
+        th.start()
+        th.join(1)
+        travou = th.is_alive()
+    th.join(1)
+    assert not travou
+    db.set_alias(conn, "BOVA11", "B3", "iShares Ibovespa")  # e a invalidação feita durante a obra vale
+    assert search.search_local(conn, "ishares") and search.search_local(conn, "ishares")[0]["symbol"] == "BOVA11"
