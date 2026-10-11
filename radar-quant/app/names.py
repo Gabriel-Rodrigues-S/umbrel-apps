@@ -50,10 +50,13 @@ async def learn_names(conn, market: str, symbols: list[str], pace: float = 0.5, 
                     break
                 continue
             fails = 0
-            if name is None:
-                _unnamed.add((symbol, market))
-            elif await asyncio.to_thread(db.set_alias, conn, symbol, market, name):
-                saved += 1
+            try:
+                if name and await asyncio.to_thread(db.set_alias, conn, symbol, market, db.pretty_name(name)):
+                    saved += 1
+                    continue
+            except Exception:  # noqa: BLE001 - nome que não grava vale como "sem nome": o lote segue
+                log.exception("falha ao gravar o nome de %s", symbol)
+            _unnamed.add((symbol, market))
     finally:
         if saved:
             search.invalidate()

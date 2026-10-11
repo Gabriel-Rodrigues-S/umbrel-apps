@@ -362,3 +362,37 @@ def test_touch_news_renova_so_o_carimbo(conn):
     db.touch_news(conn, a)
     items, fetched = db.load_news(conn, a)
     assert len(items) == 1 and fetched > "2020-01-02"
+
+
+# ---------- 1.1.1: nomes legíveis ----------
+
+@pytest.mark.parametrize("name, esperado", [
+    ("BCO SANTANDER (BRASIL) S.A.", "Bco Santander (Brasil) S.A."),
+    ("ISHARES IBOVESPA CLASSE DE ÍNDICE - RESPONSABILIDADE LIMITADA", "Ishares Ibovespa Classe de Índice"),
+    ("iShares Ibovespa Classe de Índice - Responsabilidade Limitada", "iShares Ibovespa Classe de Índice"),
+    ("PETROLEO BRASILEIRO S.A. PETROBRAS", "Petroleo Brasileiro S.A. Petrobras"),
+    ("Apple Inc.", "Apple Inc."), ("WEG S.A.", "Weg S.A."), ("BOVA11", "BOVA11"),
+    ("BCO ABC BRASIL S/A", "Bco ABC Brasil S/A"), ("ITAUSA SA", "Itausa SA"), ("CIA BRASILEIRA DE DISTRIBUICAO",
+                                                                                "Cia Brasileira de Distribuicao"),
+    ("FII KINEA RENDA ETF BDR ON PN UNT B3 BR", "FII Kinea Renda ETF BDR ON PN UNT B3 BR"),
+    ("LOJAS DOS SANTOS E DAS FLORES EM SP DA SERRA DO MAR", "Lojas dos Santos e das Flores em Sp da Serra do Mar"),
+    ("BRADESCO DO 15,43", "Bradesco do 15,43"), ("", ""), ("123", "123"), ("Petrobras PN", "Petrobras PN"),
+])
+def test_pretty_name(name, esperado):
+    assert db.pretty_name(name) == esperado
+    assert db.pretty_name(esperado) == esperado  # idempotente
+
+
+def test_nome_exibido_sai_legivel_e_o_cru_fica_no_banco(conn):
+    db.replace_catalog_market(conn, "B3", [("SANB11", "BCO SANTANDER (BRASIL) S.A.", "Ação"),
+                                           ("BOVA11", "BOVA11", "ETF"), ("ABCD3", "ABCD3", "Ação")])
+    db.replace_catalog_market(conn, "CRYPTO", [("BNB", "BNB", "Cripto"), ("XRP", "XRP", "Cripto")])
+    db.set_index_members(conn, "IBRA", "B3", ["SANB11"])
+    assert db.catalog_entry(conn, "SANB11", "B3")["name"] == "Bco Santander (Brasil) S.A."
+    assert db.index_members(conn, "IBRA")[0]["name"] == "Bco Santander (Brasil) S.A."
+    assert db.search_catalog(conn, "santander")[0]["name"] == "Bco Santander (Brasil) S.A."
+    assert db.catalog_entry(conn, "BOVA11", "B3")["name"] == "BOVA11"
+    assert db.catalog_entry(conn, "BNB", "CRYPTO")["name"] == "BNB"  # nome igual ao código fica como está
+    assert next(c for c in db.all_catalog(conn) if c["symbol"] == "SANB11")["name"] == "BCO SANTANDER (BRASIL) S.A."
+    db.set_alias(conn, "BOVA11", "B3", "ISHARES IBOVESPA CLASSE DE ÍNDICE - RESPONSABILIDADE LIMITADA")
+    assert db.catalog_entry(conn, "BOVA11", "B3")["name"] == "Ishares Ibovespa Classe de Índice"

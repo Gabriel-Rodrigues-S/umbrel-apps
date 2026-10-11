@@ -1,5 +1,6 @@
 """Camada SQLite: ativos, candles diários, taxa livre de risco, catálogo, screener e notícias."""
 import json
+import re
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -249,10 +250,41 @@ def _split(indices: str) -> list[str]:
     return [i for i in indices.split(",") if i]
 
 
+_LIMITED_RE = re.compile(r"\s*-\s*RESPONSABILIDADE LIMITADA\s*$", re.I)
+_KEEP = frozenset({"S.A.", "S.A", "S/A", "SA", "FII", "ETF", "BDR", "ON", "PN", "UNT", "B3", "ABC", "BR"})
+_LOWER = frozenset({"de", "do", "da", "dos", "das", "e", "em"})
+
+
+def _pretty_word(word: str) -> str:
+    core = word.strip("()[],;:\"'")
+    if core in _KEEP or any(c.isdigit() for c in word):  # siglas e o que tem número ficam como vieram
+        return word
+    low = word.lower()
+    if core.lower() in _LOWER:
+        return low
+    i = next((i for i, c in enumerate(low) if c.isalpha()), None)
+    return word if i is None else low[:i] + low[i].upper() + low[i + 1:]
+
+
+def pretty_name(name: str) -> str:
+    """Nome legível: sem o sufixo " - RESPONSABILIDADE LIMITADA" e, se veio todo em maiúsculas (como na fonte
+    da B3), em capitalização de título, com siglas preservadas e preposições em minúsculas."""
+    name = _LIMITED_RE.sub("", name)
+    if name != name.upper() or not any(c.isalpha() for c in name):
+        return name
+    return " ".join(_pretty_word(w) for w in name.split(" "))
+
+
+def display_name(symbol: str, name: str, alias: str | None = None) -> str:
+    """Nome exibido de um papel: o alias aprendido, se houver, senão o da fonte; nome igual ao código não muda."""
+    shown = alias or name
+    return shown if shown == symbol else pretty_name(shown)
+
+
 def _catalog_dict(r) -> dict:
     """Linha do catálogo para os chamadores: `name` é o nome exibido (alias, se houver)."""
     d = dict(r)
-    d["name"] = d.pop("alias", None) or d["name"]
+    d["name"] = display_name(d["symbol"], d["name"], d.pop("alias", None))
     d["indices"] = _split(d["indices"])
     return d
 
