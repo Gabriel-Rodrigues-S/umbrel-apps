@@ -2125,17 +2125,23 @@
   }
 
   // ------------------------------------------------------ busca no catálogo
-  var search = { token: 0, timer: 0, items: [], active: -1, open: false, busy: false, busyTimer: 0 };
+  var search = { token: 0, timer: 0, items: [], active: -1, open: false, busy: false, busyTimer: 0, inflight: null };
   var SEARCH_DEBOUNCE_MS = 200;
   // A busca pode ir à rede e levar segundos. O aviso "buscando…" só entra se a
   // resposta demorar mais que isto, para não piscar a cada tecla na busca local.
+  // O atraso vale a partir do estado ocioso: com uma requisição ainda sem resposta,
+  // digitar outra tecla não reinicia a contagem nem tira o aviso da tela.
   var SEARCH_BUSY_AFTER_MS = 150;
 
-  function setSearchBusy(on) {
+  // Volta ao estado ocioso: cancela a requisição em voo e tira o aviso.
+  function searchIdle() {
+    if (search.inflight) { try { search.inflight.abort(); } catch (e) { /* já encerrada */ } }
+    search.inflight = null;
     window.clearTimeout(search.busyTimer);
-    search.busy = on;
+    search.busyTimer = 0;
+    search.busy = false;
     var node = $("search-results").querySelector(".search-busy");
-    if (!on && node) node.parentNode.removeChild(node);
+    if (node) node.parentNode.removeChild(node);
   }
 
   function closeSearch() {
@@ -2152,7 +2158,7 @@
     window.clearTimeout(search.timer);
     search.token++;
     search.items = [];
-    setSearchBusy(false);
+    searchIdle();
     closeSearch();
   }
 
@@ -2211,22 +2217,32 @@
   function runSearch() {
     var query = $("add-symbol").value.trim();
     var token = ++search.token;
-    setSearchBusy(false);
-    if (!query) { search.items = []; closeSearch(); return; }
-    search.busyTimer = window.setTimeout(function () {
+    if (!query) { search.items = []; searchIdle(); closeSearch(); return; }
+
+    // A resposta da consulta anterior seria descartada: cancela para não esperar por ela.
+    if (search.inflight) { try { search.inflight.abort(); } catch (e) { /* já encerrada */ } }
+    var controller = typeof AbortController === "function" ? new AbortController() : {};
+    search.inflight = controller;
+    if (!search.busy && !search.busyTimer) {
+      search.busyTimer = window.setTimeout(function () {
+        search.busyTimer = 0;
+        if (!search.inflight) return;
+        search.busy = true;
+        if (document.activeElement === $("add-symbol")) renderSearch($("add-symbol").value.trim());
+      }, SEARCH_BUSY_AFTER_MS);
+    }
+
+    api("/api/search?q=" + encodeURIComponent(query), controller.signal ? { signal: controller.signal } : undefined).then(function (list) {
       if (token !== search.token) return;
-      search.busy = true;
-      if (document.activeElement === $("add-symbol")) renderSearch(query);
-    }, SEARCH_BUSY_AFTER_MS);
-    api("/api/search?q=" + encodeURIComponent(query)).then(function (list) {
-      if (token !== search.token) return;
-      setSearchBusy(false);
+      search.inflight = null;  // já respondeu: nada a cancelar
+      searchIdle();
       search.items = (Array.isArray(list) ? list : []).filter(function (r) {
         return r && typeof r.symbol === "string" && typeof r.market === "string";
       });
       if (document.activeElement === $("add-symbol")) renderSearch(query);
     }, function () {
-      if (token === search.token) { setSearchBusy(false); search.items = []; closeSearch(); }  // busca é acessória: falha fica calada
+      // Requisição cancelada (token antigo) ou falha: a busca é acessória, fica calada.
+      if (token === search.token) { search.inflight = null; searchIdle(); search.items = []; closeSearch(); }
     });
   }
 
@@ -2257,7 +2273,7 @@
       if (search.open) event.preventDefault();
       window.clearTimeout(search.timer);
       search.token++;
-      setSearchBusy(false);
+      searchIdle();
       closeSearch();
     }
   }
