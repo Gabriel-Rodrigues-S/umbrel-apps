@@ -21,7 +21,8 @@ YAHOO_URL = "https://query1.finance.yahoo.com/v1/finance/search"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; RadarQuantBot/1.0)"}
 TIMEOUT = 4  # segundos (aprendizado de nomes, em segundo plano)
 SEARCH_TIMEOUT = 2  # teto da ida à rede na busca interativa: alguém está esperando a resposta
-BREAKER_SECONDS = 60  # sem rede depois de falha (rede, timeout, status, corpo ruim)
+BREAKER_SECONDS = 60  # sem rede depois de falha de rede, timeout ou 5xx
+NEGATIVE_SECONDS = 600  # resposta imprestável (corpo grande demais, JSON inválido, 4xx): não repetir a consulta
 BREAKER_429_SECONDS = 15 * 60  # idem depois de HTTP 429: o host é o mesmo dos preços
 MAX_QUOTES = 10  # itens de `quotes` considerados por resposta (pedimos 8)
 MAX_INSERTS = 3  # papéis novos que uma consulta pode pôr no catálogo
@@ -32,6 +33,8 @@ MIN_REMOTE_CHARS = 3  # consulta menor que isso não vai à rede
 CACHE_SECONDS = 24 * 3600
 CACHE_MAX = 256
 SCORE_EXACT, SCORE_PREFIX, SCORE_REMOTE, SCORE_NAME = 1000, 600, 450, 300
+SCORE_NICK, SCORE_NICK_EXTRA = 950, 500  # apelido de marca; EXTRA só acrescenta o papel, sem passar os demais
+MIN_NICK_PREFIX = 4  # letras digitadas para um prefixo de apelido valer
 
 ABBR = {"bco": "banco", "cia": "companhia", "part": "participacoes", "empr": "empreendimentos",
         "energ": "energia", "sid": "siderurgica", "ind": "industria", "com": "comercio",
@@ -45,6 +48,30 @@ COVERAGE_POINTS, INDEX_POINTS, HOME_POINTS, STOCK_POINTS, RIGHTS_PENALTY = 150, 
 HOME_MARKETS = ("B3", "CRYPTO")  # o dono é brasileiro; a lista de cripto é curta e curada
 FULL_COVERAGE = 0.99
 _RIGHTS_RE = re.compile(r"[A-Z0-9]{4}(1|2|9|10)")  # BBDC1, PETR10: direitos e recibos de subscrição da B3
+
+
+def _nicks(boost: int, table: dict[str, str]) -> dict[str, tuple[int, tuple[tuple[str, str], ...]]]:
+    return {nick: (boost, tuple(tuple(p.split("/")) for p in papers.split())) for nick, papers in table.items()}
+
+
+# Apelido de marca (normalizado) -> (pontuação, papéis em ordem de preferência). Nem o catálogo nem a busca
+# on-line ligam "vivo" à VIVT3. Só vale para os papéis que existem no catálogo no momento.
+NICKNAMES = {
+    **_nicks(SCORE_NICK, {
+        "vivo": "VIVT3/B3", "magalu": "MGLU3/B3", "nubank": "ROXO34/B3 NU/US", "nu": "NU/US", "bb": "BBAS3/B3",
+        "santander": "SANB11/B3 BSBR/US", "btg": "BPAC11/B3", "xp": "XP/US", "mercado livre": "MELI34/B3 MELI/US",
+        "tim": "TIMS3/B3", "oi": "OIBR3/B3", "americanas": "AMER3/B3", "casas bahia": "BHIA3/B3",
+        "renner": "LREN3/B3", "assai": "ASAI3/B3", "natura": "NATU3/B3 NTCO3/B3", "rede dor": "RDOR3/B3",
+        "porto seguro": "PSSA3/B3", "sabesp": "SBSP3/B3", "copel": "CPLE6/B3 CPLE3/B3",
+        "cemig": "CMIG4/B3 CMIG3/B3", "csn": "CSNA3/B3", "gerdau": "GGBR4/B3", "usiminas": "USIM5/B3",
+        "braskem": "BRKM5/B3", "klabin": "KLBN11/B3", "azul": "AZUL4/B3", "inter": "INBR32/B3",
+        "stone": "STNE/US", "pagbank": "PAGS/US"}),
+    # a busca por nome já acha o papel americano em 1º: aqui o apelido só acrescenta o BDR da B3
+    **_nicks(SCORE_NICK_EXTRA, {
+        "google": "GOGL34/B3 GOOGL/US GOOG/US", "facebook": "M1TA34/B3 META/US", "amazon": "AMZO34/B3 AMZN/US",
+        "tesla": "TSLA34/B3 TSLA/US", "nvidia": "NVDC34/B3 NVDA/US", "microsoft": "MSFT34/B3 MSFT/US",
+        "apple": "AAPL34/B3 AAPL/US"}),
+}
 US_EXCHANGES = frozenset({"NMS", "NGM", "NCM", "NYQ", "ASE", "PCX", "BTS"})
 _B3_RE = re.compile(r"[A-Z0-9]{4,6}[0-9]{1,2}")
 _FRACTION_RE = re.compile(r"[A-Z0-9]{4}[0-9]{1,2}F")  # PETR4F: mercado fracionário
@@ -55,9 +82,9 @@ _CLASS_ORDER = {"4": 0, "3": 1, "11": 2}  # PN antes de ON antes de unit; o rest
 _DROP = ("Cs", "Co", "Cn")  # substitutos solitários, uso privado, não atribuídos: o SQLite nem codifica
 
 _lock = threading.Lock()
-_state: tuple | None = None  # (conexão, geração, entradas do índice)
+_state: tuple | None = None  # (conexão, geração, entradas do índice, item por (símbolo, mercado))
 _generation = 0  # sobe a cada `invalidate()`; índice de geração antiga é refeito na próxima busca
-_remote_cache: dict[str, tuple[float, list[dict]]] = {}  # consulta normalizada -> (instante, acertos)
+_remote_cache: dict[str, tuple[float, list[dict]]] = {}  # consulta normalizada -> (validade, acertos)
 _pending: dict[str, asyncio.Future] = {}  # consultas em voo: quem chega depois espera a mesma requisição
 _blocked_until = 0.0  # disjuntor: até este instante (`_now()`) a busca não vai à rede
 
@@ -144,13 +171,14 @@ def _coverage(cover: tuple, wanted: tuple[str, ...]) -> float:
     return best
 
 
-def _index(conn) -> list[tuple]:
+def _index(conn) -> tuple[list[tuple], dict]:
     global _state
     with _lock:
         if _state is None or _state[0] is not conn or _state[1] != _generation:
             generation = _generation  # lida antes do catálogo: invalidação durante a obra vale para a próxima
-            _state = (conn, generation, [_entry(r) for r in db.all_catalog(conn)])
-        return _state[2]
+            entries = [_entry(r) for r in db.all_catalog(conn)]
+            _state = (conn, generation, entries, {(e[-1]["symbol"], e[-1]["market"]): e[-1] for e in entries})
+        return _state[2], _state[3]
 
 
 @functools.lru_cache(maxsize=32768)
@@ -163,8 +191,8 @@ def _tie(symbol: str, market: str) -> tuple:
     return len(symbol), symbol, 0, symbol, market
 
 
-def _order(scored: tuple[float, float, dict]):
-    score, coverage, item = scored
+def _order(scored: tuple):
+    score, coverage, item = scored[:3]
     return -score, -coverage, *_tie(item["symbol"], item["market"])
 
 
@@ -174,11 +202,13 @@ def _code(q: str) -> str:
     return code[:-3] if code.endswith(".SA") else code
 
 
-def _rank(conn, q: str) -> list[tuple[float, float, dict]]:
-    """Todos os papéis que casam com a consulta, como (pontuação, cobertura, item), do melhor para o pior.
+def _rank(conn, q: str) -> list[tuple[float, float, dict, bool]]:
+    """Todos os papéis que casam com a consulta, como (pontuação, cobertura, item, resolvido), do melhor para
+    o pior. `resolvido`: toda palavra da consulta é uma palavra inteira do nome, ou a consulta é um apelido.
 
-    Símbolo exato 1000; prefixo de símbolo 600; nome 300 (+80 primeira palavra, +40 igualdade); mais
-    150 x cobertura do nome, 40 por índice, 30 se B3/cripto, 20 se ação; direito/recibo da B3 perde 250."""
+    Símbolo exato 1000; apelido de marca 950; prefixo de símbolo 600; nome 300 (+80 primeira palavra, +40
+    igualdade); mais 150 x cobertura do nome, 40 por índice, 30 se B3/cripto, 20 se ação; direito/recibo da
+    B3 perde 250."""
     words = _words(q)
     groups = [_variants(w) for w in ([w for w in words if w not in STOPWORDS] or words)]
     needles = [tuple(" " + v for v in g) for g in groups]
@@ -186,8 +216,9 @@ def _rank(conn, q: str) -> list[tuple[float, float, dict]]:
     if not code:
         return []
     wanted = tuple(v for g in groups for v in g)
+    entries, by_key = _index(conn)
     out = []
-    for symbol, blob, firsts, tokens, cover, bonus, rights, item in _index(conn):
+    for symbol, blob, firsts, tokens, cover, bonus, rights, item in entries:
         if symbol == code:
             score = SCORE_EXACT + rights  # quem digitou o código inteiro quer esse papel: sem penalidade
         elif symbol.startswith(code):
@@ -198,12 +229,31 @@ def _rank(conn, q: str) -> list[tuple[float, float, dict]]:
         else:
             continue
         coverage = _coverage(cover, wanted)
-        out.append((score + COVERAGE_POINTS * coverage + bonus - rights, coverage, item))
+        solid = bool(groups) and all(any(v in tokens for v in g) for g in groups)
+        out.append((score + COVERAGE_POINTS * coverage + bonus - rights, coverage, item, solid))
+    nick = _nicknamed(" ".join(words), by_key)
+    if nick:
+        rows = {(r[2]["symbol"], r[2]["market"]): r for r in out}
+        for key, score in nick.items():
+            old = rows.get(key, (0, 0.0, by_key[key], True))
+            rows[key] = (max(score, old[0]), old[1], old[2], True)
+        out = list(rows.values())
     out.sort(key=_order)
     return out
 
 
-def _public(ranked: list[tuple[float, float, dict]], limit: int) -> list[dict]:
+def _nicknamed(query: str, by_key: dict) -> dict[tuple[str, str], int]:
+    """Papéis do catálogo que a consulta alcança por apelido de marca (igual, ou prefixo com 4+ letras), com
+    a pontuação de cada um; a ordem de preferência do apelido desempata (950, 949...)."""
+    out: dict[tuple[str, str], int] = {}
+    for nick, (boost, papers) in NICKNAMES.items():
+        if query == nick or (len(query) >= MIN_NICK_PREFIX and nick.startswith(query)):
+            for i, key in enumerate(k for k in papers if k in by_key):
+                out[key] = max(out.get(key, 0), boost - i)
+    return out
+
+
+def _public(ranked: list[tuple], limit: int) -> list[dict]:
     return [{**r[2], "indices": list(r[2]["indices"])} for r in ranked[:limit]]  # cópia: o índice fica intacto
 
 
@@ -266,6 +316,13 @@ def _map(quote: dict) -> dict | None:
             "kind": QUOTE_KINDS.get(quote_type) if isinstance(quote_type, str) else None}
 
 
+def _remember(key: str, hits: list[dict], seconds: float) -> None:
+    _remote_cache.pop(key, None)
+    _remote_cache[key] = (_now() + seconds, hits)
+    while len(_remote_cache) > CACHE_MAX:
+        del _remote_cache[next(iter(_remote_cache))]  # a mais antiga
+
+
 async def _fetch_remote(key: str, transport) -> list[dict]:
     """Uma ida à rede: mapeia, guarda no cache e registra; falha abre o disjuntor e devolve lista vazia."""
     global _blocked_until
@@ -277,35 +334,34 @@ async def _fetch_remote(key: str, transport) -> list[dict]:
             if mapped:
                 found.setdefault((mapped["symbol"], mapped["market"]), mapped)
     except Exception as e:  # noqa: BLE001 - rede, status, tamanho, JSON, recursão: a busca local segue valendo
-        pause = BREAKER_429_SECONDS if getattr(e, "status", None) == 429 else BREAKER_SECONDS
-        _blocked_until = _now() + pause
-        log.warning("busca on-line de %r falhou (%s: %s); sem rede por %d s", key, type(e).__name__, e, pause)
+        status = getattr(e, "status", None)
+        if isinstance(e, (httpx.HTTPError, asyncio.TimeoutError, OSError)) or (status or 0) >= 500 or status == 429:
+            pause = BREAKER_429_SECONDS if status == 429 else BREAKER_SECONDS
+            _blocked_until = _now() + pause  # a fonte está mal (e é a mesma dos preços): disjuntor
+            log.warning("busca on-line de %r falhou (%s: %s); sem rede por %d s", key, type(e).__name__, e, pause)
+        else:  # resposta imprestável só para esta consulta: cache negativo curto, sem disjuntor
+            _remember(key, [], NEGATIVE_SECONDS)
+            log.warning("busca on-line de %r sem resposta útil (%s: %s)", key, type(e).__name__, e)
         return []
     hits = list(found.values())
-    _remote_cache.pop(key, None)
-    _remote_cache[key] = (_now(), hits)
-    while len(_remote_cache) > CACHE_MAX:
-        del _remote_cache[next(iter(_remote_cache))]  # a mais antiga
+    _remember(key, hits, CACHE_SECONDS)
     log.info("busca on-line de %r: %d acerto(s) em %.2f s", key, len(hits), time.monotonic() - started)
     return hits
 
 
-async def search_remote(q: str, transport: httpx.AsyncBaseTransport | None = None) -> list[dict]:
-    """Acertos da busca do Yahoo já mapeados e filtrados; nunca levanta (falha = lista vazia, sem cache).
-
-    Resposta boa (mesmo vazia) vale por CACHE_SECONDS; depois de uma falha o disjuntor pula a rede por um
-    tempo; consultas iguais em voo compartilham a mesma requisição."""
+async def _consult(q: str, transport: httpx.AsyncBaseTransport | None = None) -> tuple[list[dict], bool]:
+    """(acertos, se a fonte foi consultada — agora, por outra chamada em voo ou pelo cache)."""
     key = " ".join(q.lower().split())
     if len(key) < MIN_REMOTE_CHARS:
-        return []
+        return [], False
     hit = _remote_cache.get(key)
-    if hit and _now() - hit[0] < CACHE_SECONDS:
-        return [dict(h) for h in hit[1]]
+    if hit and _now() < hit[0]:
+        return [dict(h) for h in hit[1]], True
     flying = _pending.get(key)
-    if flying is not None:
-        return [dict(h) for h in await asyncio.shield(flying)]  # shield: desistir de esperar não cancela a dos outros
+    if flying is not None:  # shield: desistir de esperar não cancela a requisição dos outros
+        return [dict(h) for h in await asyncio.shield(flying)], True
     if _now() < _blocked_until:
-        return []
+        return [], False
     future = _pending[key] = asyncio.get_running_loop().create_future()
     hits: list[dict] = []
     try:
@@ -313,10 +369,18 @@ async def search_remote(q: str, transport: httpx.AsyncBaseTransport | None = Non
     finally:  # também no cancelamento: quem esperava segue só com o resultado local
         _pending.pop(key, None)
         future.set_result(hits)
-    return [dict(h) for h in hits]
+    return [dict(h) for h in hits], True
 
 
-def _learn(conn, ranked: list[tuple[float, float, dict]], hits: list[dict]) -> list[tuple[float, float, dict]]:
+async def search_remote(q: str, transport: httpx.AsyncBaseTransport | None = None) -> list[dict]:
+    """Acertos da busca do Yahoo já mapeados e filtrados; nunca levanta (falha = lista vazia).
+
+    Resposta boa (mesmo vazia) vale por CACHE_SECONDS e resposta imprestável por NEGATIVE_SECONDS; depois de
+    falha da fonte o disjuntor pula a rede por um tempo; consultas iguais em voo compartilham a requisição."""
+    return (await _consult(q, transport))[0]
+
+
+def _learn(conn, ranked: list[tuple], hits: list[dict]) -> list[tuple]:
     """Grava o que a rede ensinou e junta os acertos aos locais.
 
     Alias para quem não tinha; papel fora do catálogo só entra com nome e tipo conhecidos (ação ou ETF), no
@@ -344,20 +408,22 @@ def _learn(conn, ranked: list[tuple[float, float, dict]], hits: list[dict]) -> l
                 entry = {"symbol": h["symbol"], "market": h["market"], "kind": h["kind"], "indices": [],
                          "name": db.display_name(h["symbol"], h["name"])}
         if entry:
-            score, coverage, _ = best.get(key, (0, 0.0, None))
-            best[key] = (max(SCORE_REMOTE, score), coverage, entry)
+            score, coverage, _, solid = best.get(key, (0, 0.0, None, False))
+            best[key] = (max(SCORE_REMOTE, score), coverage, entry, solid)
     if learned:
         invalidate()
     return sorted(best.values(), key=_order)
 
 
-def _weak(ranked: list[tuple[float, float, dict]], q: str) -> bool:
-    """O catálogo não resolve a consulta: nenhum nome coberto por inteiro, nenhum resultado na faixa de
-    prefixo de símbolo (ou acima) e nenhum símbolo exato que baste. Símbolo exato basta quando a consulta tem
-    dígito ou o papel é da B3/cripto: "vivo" (EUA) ainda pode ser a marca da VIVT3."""
+def _weak(ranked: list[tuple], q: str) -> bool:
+    """O catálogo não resolve a consulta: nenhum resultado `resolvido` (palavras inteiras do nome, apelido),
+    nenhum nome coberto por inteiro, nenhum na faixa de prefixo de símbolo (ou acima) e nenhum símbolo exato
+    que baste. Símbolo exato basta quando a consulta tem dígito ou o papel é da B3/cripto."""
     code = _code(q)
     digit = any(c.isdigit() for c in code)
-    for score, coverage, item in ranked:
+    for score, coverage, item, solid in ranked:
+        if solid:
+            return False
         if item["symbol"] == code:
             if digit or item["market"] in HOME_MARKETS:
                 return False
@@ -366,14 +432,22 @@ def _weak(ranked: list[tuple[float, float, dict]], q: str) -> bool:
     return True
 
 
-async def search(conn, q: str, limit: int, settings, transport: httpx.AsyncBaseTransport | None = None) -> list[dict]:
-    """Busca local; só se o catálogo não resolver (e fora do modo sintético) reforça com a busca on-line."""
+async def search_detail(conn, q: str, limit: int, settings, transport: httpx.AsyncBaseTransport | None = None,
+                        remote: bool = True) -> tuple[list[dict], bool]:
+    """(resultados, se a fonte on-line foi consultada). Busca local; só se o catálogo não resolver, fora do
+    modo sintético e com `remote`, reforça com a busca on-line e aprende. `remote=False`: nunca toca a rede."""
     ranked = await asyncio.to_thread(_rank, conn, q)
-    if settings.provider != "synthetic" and len(q.strip()) >= MIN_REMOTE_CHARS and _weak(ranked, q):
-        hits = await search_remote(q, transport)
+    consulted = False
+    if remote and settings.provider != "synthetic" and len(q.strip()) >= MIN_REMOTE_CHARS and _weak(ranked, q):
+        hits, consulted = await _consult(q, transport)
         if hits:
             try:
                 ranked = await asyncio.to_thread(_learn, conn, ranked, hits)
             except Exception:  # noqa: BLE001 - o que o catálogo já tinha continua valendo
                 log.exception("falha ao juntar os acertos da busca on-line de %r", q)
-    return _public(ranked, limit)
+    return _public(ranked, limit), consulted
+
+
+async def search(conn, q: str, limit: int, settings, transport: httpx.AsyncBaseTransport | None = None,
+                 remote: bool = True) -> list[dict]:
+    return (await search_detail(conn, q, limit, settings, transport, remote))[0]

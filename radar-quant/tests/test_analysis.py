@@ -229,7 +229,7 @@ def test_nome_exibido_e_o_alias_no_resumo_e_na_carteira(conn):
     """1.1.1: `asset_summary` e os pesos da carteira trazem o nome exibido (alias quando existe)."""
     db.replace_catalog_market(conn, "B3", [("BBAS3", "BCO BRASIL S.A.", "Ação")])
     b = asset(conn, "BBAS3")
-    assert analysis.asset_summary(conn, b)["name"] == "Bco Brasil S.A."  # legível, mesmo sem alias
+    assert analysis.asset_summary(conn, b)["name"] == "BCO Brasil S.A."  # legível, mesmo sem alias
     db.set_alias(conn, "BBAS3", "B3", "Banco do Brasil S.A.")
     assert analysis.asset_summary(conn, b)["name"] == "Banco do Brasil S.A."
     ws = {w["symbol"]: w for w in analysis.portfolio(conn, "risk_parity")["weights"]}

@@ -155,4 +155,4 @@ def test_learn_names_saneia_substituto_e_deixa_o_nome_legivel(conn):
                               transport=httpx.MockTransport(handler)))
     assert n == 2
     assert {c["symbol"]: c["alias"] for c in db.all_catalog(conn) if c["alias"]} == {
-        "BBAS3": "Bco Brasil S.A.", "PETR4": "Petroleo Brasileiro S.A. Petrobras"}
+        "BBAS3": "BCO Brasil S.A.", "PETR4": "Petroleo Brasileiro S.A. Petrobras"}
