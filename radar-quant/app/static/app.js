@@ -2125,23 +2125,42 @@
   }
 
   // ------------------------------------------------------ busca no catálogo
-  var search = { token: 0, timer: 0, items: [], active: -1, open: false, busy: false, busyTimer: 0, inflight: null };
+  // Duas fases por consulta. Local (remote=0): a cada tecla, depois do debounce;
+  // responde em milissegundos e não mostra aviso. Remota (remote=1): só quando o
+  // usuário para de digitar e a consulta tem 3+ caracteres; pode ir à rede e levar
+  // segundos, e é a única que mostra "buscando…". Qualquer tecla, Esc, escolha ou
+  // envio do formulário troca o token e cancela as duas.
+  var search = {
+    token: 0, timer: 0, remoteTimer: 0, busyTimer: 0,
+    query: "", items: [], active: -1, open: false,
+    localDone: false,       // a fase local da consulta atual já respondeu
+    remotePending: false,   // a fase remota está agendada ou em voo
+    remoteDone: false,      // a fase remota já respondeu (a local atrasada não a sobrescreve)
+    busy: false,            // aviso "buscando…" da fase remota em voo
+    localCtl: null, remoteCtl: null,
+  };
   var SEARCH_DEBOUNCE_MS = 200;
-  // A busca pode ir à rede e levar segundos. O aviso "buscando…" só entra se a
-  // resposta demorar mais que isto, para não piscar a cada tecla na busca local.
-  // O atraso vale a partir do estado ocioso: com uma requisição ainda sem resposta,
-  // digitar outra tecla não reinicia a contagem nem tira o aviso da tela.
+  var SEARCH_REMOTE_AFTER_MS = 700;   // pausa sem digitar que dispara a fase remota
+  var SEARCH_REMOTE_MIN_CHARS = 3;
+  // O aviso só entra se a fase remota demorar mais que isto: quando o servidor
+  // responde na hora (resultado local já era bom), nada pisca.
   var SEARCH_BUSY_AFTER_MS = 150;
 
-  // Volta ao estado ocioso: cancela a requisição em voo e tira o aviso.
-  function searchIdle() {
-    if (search.inflight) { try { search.inflight.abort(); } catch (e) { /* já encerrada */ } }
-    search.inflight = null;
+  function abortSearchPhase(key) {
+    var ctl = search[key];
+    search[key] = null;
+    if (ctl && typeof ctl.abort === "function") { try { ctl.abort(); } catch (e) { /* já encerrada */ } }
+  }
+
+  // Cancela timers e requisições das duas fases (as respostas seriam descartadas).
+  function stopSearchRequests() {
+    window.clearTimeout(search.timer);
+    window.clearTimeout(search.remoteTimer);
     window.clearTimeout(search.busyTimer);
-    search.busyTimer = 0;
+    abortSearchPhase("localCtl");
+    abortSearchPhase("remoteCtl");
+    search.remotePending = false;
     search.busy = false;
-    var node = $("search-results").querySelector(".search-busy");
-    if (node) node.parentNode.removeChild(node);
   }
 
   function closeSearch() {
@@ -2153,12 +2172,13 @@
     input.removeAttribute("aria-activedescendant");
   }
 
-  // Cancela busca pendente e respostas em trânsito (ex.: ao enviar o formulário).
+  // Cancela busca pendente e respostas em trânsito (Esc, escolha, envio do formulário).
   function cancelSearch() {
-    window.clearTimeout(search.timer);
     search.token++;
+    stopSearchRequests();
     search.items = [];
-    searchIdle();
+    search.localDone = false;
+    search.remoteDone = false;
     closeSearch();
   }
 
@@ -2175,7 +2195,37 @@
     }
   }
 
-  function renderSearch(query) {
+  // "busy": fase remota em voo há mais que o atraso, ou ainda pendente sem nenhum
+  // resultado local para mostrar. "empty": só depois de tudo o que ia rodar ter rodado.
+  function searchStatus() {
+    if (search.busy) return "busy";
+    if (!search.localDone || search.items.length) return "";
+    return search.remotePending ? "busy" : "empty";
+  }
+
+  // Troca só a linha de estado ("buscando…" / "nenhum papel"), sem tocar nos itens:
+  // o destaque do teclado e um clique em andamento não são perdidos.
+  function syncSearchStatus() {
+    var root = $("search-results"), input = $("add-symbol");
+    root.querySelectorAll(".search-busy, .search-empty").forEach(function (node) { root.removeChild(node); });
+    var status = searchStatus();
+    if (status === "busy") {
+      // Acima dos resultados locais, que continuam na lista até a resposta chegar.
+      var busy = el("li", "search-busy", "buscando…");
+      busy.setAttribute("role", "status");
+      root.insertBefore(busy, root.firstChild);
+    } else if (status === "empty") {
+      root.appendChild(el("li", "search-empty",
+        "Nenhum papel encontrado para “" + search.query + "”. Tente o código, ex.: BBAS3. "
+        + "Para buscar o símbolo direto na fonte, escolha o mercado e use Adicionar."));
+    }
+    if (!search.items.length && !status) { closeSearch(); return; }
+    root.hidden = false;
+    search.open = true;
+    input.setAttribute("aria-expanded", "true");
+  }
+
+  function renderSearch() {
     var root = $("search-results");
     clear(root);
     search.items.forEach(function (r, i) {
@@ -2196,54 +2246,102 @@
       li.title = "Abrir " + r.symbol + " no gráfico (sem adicionar à watchlist)";
       root.appendChild(li);
     });
-    if (search.busy) {
-      // Fica acima dos resultados anteriores, que continuam na lista até a resposta chegar.
-      var busy = el("li", "search-busy", "buscando…");
-      busy.setAttribute("role", "status");
-      root.insertBefore(busy, root.firstChild);
-    } else if (!search.items.length) {
-      root.appendChild(el("li", "search-empty",
-        "Nenhum papel encontrado para “" + query + "”. Tente o código, ex.: BBAS3. "
-        + "Para buscar o símbolo direto na fonte, escolha o mercado e use Adicionar."));
-    }
-    root.hidden = false;
-    search.open = true;
     search.active = -1;
-    var input = $("add-symbol");
-    input.setAttribute("aria-expanded", "true");
-    input.removeAttribute("aria-activedescendant");
+    $("add-symbol").removeAttribute("aria-activedescendant");
+    syncSearchStatus();
   }
 
-  function runSearch() {
+  function searchKey(r) { return r.symbol + "|" + r.market; }
+
+  function searchRows(list) {
+    return (Array.isArray(list) ? list : []).filter(function (r) {
+      return r && typeof r.symbol === "string" && typeof r.market === "string";
+    });
+  }
+
+  function searchFocused() { return document.activeElement === $("add-symbol"); }
+
+  function searchRequest(query, remote, ctlKey) {
+    abortSearchPhase(ctlKey);
+    var ctl = typeof AbortController === "function" ? new AbortController() : {};
+    search[ctlKey] = ctl;
+    var done = function () { if (search[ctlKey] === ctl) search[ctlKey] = null; };
+    return api("/api/search?q=" + encodeURIComponent(query) + "&remote=" + (remote ? "1" : "0"),
+      ctl.signal ? { signal: ctl.signal } : undefined)
+      .then(function (list) { done(); return list; }, function (err) { done(); throw err; });
+  }
+
+  // Fase 1: só o catálogo local. Mostra assim que chega, sem aviso.
+  function runLocalSearch(token, query) {
+    searchRequest(query, false, "localCtl").then(function (list) {
+      if (token !== search.token || search.remoteDone) return;
+      search.localDone = true;
+      search.items = searchRows(list);
+      if (searchFocused()) renderSearch();
+    }, function () {
+      // Cancelada (token antigo) ou falha: a busca é acessória, fica calada.
+      if (token !== search.token || search.remoteDone) return;
+      search.items = [];
+      if (!search.remotePending) { closeSearch(); return; }  // sem fase remota a caminho: some em silêncio
+      search.localDone = true;
+      if (searchFocused()) renderSearch();
+    });
+  }
+
+  // Fase 2: pode consultar a rede. Substitui a lista só se o resultado mudou.
+  function runRemoteSearch(token, query) {
+    if (token !== search.token) return;
+    search.busyTimer = window.setTimeout(function () {
+      if (token !== search.token || !search.remotePending) return;
+      search.busy = true;
+      if (searchFocused()) syncSearchStatus();
+    }, SEARCH_BUSY_AFTER_MS);
+
+    var finish = function () {
+      window.clearTimeout(search.busyTimer);
+      search.busy = false;
+      search.remotePending = false;
+      search.remoteDone = true;
+      search.localDone = true;
+    };
+    searchRequest(query, true, "remoteCtl").then(function (list) {
+      if (token !== search.token) return;
+      finish();
+      abortSearchPhase("localCtl");  // se a local ainda não voltou, a remota já a contém
+      var rows = searchRows(list);
+      var same = rows.length === search.items.length && rows.every(function (r, i) {
+        return searchKey(r) === searchKey(search.items[i]);
+      });
+      if (same) { if (searchFocused()) syncSearchStatus(); return; }  // mesma lista: só sai o aviso
+      var kept = search.open && search.active >= 0 && search.items[search.active] ? searchKey(search.items[search.active]) : "";
+      search.items = rows;
+      if (!searchFocused()) return;
+      renderSearch();
+      if (kept) {
+        for (var i = 0; i < rows.length; i++) if (searchKey(rows[i]) === kept) { setSearchActive(i); break; }
+      }
+    }, function () {
+      if (token !== search.token) return;
+      finish();  // rede fora do ar: ficam os resultados locais (ou "nenhum papel")
+      if (searchFocused()) syncSearchStatus();
+    });
+  }
+
+  // A cada tecla: invalida o que estava em curso e agenda as duas fases.
+  function searchInputChanged() {
     var query = $("add-symbol").value.trim();
     var token = ++search.token;
-    if (!query) { search.items = []; searchIdle(); closeSearch(); return; }
-
-    // A resposta da consulta anterior seria descartada: cancela para não esperar por ela.
-    if (search.inflight) { try { search.inflight.abort(); } catch (e) { /* já encerrada */ } }
-    var controller = typeof AbortController === "function" ? new AbortController() : {};
-    search.inflight = controller;
-    if (!search.busy && !search.busyTimer) {
-      search.busyTimer = window.setTimeout(function () {
-        search.busyTimer = 0;
-        if (!search.inflight) return;
-        search.busy = true;
-        if (document.activeElement === $("add-symbol")) renderSearch($("add-symbol").value.trim());
-      }, SEARCH_BUSY_AFTER_MS);
+    stopSearchRequests();
+    search.query = query;
+    search.localDone = false;
+    search.remoteDone = false;
+    if (!query) { search.items = []; closeSearch(); return; }
+    // A lista em exibição fica como está até a fase local responder (nada pisca).
+    search.remotePending = query.length >= SEARCH_REMOTE_MIN_CHARS;
+    search.timer = window.setTimeout(function () { runLocalSearch(token, query); }, SEARCH_DEBOUNCE_MS);
+    if (search.remotePending) {
+      search.remoteTimer = window.setTimeout(function () { runRemoteSearch(token, query); }, SEARCH_REMOTE_AFTER_MS);
     }
-
-    api("/api/search?q=" + encodeURIComponent(query), controller.signal ? { signal: controller.signal } : undefined).then(function (list) {
-      if (token !== search.token) return;
-      search.inflight = null;  // já respondeu: nada a cancelar
-      searchIdle();
-      search.items = (Array.isArray(list) ? list : []).filter(function (r) {
-        return r && typeof r.symbol === "string" && typeof r.market === "string";
-      });
-      if (document.activeElement === $("add-symbol")) renderSearch(query);
-    }, function () {
-      // Requisição cancelada (token antigo) ou falha: a busca é acessória, fica calada.
-      if (token === search.token) { search.inflight = null; searchIdle(); search.items = []; closeSearch(); }
-    });
   }
 
   function chooseSearch(index) {
@@ -2260,7 +2358,7 @@
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       if (!count) return;
       event.preventDefault();
-      if (!search.open) { renderSearch($("add-symbol").value.trim()); }
+      if (!search.open) renderSearch();
       var step = event.key === "ArrowDown" ? 1 : -1;
       var next = search.active < 0 ? (step > 0 ? 0 : count - 1) : (search.active + step + count) % count;
       setSearchActive(next);
@@ -2271,10 +2369,9 @@
     } else if (event.key === "Escape") {
       // Invalida também a busca pendente ou em voo, para a lista não reabrir sozinha.
       if (search.open) event.preventDefault();
-      window.clearTimeout(search.timer);
-      search.token++;
-      searchIdle();
-      closeSearch();
+      var shown = search.items;
+      cancelSearch();
+      search.items = shown;  // seta para baixo ou novo foco reabrem o que já estava carregado
     }
   }
 
@@ -2318,12 +2415,11 @@
     var searchInput = $("add-symbol"), searchList = $("search-results");
     searchInput.addEventListener("input", function () {
       showAddError("");
-      window.clearTimeout(search.timer);
-      search.timer = window.setTimeout(runSearch, SEARCH_DEBOUNCE_MS);
+      searchInputChanged();
     });
     searchInput.addEventListener("keydown", searchKeydown);
     searchInput.addEventListener("focus", function () {
-      if (search.items.length && searchInput.value.trim()) renderSearch(searchInput.value.trim());
+      if (search.items.length && searchInput.value.trim()) renderSearch();
     });
     searchInput.addEventListener("blur", function () { window.setTimeout(closeSearch, 120); });
     // mousedown não tira o foco do campo; a escolha acontece no click.
