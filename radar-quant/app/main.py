@@ -12,7 +12,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import analysis, catalog, db, news, screener, service, universe
+from app import analysis, catalog, db, names, news, screener, search, service, universe
 from app.config import INTERVALS, INTRADAY, MARKETS, get_settings, normalize_symbol
 from app.providers.base import ProviderError, UnknownSymbol
 from app.stats.portfolio import PortfolioError
@@ -72,6 +72,25 @@ async def refresh_safely(app: FastAPI) -> None:
         log.exception("falha no refresh em segundo plano")
 
 
+async def learn_names_safely(app: FastAPI, symbols: list[str]) -> None:
+    """Aprende o nome completo dos papéis da B3 ainda sem alias; pulado no modo sintético, erros só registrados."""
+    if app.state.settings.provider == "synthetic" or not symbols:
+        return
+    try:
+        await names.learn_names(app.state.conn, "B3", symbols)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("falha ao aprender nomes de papéis")
+
+
+def spawn(app: FastAPI, coro) -> None:
+    """Tarefa em segundo plano, cancelada no encerramento junto com as demais."""
+    task = asyncio.create_task(coro)
+    app.state.tasks.add(task)
+    task.add_done_callback(app.state.tasks.discard)
+
+
 def next_sleep(has_errors: bool, short_retries: int, refresh_hours: float) -> tuple[float, int]:
     """(espera em segundos, novo contador de esperas curtas).
 
@@ -92,7 +111,9 @@ async def loop_refresh(app: FastAPI) -> None:
     while True:
         await refresh_safely(app)
         await refresh_catalog_safely(app)
-        has_errors = any(a["last_error"] for a in db.list_assets(app.state.conn))
+        assets = await asyncio.to_thread(db.list_assets, app.state.conn)
+        await learn_names_safely(app, [a["symbol"] for a in assets if a["market"] == "B3"])
+        has_errors = any(a["last_error"] for a in assets)
         seconds, short_retries = next_sleep(has_errors, short_retries, app.state.settings.refresh_hours)
         await asyncio.sleep(seconds)
 
@@ -109,10 +130,12 @@ async def loop_universe(app: FastAPI) -> None:
         except Exception:
             log.exception("falha na passada do universo")
         try:
-            has_members = bool(await asyncio.to_thread(db.index_members, app.state.conn))
+            members = await asyncio.to_thread(db.index_members, app.state.conn)
         except Exception:
-            has_members = False
-        await asyncio.sleep(UNIVERSE_CHECK_SECONDS if has_members else UNIVERSE_WAIT_SECONDS)
+            members = []
+        # a cada verificação (mesmo sem passada devida): 40 nomes por vez até não faltar nenhum
+        await learn_names_safely(app, [m["symbol"] for m in members if m["market"] == "B3"])
+        await asyncio.sleep(UNIVERSE_CHECK_SECONDS if members else UNIVERSE_WAIT_SECONDS)
 
 
 @asynccontextmanager
@@ -177,9 +200,9 @@ def create_app() -> FastAPI:
                 "universe": {"total": len(members), "ready": len(ready)}}
 
     @app.get("/api/search")
-    def search(request: Request, q: Annotated[str, Query(max_length=64)] = "",
-               limit: Annotated[int, Query(ge=1, le=25)] = 12):
-        return db.search_catalog(conn(request), q, limit)
+    async def search_assets(request: Request, q: Annotated[str, Query(max_length=64)] = "",
+                            limit: Annotated[int, Query(ge=1, le=25)] = 12):
+        return await search.search(conn(request), q, limit, request.app.state.settings)
 
     @app.get("/api/assets")
     def list_assets(request: Request):
@@ -194,6 +217,9 @@ def create_app() -> FastAPI:
         try:
             before = db.find_asset(c, normalize_symbol(body.symbol, body.market), body.market)
             asset = await service.open_asset(c, body.symbol, body.market, request.app.state.settings)
+            if (asset["market"] == "B3" and request.app.state.settings.provider != "synthetic"
+                    and await asyncio.to_thread(db.missing_alias, c, "B3", [asset["symbol"]])):
+                spawn(request.app, learn_names_safely(request.app, [asset["symbol"]]))  # não bloqueia a resposta
             return asset, before is None or before["last_refresh"] != asset["last_refresh"]
         except UnknownSymbol:
             raise HTTPException(422, f"símbolo não encontrado em {body.market}")
@@ -300,9 +326,7 @@ def create_app() -> FastAPI:
     async def refresh(request: Request):
         if request.app.state.refresh_lock.locked():
             return {"status": "em andamento"}
-        task = asyncio.create_task(refresh_safely(request.app))
-        request.app.state.tasks.add(task)
-        task.add_done_callback(request.app.state.tasks.discard)
+        spawn(request.app, refresh_safely(request.app))
         return {"status": "agendado"}
 
     app.mount("/", StaticFiles(directory=STATIC, html=True), name="static")

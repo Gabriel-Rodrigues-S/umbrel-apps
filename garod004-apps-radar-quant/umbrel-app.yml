@@ -4,7 +4,7 @@ name: Radar Quant
 tagline: Busca em todo o mercado, screener, curto prazo e notícias com evidência estatística
 icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-radar-quant/icon.svg
 category: finance
-version: '1.1.0'
+version: '1.1.1'
 port: 8430
 description: >-
   Radar estatístico de mercados: pesquise qualquer papel da B3 e dos EUA e as
@@ -29,6 +29,10 @@ path: ''
 defaultUsername: ''
 defaultPassword: ''
 releaseNotes: >-
+  1.1.1: a busca agora encontra o papel pelo nome da empresa (por exemplo,
+  "banco do brasil" sugere BBAS3) além do código, e todo papel mostra o nome
+  completo da empresa. Os dados das versões anteriores são preservados.
+
   1.1.0: busca em todo o catálogo da B3 e dos EUA e abertura de qualquer ativo
   sob demanda, screener pré-analisado dos índices, setups de curto prazo com
   evidência, notícias por ativo e doze intervalos de gráfico (com intraday).

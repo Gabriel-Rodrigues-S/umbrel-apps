@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS rf_rates (
 """
 _UPSERT_CANDLE = ("INSERT OR REPLACE INTO candles (asset_id, date, open, high, low, close, volume) "
                   "VALUES (?, ?, ?, ?, ?, ?, ?)")
-SCHEMA_VERSION = 1  # PRAGMA user_version: 1.0.0 = 0, 1.1.0 = 1
+SCHEMA_VERSION = 2  # PRAGMA user_version: 1.0.0 = 0, 1.1.0 = 1, 1.1.1 = 2
 _MIGRATION_1 = (
     """CREATE TABLE IF NOT EXISTS catalog (
         symbol TEXT NOT NULL, market TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL,
@@ -54,6 +54,7 @@ _MIGRATION_1 = (
     "CREATE INDEX IF NOT EXISTS idx_catalog_market ON catalog(market)",
     "CREATE INDEX IF NOT EXISTS idx_assets_watch ON assets(watch)",
 )
+_MIGRATION_2 = ("ALTER TABLE catalog ADD COLUMN alias TEXT",)  # nome completo aprendido (1.1.1)
 MIN_TRIM_CANDLES = 250  # lote menor que isso não é uma janela confiável para apagar histórico
 
 
@@ -87,19 +88,28 @@ def connect(path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _columns(conn, table: str) -> set[str]:
+    return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
 def _migrate(conn) -> None:
-    """Leva um banco 1.0.0 (ou recém-criado) ao schema atual, numa transação; idempotente."""
-    if conn.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
+    """Leva um banco 1.0.0 ou 1.1.0 (ou recém-criado) ao schema atual, numa transação; idempotente."""
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version >= SCHEMA_VERSION:
         return
     try:
         conn.execute("BEGIN")
-        cols = {r["name"] for r in conn.execute("PRAGMA table_info(assets)")}
-        if "watch" not in cols:
-            conn.execute("ALTER TABLE assets ADD COLUMN watch INTEGER NOT NULL DEFAULT 1")
-        if "last_viewed" not in cols:
-            conn.execute("ALTER TABLE assets ADD COLUMN last_viewed TEXT")
-        for stmt in _MIGRATION_1:
-            conn.execute(stmt)
+        if version < 1:
+            cols = _columns(conn, "assets")
+            if "watch" not in cols:
+                conn.execute("ALTER TABLE assets ADD COLUMN watch INTEGER NOT NULL DEFAULT 1")
+            if "last_viewed" not in cols:
+                conn.execute("ALTER TABLE assets ADD COLUMN last_viewed TEXT")
+            for stmt in _MIGRATION_1:
+                conn.execute(stmt)
+        if "alias" not in _columns(conn, "catalog"):
+            for stmt in _MIGRATION_2:
+                conn.execute(stmt)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")  # transacional no SQLite
         conn.commit()
     except BaseException:
@@ -240,13 +250,15 @@ def _split(indices: str) -> list[str]:
 
 
 def _catalog_dict(r) -> dict:
+    """Linha do catálogo para os chamadores: `name` é o nome exibido (alias, se houver)."""
     d = dict(r)
+    d["name"] = d.pop("alias", None) or d["name"]
     d["indices"] = _split(d["indices"])
     return d
 
 
 def replace_catalog_market(conn, market: str, rows: Iterable[tuple[str, str, str]]) -> int:
-    """Troca o catálogo do mercado por (symbol, name, kind); quem continua mantém `indices`.
+    """Troca o catálogo do mercado por (symbol, name, kind); quem continua mantém `indices` e `alias`.
 
     `rows` vazio não apaga nada e devolve 0: fonte que falhou não pode zerar o catálogo.
     """
@@ -254,13 +266,46 @@ def replace_catalog_market(conn, market: str, rows: Iterable[tuple[str, str, str
     if not new:
         return 0
     with _write(conn):
-        old = {r["symbol"]: r["indices"] for r in
-               conn.execute("SELECT symbol, indices FROM catalog WHERE market = ?", (market,))}
+        old = {r["symbol"]: (r["indices"], r["alias"]) for r in
+               conn.execute("SELECT symbol, indices, alias FROM catalog WHERE market = ?", (market,))}
         conn.execute("DELETE FROM catalog WHERE market = ?", (market,))
         conn.executemany(
-            "INSERT INTO catalog (symbol, market, name, kind, indices) VALUES (?, ?, ?, ?, ?)",
-            [(sym, market, name, kind, old.get(sym, "")) for sym, (name, kind) in new.items()])
+            "INSERT INTO catalog (symbol, market, name, kind, indices, alias) VALUES (?, ?, ?, ?, ?, ?)",
+            [(sym, market, name, kind, *old.get(sym, ("", None))) for sym, (name, kind) in new.items()])
     return len(new)
+
+
+def upsert_catalog_entry(conn, symbol: str, market: str, name: str, kind: str) -> None:
+    """Insere o papel se não existir; quem já existe fica como está (nome, índices e alias)."""
+    with _write(conn):
+        conn.execute("INSERT OR IGNORE INTO catalog (symbol, market, name, kind, indices) VALUES (?, ?, ?, ?, '')",
+                     (symbol, market, name, kind))
+
+
+def set_alias(conn, symbol: str, market: str, alias: str) -> bool:
+    """Grava o nome completo aprendido; False se o papel não está no catálogo."""
+    with _write(conn):
+        return conn.execute("UPDATE catalog SET alias = ? WHERE symbol = ? AND market = ?",
+                            (alias, symbol, market)).rowcount > 0
+
+
+def missing_alias(conn, market: str, symbols: Iterable[str] | None = None) -> list[str]:
+    """Papéis do mercado sem alias, em ordem alfabética; com `symbols`, só eles (na ordem recebida)."""
+    with _lock:
+        missing = [r["symbol"] for r in conn.execute(
+            "SELECT symbol FROM catalog WHERE market = ? AND (alias IS NULL OR alias = '') ORDER BY symbol",
+            (market,))]
+    if symbols is None:
+        return missing
+    have = set(missing)
+    return [s for s in dict.fromkeys(symbols) if s in have]
+
+
+def all_catalog(conn) -> list[dict]:
+    """Catálogo inteiro com o nome cru da fonte em `name` e o aprendido em `alias` (para o índice de busca)."""
+    with _lock:
+        rows = conn.execute("SELECT * FROM catalog ORDER BY market, symbol").fetchall()
+    return [{**dict(r), "indices": _split(r["indices"])} for r in rows]
 
 
 def set_index_members(conn, index: str, market: str, symbols: Iterable[str]) -> int:
@@ -283,7 +328,7 @@ def set_index_members(conn, index: str, market: str, symbols: Iterable[str]) -> 
 
 
 def search_catalog(conn, q: str, limit: int = 12) -> list[dict]:
-    """Prefixo de símbolo primeiro, depois nome contendo `q`; curingas do LIKE escapados."""
+    """Prefixo de símbolo primeiro, depois nome (ou alias) contendo `q`; curingas do LIKE escapados."""
     q = q.strip()
     if not q:
         return []
@@ -291,6 +336,7 @@ def search_catalog(conn, q: str, limit: int = 12) -> list[dict]:
     with _lock:
         rows = conn.execute(
             "SELECT * FROM catalog WHERE symbol LIKE :pre ESCAPE '\\' OR name LIKE :sub ESCAPE '\\' "
+            "OR alias LIKE :sub ESCAPE '\\' "
             "ORDER BY symbol LIKE :pre ESCAPE '\\' DESC, symbol LIMIT :lim",
             {"pre": esc + "%", "sub": "%" + esc + "%", "lim": limit}).fetchall()
     return [_catalog_dict(r) for r in rows]

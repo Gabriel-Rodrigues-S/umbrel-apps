@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
-from . import db
+from . import db, search
 from .config import INDICES
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; RadarQuantBot/1.0)"}
@@ -223,6 +223,13 @@ def _stamp(conn, key: str = STAMP_KEY) -> None:
 
 async def refresh_catalog(conn, settings, transport=None) -> dict:
     """Cada fonte em `try` próprio; o que falhar (ou vier encolhido) mantém o que já estava gravado."""
+    try:
+        return await _refresh_catalog(conn, settings, transport)
+    finally:
+        search.invalidate()  # o índice em memória da busca é refeito a partir do catálogo novo
+
+
+async def _refresh_catalog(conn, settings, transport) -> dict:
     out = {"markets": {}, "indices": {}, "errors": []}
     if settings.provider == "synthetic":
         markets, indices = synthetic_catalog()

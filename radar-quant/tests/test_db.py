@@ -251,6 +251,56 @@ def test_search_catalog_entradas_hostis(conn, q):
     assert db.catalog_count(conn) == 4
 
 
+# ---------- 1.1.1: alias (nome completo aprendido) ----------
+
+def test_nome_exibido_e_o_alias_quando_existe(conn):
+    _catalogo(conn)
+    db.set_index_members(conn, "IBOV", "B3", ["PETR4", "VALE3"])
+    assert db.set_alias(conn, "PETR4", "B3", "Petróleo Brasileiro S.A. - Petrobras") is True
+    assert db.set_alias(conn, "NADA3", "B3", "Nada") is False
+    assert db.catalog_entry(conn, "PETR4", "B3") == {
+        "symbol": "PETR4", "market": "B3", "name": "Petróleo Brasileiro S.A. - Petrobras", "kind": "Ação",
+        "indices": ["IBOV"]}
+    assert db.catalog_entry(conn, "VALE3", "B3")["name"] == "Vale ON"
+    assert {m["symbol"]: m["name"] for m in db.index_members(conn, "IBOV")} == {
+        "PETR4": "Petróleo Brasileiro S.A. - Petrobras", "VALE3": "Vale ON"}
+    achados = db.search_catalog(conn, "brasileiro")
+    assert [(r["symbol"], r["name"]) for r in achados] == [("PETR4", "Petróleo Brasileiro S.A. - Petrobras")]
+
+
+def test_replace_catalog_preserva_alias(conn):
+    _catalogo(conn)
+    db.set_alias(conn, "PETR4", "B3", "Petrobras completo")
+    db.replace_catalog_market(conn, "B3", [("PETR4", "PETROBRAS", "Ação"), ("ABEV3", "AMBEV S.A.", "Ação")])
+    assert db.all_catalog(conn) == [
+        {"symbol": "ABEV3", "market": "B3", "name": "AMBEV S.A.", "kind": "Ação", "indices": [], "alias": None},
+        {"symbol": "PETR4", "market": "B3", "name": "PETROBRAS", "kind": "Ação", "indices": [],
+         "alias": "Petrobras completo"}]
+
+
+def test_upsert_catalog_entry_nao_sobrescreve(conn):
+    _catalogo(conn)
+    db.set_index_members(conn, "IBOV", "B3", ["PETR4"])
+    db.set_alias(conn, "PETR4", "B3", "Petrobras completo")
+    db.upsert_catalog_entry(conn, "PETR4", "B3", "Outro nome", "ETF")
+    db.upsert_catalog_entry(conn, "NOVO3", "B3", "Novo S.A.", "Ação")
+    cat = {c["symbol"]: c for c in db.all_catalog(conn)}
+    assert cat["PETR4"] == {"symbol": "PETR4", "market": "B3", "name": "Petrobras PN", "kind": "Ação",
+                            "indices": ["IBOV"], "alias": "Petrobras completo"}
+    assert cat["NOVO3"] == {"symbol": "NOVO3", "market": "B3", "name": "Novo S.A.", "kind": "Ação",
+                            "indices": [], "alias": None}
+
+
+def test_missing_alias(conn):
+    _catalogo(conn)
+    db.replace_catalog_market(conn, "US", [("AAPL", "Apple", "Ação")])
+    db.set_alias(conn, "VALE3", "B3", "Vale S.A.")
+    assert db.missing_alias(conn, "B3") == ["ITUB4", "PETR4", "XPET3"]
+    assert db.missing_alias(conn, "B3", ["XPET3", "VALE3", "FORA3", "PETR4", "XPET3"]) == ["XPET3", "PETR4"]
+    assert db.missing_alias(conn, "B3", []) == []
+    assert db.missing_alias(conn, "US") == ["AAPL"]
+
+
 # ---------- 1.1: screener, notícias, meta ----------
 
 def test_screener_ida_e_volta(conn):
