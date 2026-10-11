@@ -357,3 +357,17 @@ def test_query_stale_rows(conn):
     # cripto negocia todo dia: o candle mais novo dela não torna atrasadas as ações
     put(conn, add(conn, "BTC", "CRYPTO"), as_of="2026-10-08")
     assert screener.query(conn)["stale_rows"] == 2
+
+
+def test_query_devolve_o_nome_atual_do_catalogo(conn):
+    """1.1.1: linha gravada com o nome antigo mostra o nome exibido de agora (alias aprendido depois)."""
+    universe.ensure_assets(conn)
+    a = db.find_asset(conn, "BBAS3", "B3")
+    put(conn, a, name="BCO BRASIL S.A.")
+    assert screener.query(conn, scope="IBOV")["rows"][0]["name"] == "Banco do Brasil ON"
+    db.set_alias(conn, "BBAS3", "B3", "Banco do Brasil S.A.")
+    assert screener.query(conn, scope="IBOV")["rows"][0]["name"] == "Banco do Brasil S.A."
+    assert db.load_screener(conn, [a["id"]])[0]["payload"]["name"] == "BCO BRASIL S.A."  # só a resposta muda
+    fora = add(conn, "ZZZZ3")  # fora do catálogo: fica o nome gravado
+    put(conn, fora, name="Nome gravado")
+    assert screener.query(conn)["rows"][0]["name"] == "Nome gravado"

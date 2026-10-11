@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app import catalog, db
+from app import catalog, db, search
 from app.config import Settings
 
 FIX = Path(__file__).parent / "fixtures"
@@ -335,3 +335,17 @@ def test_falha_parcial_depois_de_carimbo_valido_e_sucesso_seguinte(conn, tmp_pat
     db.set_meta(conn, "catalog_attempt_at", old)
     run(catalog.refresh_catalog(conn, settings(tmp_path, "synthetic")))  # sucesso completo
     assert not catalog.catalog_is_stale(conn)
+
+
+def test_refresh_derruba_o_indice_de_busca(conn, tmp_path):
+    """1.1.1: o índice em memória da busca é reconstruído depois de qualquer atualização do catálogo."""
+    search.invalidate()
+    assert search.search_local(conn, "banco do brasil") == []  # índice construído com o catálogo vazio
+    run(catalog.refresh_catalog(conn, settings(tmp_path, "synthetic")))
+    assert search.search_local(conn, "banco do brasil")[0]["symbol"] == "BBAS3"
+    db.replace_catalog_market(conn, "CRYPTO", [("ZZZ", "Moeda Zzz", "Cripto")])
+    assert search.search_local(conn, "zzz") == []  # escrita direta no banco não derruba sozinha
+    run(catalog.refresh_catalog(conn, replace(settings(tmp_path), provider="live"),
+                                httpx.MockTransport(lambda r: httpx.Response(500))))  # live, tudo fora do ar
+    assert search.search_local(conn, "dogecoin")[0]["symbol"] == "DOGE"
+    assert search.search_local(conn, "zzz") == []  # o catálogo de cripto voltou à lista fixa

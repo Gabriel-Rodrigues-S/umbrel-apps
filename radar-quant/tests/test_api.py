@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app import analysis, catalog, db, main, news, screener, service, universe
+from app import analysis, catalog, db, main, names, news, screener, search, service, universe
 from app.config import INTERVALS, get_settings
 from app.providers.base import ProviderError
 from app.main import create_app, next_sleep
@@ -19,6 +19,8 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("RADAR_UNIVERSE", "0")
     analysis.invalidate()
     service.clear_intraday_cache()
+    search.invalidate()
+    search.clear_remote_cache()
     with TestClient(create_app()) as c:
         asyncio.run(service.refresh_all(c.app.state.conn, get_settings()))
         analysis.invalidate()
@@ -535,3 +537,117 @@ def test_ativo_some_entre_abrir_e_resumir(client, monkeypatch, route):
     monkeypatch.setattr(service, "open_asset", fantasma)
     r = TestClient(client.app, raise_server_exceptions=False).post(route, json={"symbol": "AMZN", "market": "US"})
     assert r.status_code == 502 and r.json()["detail"] == "ativo removido durante a abertura"
+
+
+# ---------- 1.1.1: busca por nome e nome completo ----------
+
+def test_search_por_nome_da_empresa(client):
+    r = client.get("/api/search?q=banco%20do%20brasil").json()
+    assert r[0] == {"symbol": "BBAS3", "market": "B3", "name": "Banco do Brasil ON", "kind": "Ação",
+                    "indices": ["IBOV", "IBRA"]}
+    assert client.get("/api/search?q=itau").json()[0]["symbol"] == "ITUB4"  # nome com acento no catálogo
+    assert client.get("/api/search?q=ita%C3%BA").json()[0]["symbol"] == "ITUB4"
+    for q in ("BBAS3", "bbas3", "bbas3.sa"):
+        assert client.get(f"/api/search?q={q}").json()[0]["symbol"] == "BBAS3"
+    assert client.get("/api/search?q=%20%20").json() == []
+
+
+def test_search_nao_vai_a_rede_no_sintetico(client, monkeypatch):
+    async def boom(*a, **k):
+        raise AssertionError("modo sintético não acessa a rede")
+    monkeypatch.setattr(search, "search_remote", boom)
+    assert client.get("/api/search?q=inexistente").json() == []
+
+
+def test_alias_aparece_em_assets_screener_e_carteira(client):
+    conn = client.app.state.conn
+    assert all(w["name"] for w in client.get("/api/portfolio").json()["weights"])
+    assert set(client.get("/api/portfolio").json()["weights"][0]) == {"id", "symbol", "market", "weight", "name"}
+    assert next(r for r in client.get("/api/screener").json()["rows"] if r["symbol"] == "BBAS3")["name"] \
+        == "Banco do Brasil ON"  # linha gravada com o nome antigo
+    assert db.set_alias(conn, "BBAS3", "B3", "Banco do Brasil S.A.")
+    nome = lambda itens: next(i["name"] for i in itens if i["symbol"] == "BBAS3")
+    assert nome(client.get("/api/assets").json()) == "Banco do Brasil S.A."
+    assert nome(client.get("/api/screener").json()["rows"]) == "Banco do Brasil S.A."
+    assert nome(client.get("/api/portfolio").json()["weights"]) == "Banco do Brasil S.A."
+
+
+def _live(client, monkeypatch, aprendidos):
+    """Finge o modo live só para o aprendizado de nomes (os dados continuam sintéticos)."""
+    from dataclasses import replace
+
+    async def fake_learn(conn, market, symbols, **kw):
+        aprendidos.append((market, list(symbols)))
+        return 0
+    real, abrir = client.app.state.settings, service.open_asset
+    monkeypatch.setattr(names, "learn_names", fake_learn)
+    monkeypatch.setattr(service, "open_asset", lambda c, s, m, st: abrir(c, s, m, real))
+    client.app.state.settings = replace(client.app.state.settings, provider="live")
+
+
+def _sem_tarefas(client, espera=2.0):
+    """A tarefa em segundo plano termina e sai de `app.state.tasks` (roda no laço do TestClient)."""
+    import time
+    fim = time.monotonic() + espera
+    while client.app.state.tasks and time.monotonic() < fim:
+        time.sleep(0.01)
+    return not client.app.state.tasks
+
+
+def test_open_dispara_aprendizado_do_nome_em_segundo_plano(client, monkeypatch):
+    aprendidos = []
+    monkeypatch.setattr(names, "learn_names", lambda *a, **k: aprendidos.append("sintético"))
+    assert _open(client, "WEGE3", "B3").status_code == 200 and aprendidos == []  # sintético: nada de rede
+    _live(client, monkeypatch, aprendidos)
+    assert _open(client, "WEGE3", "B3").status_code == 200
+    assert _open(client, "AMZN", "US").status_code == 200  # só B3
+    db.set_alias(client.app.state.conn, "WEGE3", "B3", "WEG S.A.")
+    assert _open(client, "WEGE3", "B3").status_code == 200  # já tem alias: não dispara
+    assert _sem_tarefas(client) and aprendidos == [("B3", ["WEGE3"])]
+
+
+def test_nome_aprendido_no_open_nunca_derruba(client, monkeypatch):
+    async def boom(*a, **k):
+        raise RuntimeError("yahoo caiu")
+    _live(client, monkeypatch, [])
+    monkeypatch.setattr(names, "learn_names", boom)
+    assert _open(client, "WEGE3", "B3").status_code == 200
+    assert _sem_tarefas(client)
+
+
+def test_lacos_aprendem_nomes_da_watchlist_e_dos_indices(client, monkeypatch):
+    aprendidos = []
+
+    async def nada(*a, **k):
+        return None
+
+    async def fake_sleep(s):
+        raise asyncio.CancelledError
+
+    _live(client, monkeypatch, aprendidos)
+    monkeypatch.setattr(main, "refresh_safely", nada)
+    monkeypatch.setattr(main, "refresh_catalog_safely", nada)
+    monkeypatch.setattr(universe, "universe_due", lambda conn, now: False)
+    monkeypatch.setattr(main.asyncio, "sleep", fake_sleep)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(main.loop_refresh(client.app))
+    assert aprendidos == [("B3", ["PETR4", "VALE3", "ITUB4", "BBAS3", "WEGE3", "BOVA11"])]  # só os B3 da watchlist
+    aprendidos.clear()
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(main.loop_universe(client.app))  # sem passada devida: aprende mesmo assim
+    assert aprendidos == [("B3", ["ABCD3", "BBAS3", "EFGH4", "ITUB4", "MNOP3", "PETR4", "VALE3", "WEGE3"])]
+
+
+def test_falha_ao_aprender_nomes_nao_derruba_os_lacos(client, monkeypatch):
+    async def boom(*a, **k):
+        raise RuntimeError("yahoo caiu")
+
+    async def fake_sleep(s):
+        raise asyncio.CancelledError
+
+    _live(client, monkeypatch, [])
+    monkeypatch.setattr(names, "learn_names", boom)
+    monkeypatch.setattr(universe, "universe_due", lambda conn, now: False)
+    monkeypatch.setattr(main.asyncio, "sleep", fake_sleep)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(main.loop_universe(client.app))  # chegou ao sleep

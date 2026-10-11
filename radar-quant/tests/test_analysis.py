@@ -223,3 +223,15 @@ def test_session_open(conn, monkeypatch):
     assert analysis.asset_summary(conn, a)["session_open"] is False
     monkeypatch.setattr(analysis, "_now", lambda: t(8, 15))
     assert analysis.analyze_asset(conn, a)["session_open"] is False
+
+
+def test_nome_exibido_e_o_alias_no_resumo_e_na_carteira(conn):
+    """1.1.1: `asset_summary` e os pesos da carteira trazem o nome exibido (alias quando existe)."""
+    db.replace_catalog_market(conn, "B3", [("BBAS3", "BCO BRASIL S.A.", "Ação")])
+    b = asset(conn, "BBAS3")
+    assert analysis.asset_summary(conn, b)["name"] == "BCO BRASIL S.A."
+    db.set_alias(conn, "BBAS3", "B3", "Banco do Brasil S.A.")
+    assert analysis.asset_summary(conn, b)["name"] == "Banco do Brasil S.A."
+    ws = {w["symbol"]: w for w in analysis.portfolio(conn, "risk_parity")["weights"]}
+    assert ws["BBAS3"]["name"] == "Banco do Brasil S.A." and ws["BTC"]["name"] is None  # fora do catálogo
+    assert set(ws["BBAS3"]) == {"id", "symbol", "market", "weight", "name"}

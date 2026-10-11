@@ -111,11 +111,12 @@ def _stale_rows(rows: list[dict]) -> int:
 
 
 def _public(conn, row: dict) -> dict:
-    """Linha da resposta: sem `pool`, com o nome que faltava (gravada antes do catálogo) e `session_open`."""
+    """Linha da resposta: sem `pool`, com o nome exibido atual do catálogo (a linha pode ter sido gravada
+    antes de o catálogo chegar ou de o nome completo ser aprendido) e `session_open`."""
     out = {k: v for k, v in row.items() if k != "pool"}
-    if out.get("name") is None:
-        entry = db.catalog_entry(conn, row["symbol"], row["market"])
-        out["name"] = entry["name"] if entry else None
+    entry = db.catalog_entry(conn, row["symbol"], row["market"])
+    if entry:
+        out["name"] = entry["name"]
     out["session_open"] = analysis.session_open(row["market"], row.get("as_of"))
     return out
 

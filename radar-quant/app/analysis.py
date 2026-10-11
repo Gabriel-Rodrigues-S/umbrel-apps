@@ -188,6 +188,7 @@ def portfolio(conn, method: str, market: str | None = None) -> dict:
         by_label[label] = a
     res = build_portfolio(pd.concat(cols, axis=1, join="inner").iloc[1:], method)
     weights = [{"id": by_label[k]["id"], "symbol": by_label[k]["symbol"], "market": by_label[k]["market"],
+                "name": (db.catalog_entry(conn, by_label[k]["symbol"], by_label[k]["market"]) or {}).get("name"),
                 "weight": w} for k, w in sorted(res["weights"].items(), key=lambda kv: -kv[1])]
     return clean({"method": method, "market": market, "weights": weights,
                   "correlation": res["correlation"], "stats": res["stats"], "weeks": res["weeks"],
