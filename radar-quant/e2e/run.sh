@@ -206,6 +206,30 @@ setsel "#screener-scope" "watchlist"
 wait_true "screener volta à watchlist" "$QA('#ranking-table tbody tr[data-asset-id]').length === $N_OK"
 agent-browser click "#tab-chart" >/dev/null
 
+# ===================== 1.1.1 =====================
+# --- busca por nome da empresa e por código ---
+first_result() { js "(() => { const e = $Q('#search-results [data-symbol]'); return e ? e.dataset.symbol : ''; })()"; }
+search_for() { # texto digitado, símbolo esperado em primeiro
+  agent-browser fill "#add-symbol" "$1" >/dev/null
+  wait_true "busca \"$1\" sugere $2 em primeiro" "(() => { const e = $Q('#search-results [data-symbol]'); return !!e && e.dataset.symbol === '$2'; })()"
+}
+search_for "banco do brasil" "BBAS3"
+search_for "brasil banco" "BBAS3"
+search_for "bbas3" "BBAS3"
+search_for "BBAS3" "BBAS3"
+agent-browser fill "#add-symbol" "itau" >/dev/null
+wait_true "busca sem acento encontra o Itaú" "!!$Q('#search-results [data-symbol=\"ITUB4\"]')"
+check "resultado da busca mostra o nome da empresa" "$(js "/ita[uú]/i.test($Q('#search-results [data-symbol=\"ITUB4\"]').textContent)")" "true"
+agent-browser press Escape >/dev/null
+agent-browser fill "#add-symbol" "" >/dev/null
+
+# --- nome da empresa em todo papel ---
+check "watchlist mostra o nome das empresas" "$(js "$QA('#watchlist [data-asset-id] .wl-name').length >= 5")" "true"
+check "nome da Petrobras na watchlist" "$(js "/petr[oó]/i.test(($Q('#watchlist [data-symbol=\"PETR4\"]').closest('[data-asset-id]') || $Q('#watchlist [data-symbol=\"PETR4\"]')).textContent)")" "true"
+agent-browser click "#tab-portfolio" >/dev/null
+wait_true "carteira mostra o nome das empresas" "/petr[oó]|vale|apple|ita[uú]|weg/i.test($Q('#portfolio-weights').textContent)"
+agent-browser click "#tab-chart" >/dev/null
+
 # --- tema ---
 TH=$(js "document.documentElement.dataset.theme || ''")
 agent-browser click "#theme-toggle" >/dev/null
