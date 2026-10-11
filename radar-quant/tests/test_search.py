@@ -195,14 +195,14 @@ def test_ordem_itau_e_petrobras(conn):
 
 
 def test_penalidade_de_direitos_so_nos_sufixos_1_2_9_10(conn):
-    penalizados = {e[0] for e in search._index(conn) if e[6]}
+    penalizados = {e[0] for e in search._index(conn)[0] if e[6]}
     assert penalizados == {"BBDC1"}  # BOVA11, a unit SANB11 e as ações 3/4 ficam de fora
     db.replace_catalog_market(conn, "B3", [(s, "X S.A.", "Ação") for s in (
         "PETR1", "PETR2", "PETR9", "PETR10", "PETR3", "PETR4", "PETR5", "PETR6", "PETR7", "PETR8", "PETR11",
         "BOVA11", "SANB11", "PETR12", "ABCDE1", "PETR34")])
     db.replace_catalog_market(conn, "US", [("ABCD1", "X Inc.", "Ação")])  # só vale para a B3
     search.invalidate()
-    assert {e[0] for e in search._index(conn) if e[6]} == {"PETR1", "PETR2", "PETR9", "PETR10"}
+    assert {e[0] for e in search._index(conn)[0] if e[6]} == {"PETR1", "PETR2", "PETR9", "PETR10"}
     pontos = {r[2]["symbol"]: r[0] for r in search._rank(conn, "x")}
     assert pontos["PETR5"] - pontos["PETR1"] == 250 and pontos["BOVA11"] == pontos["PETR11"] == pontos["PETR5"]
 
@@ -346,18 +346,24 @@ def test_search_insere_papel_fora_do_catalogo(conn, tmp_path):
               {"symbol": "MSFT", "exchange": "NMS", "shortname": "Microsoft Corporation", "quoteType": "EQUITY"}]
     out = run(search.search(conn, "weg", 12, settings(tmp_path), transport(quotes)))
     assert out == [{"symbol": "MSFT", "market": "US", "name": "Microsoft Corporation", "kind": "Ação", "indices": []},
-                   {"symbol": "WEGE3", "market": "B3", "name": "Weg S.A.", "kind": "Ação", "indices": []}]
-    assert db.catalog_entry(conn, "WEGE3", "B3")["name"] == "Weg S.A."
+                   {"symbol": "WEGE3", "market": "B3", "name": "WEG S.A.", "kind": "Ação", "indices": []}]
+    assert db.catalog_entry(conn, "WEGE3", "B3")["name"] == "WEG S.A."
     assert syms(search.search_local(conn, "wege3")) == ["WEGE3"]
 
 
+BRADESCO = [
+    {"symbol": "BBDC4.SA", "exchange": "SAO", "longname": "Banco Bradesco S.A.", "quoteType": "EQUITY"},
+    {"symbol": "BBD", "exchange": "NYQ", "longname": "Banco Bradesco S.A. ADR", "quoteType": "EQUITY"}]
+
+
 def test_search_ordem_e_duplicatas(conn, tmp_path):
-    # SANB11 já vem do local (480 pontos): não duplica e fica acima do acerto só remoto (450); limit corta no fim
-    quotes = [eq("SANB11.SA", "Banco Santander (Brasil) S.A."), eq("SAN", "Banco Santander, S.A.", "NYQ")]
-    out = run(search.search(conn, "santander", 12, settings(tmp_path), transport(quotes)))
-    assert [(r["symbol"], r["market"]) for r in out] == [("SANB11", "B3"), ("SAN", "US"), ("BSBR", "US")]
-    assert out[0]["name"] == "Banco Santander (Brasil) S.A."  # o nome recém-aprendido já aparece
-    assert len(run(search.search(conn, "santander", 2, settings(tmp_path), transport(quotes)))) == 2
+    # BBDC4 já vem do local (467,5 pontos): não duplica e fica acima do acerto só remoto (450); limit corta no fim
+    out = run(search.search(conn, "bradesc", 12, settings(tmp_path), transport(BRADESCO)))
+    assert [(r["symbol"], r["market"]) for r in out] == [("BBDC4", "B3"), ("BBD", "US"), ("BBDC3", "B3"),
+                                                         ("BBDC1", "B3")]
+    assert out[0]["name"] == "Banco Bradesco S.A."  # o nome recém-aprendido já aparece
+    search.clear_remote_cache()
+    assert len(run(search.search(conn, "bradesc", 2, settings(tmp_path), transport(BRADESCO)))) == 2
 
 
 def test_search_sintetico_nunca_chama_o_transporte(conn, tmp_path):
@@ -375,8 +381,8 @@ def test_search_simbolo_exato_nao_vai_a_rede(conn, tmp_path, q):
 
 def test_search_remoto_fora_do_ar_devolve_os_locais(conn, tmp_path):
     calls = []
-    out = run(search.search(conn, "santander", 12, settings(tmp_path), transport(calls=calls, status=500)))
-    assert syms(out) == ["SANB11", "BSBR"] and len(calls) == 1
+    out = run(search.search(conn, "bradesc", 12, settings(tmp_path), transport(calls=calls, status=500)))
+    assert syms(out) == ["BBDC4", "BBDC3", "BBDC1"] and len(calls) == 1
     assert run(search.search(conn, "", 12, settings(tmp_path), transport(status=500))) == []
 
 
@@ -402,29 +408,29 @@ def test_reforco_so_quando_o_local_e_fraco(conn, tmp_path, caplog):
               "apple", "weg",  # idem ("weg" também é prefixo de WEGE3)
               "PETR", "petr", "bbd", "itu",  # faixa de prefixo de símbolo
               "itau",  # 625 pontos: já está na faixa de cima
-              "bbas3", "btc"):  # símbolo exato com dígito / de cripto
+              "bbas3", "btc",  # símbolo exato com dígito / de cripto
+              "brasil", "santander", "banco brasil"):  # palavras inteiras do nome
         assert run(search.search(conn, q, 12, live, t)), q
         assert calls == [], q
     with caplog.at_level("INFO", logger="radar.search"):
         assert run(search.search(conn, "inexistente", 12, live, t)) == []  # lista local vazia é fraca
-        assert syms(run(search.search(conn, "santander", 12, live, t))) == ["SANB11", "BSBR"]  # 2 parciais
-        assert len(run(search.search(conn, "brasil", 12, live, t))) == 8  # 8 locais, nenhum resolve
-    assert [c.url.params["q"] for c in calls] == ["inexistente", "santander", "brasil"]
+        assert syms(run(search.search(conn, "bradesc", 12, live, t))) == ["BBDC4", "BBDC3", "BBDC1"]  # parciais
+        assert syms(run(search.search(conn, "petrob", 12, live, t)))[0] == "PETR4"  # palavra pela metade
+    assert [c.url.params["q"] for c in calls] == ["inexistente", "bradesc", "petrob"]
     infos = [r.getMessage() for r in caplog.records if r.name == "radar.search" and r.levelname == "INFO"]
-    assert len(infos) == 3 and "'santander'" in infos[1] and "0 acerto" in infos[1]
+    assert len(infos) == 3 and "'bradesc'" in infos[1] and "0 acerto" in infos[1]
 
 
 def test_simbolo_exato_dos_eua_sem_digito_nao_suprime_o_reforco(conn, tmp_path):
-    db.upsert_catalog_entry(conn, "VIVO", "US", "VivoPower International PLC", "Ação")
-    db.upsert_catalog_entry(conn, "VIVT3", "B3", "TELEF BRASIL S.A.", "Ação")
+    db.upsert_catalog_entry(conn, "ZETA", "US", "ZetaPower International PLC", "Ação")
     search.invalidate()
     calls, live = [], settings(tmp_path)
-    t = transport([eq("VIVT3.SA", "Telefônica Brasil S.A.")], calls=calls)
-    out = run(search.search(conn, "vivo", 12, live, t))
-    assert [(r["symbol"], r["name"]) for r in out] == [("VIVO", "VivoPower International PLC"),
-                                                       ("VIVT3", "Telefônica Brasil S.A.")]
+    t = transport([eq("ZETA3.SA", "Zeta Brasil S.A.")], calls=calls)
+    out = run(search.search(conn, "zeta", 12, live, t))
+    assert [(r["symbol"], r["name"]) for r in out] == [("ZETA", "ZetaPower International PLC"),
+                                                       ("ZETA3", "Zeta Brasil S.A.")]
     assert len(calls) == 1
-    assert syms(run(search.search(conn, "vivt3", 12, live, t))) == ["VIVT3"] and len(calls) == 1  # tem dígito
+    assert syms(run(search.search(conn, "zeta3", 12, live, t))) == ["ZETA3"] and len(calls) == 1  # tem dígito
 
 
 def test_disjuntor_depois_de_falha_e_de_429(monkeypatch):
@@ -467,8 +473,8 @@ def test_busca_interativa_tem_teto_de_tempo(conn, tmp_path, monkeypatch):
 
     monkeypatch.setattr(search, "SEARCH_TIMEOUT", 0.05)
     t0 = time.perf_counter()
-    out = run(search.search(conn, "santander", 12, settings(tmp_path), httpx.MockTransport(lento)))
-    assert syms(out) == ["SANB11", "BSBR"] and time.perf_counter() - t0 < 1  # devolve o que o catálogo tem
+    out = run(search.search(conn, "bradesc", 12, settings(tmp_path), httpx.MockTransport(lento)))
+    assert syms(out) == ["BBDC4", "BBDC3", "BBDC1"] and time.perf_counter() - t0 < 1  # devolve o que o catálogo tem
 
 
 def test_consultas_identicas_em_voo_compartilham_a_requisicao():
@@ -521,9 +527,9 @@ def test_clean_name_descarta_substitutos_e_uso_privado():
 def test_nome_com_substituto_solitario_nao_derruba_a_busca(conn, tmp_path):
     body = json.dumps({"quotes": [eq("BOVA11.SA", "iShares \ud800Ibovespa"), eq("NOVO3.SA", "Novo\udc00 S.A.")]})
     assert "\\ud800" in body
-    for _ in range(2):  # a segunda vem do cache: também não pode falhar
-        out = run(search.search(conn, "ishares", 12, settings(tmp_path), transport(body=body.encode())))
-        assert [(r["symbol"], r["name"]) for r in out] == [("BOVA11", "iShares Ibovespa"), ("NOVO3", "Novo S.A.")]
+    out = run(search.search(conn, "ishares", 12, settings(tmp_path), transport(body=body.encode())))
+    assert [(r["symbol"], r["name"]) for r in out] == [("BOVA11", "iShares Ibovespa"), ("NOVO3", "Novo S.A.")]
+    assert [h["name"] for h in run(search.search_remote("ishares"))] == ["iShares Ibovespa", "Novo S.A."]  # cache
     assert db.catalog_entry(conn, "BOVA11", "B3")["name"] == "iShares Ibovespa"
 
 
@@ -533,13 +539,14 @@ def test_falha_ao_gravar_nao_derruba_a_busca(conn, tmp_path, monkeypatch, caplog
 
     monkeypatch.setattr(db, "set_alias", boom)
     monkeypatch.setattr(db, "upsert_catalog_entry", boom)
-    quotes = [eq("SANB11.SA", "Banco Santander (Brasil) S.A."), eq("SAN", "Banco Santander, S.A.", "NYQ")]
     with caplog.at_level("ERROR", logger="radar.search"):
-        out = run(search.search(conn, "santander", 12, settings(tmp_path), transport(quotes)))
-    assert [(r["symbol"], r["market"]) for r in out] == [("SANB11", "B3"), ("SAN", "US"), ("BSBR", "US")]
-    assert out[1] == {"symbol": "SAN", "market": "US", "name": "Banco Santander, S.A.", "kind": "Ação", "indices": []}
+        out = run(search.search(conn, "bradesc", 12, settings(tmp_path), transport(BRADESCO)))
+    assert [(r["symbol"], r["market"]) for r in out] == [("BBDC4", "B3"), ("BBD", "US"), ("BBDC3", "B3"),
+                                                         ("BBDC1", "B3")]
+    assert out[1] == {"symbol": "BBD", "market": "US", "name": "Banco Bradesco S.A. ADR", "kind": "Ação",
+                      "indices": []}
     assert any(r.name == "radar.search" and r.exc_info for r in caplog.records)
-    assert db.catalog_entry(conn, "SAN", "US") is None
+    assert db.catalog_entry(conn, "BBD", "US") is None and out[0]["name"] == "BCO Bradesco S.A."  # alias não gravou
 
 
 def test_cobertura_zero_quando_o_nome_e_o_proprio_codigo(conn):
@@ -556,7 +563,7 @@ def test_cobertura_zero_quando_o_nome_e_o_proprio_codigo(conn):
 
 def test_nomes_em_maiusculas_saem_legiveis(conn, tmp_path):
     por = {r["symbol"]: r["name"] for r in search.search_local(conn, "banco", limit=25)}
-    assert por["SANB11"] == "Bco Santander (Brasil) S.A." and por["ABCB4"] == "Bco ABC Brasil S.A."
+    assert por["SANB11"] == "BCO Santander (Brasil) S.A." and por["ABCB4"] == "BCO ABC Brasil S.A."
     assert por["BBAS3"] == "Banco do Brasil S.A." and por["BSBR"].startswith("Banco Santander Brasil SA American")
     assert search.search_local(conn, "bova")[0]["name"] == "BOVA11"  # nome igual ao código fica como está
     assert syms(search.search_local(conn, "BCO SANTANDER")) == syms(search.search_local(conn, "bco santander"))
@@ -588,3 +595,115 @@ def test_invalidate_nao_espera_reconstrucao_em_curso(conn):
     assert not travou
     db.set_alias(conn, "BOVA11", "B3", "iShares Ibovespa")  # e a invalidação feita durante a obra vale
     assert search.search_local(conn, "ishares") and search.search_local(conn, "ishares")[0]["symbol"] == "BOVA11"
+
+
+# ---------- último ajuste: duas fases, local forte por palavra inteira, apelidos de marca ----------
+
+def test_remote_false_nunca_toca_a_rede(conn, tmp_path):
+    calls = []
+    t = transport([eq("NOVO3.SA", "Novo S.A.")], calls=calls)
+    assert run(search.search(conn, "inexistente", 12, settings(tmp_path), t, remote=False)) == []
+    assert run(search.search_detail(conn, "inexistente", 12, settings(tmp_path), t, remote=False)) == ([], False)
+    assert calls == [] and db.catalog_entry(conn, "NOVO3", "B3") is None  # nem aprende nada
+    out, usou = run(search.search_detail(conn, "inexistente", 12, settings(tmp_path), t))
+    assert syms(out) == ["NOVO3"] and usou is True and len(calls) == 1
+    out, usou = run(search.search_detail(conn, "inexistente", 12, settings(tmp_path), t))
+    assert syms(out) == ["NOVO3"] and usou is True and len(calls) == 1  # servida do cache remoto também conta
+    assert run(search.search_detail(conn, "bbas3", 12, settings(tmp_path), t))[1] is False  # local forte
+    assert run(search.search_detail(conn, "inexistente", 12, settings(tmp_path, "synthetic"), t))[1] is False
+
+
+def test_detail_nao_conta_como_remoto_com_disjuntor_aberto(conn, tmp_path):
+    assert run(search.search_detail(conn, "termo um", 12, settings(tmp_path), transport(status=503))) == ([], True)
+    calls = []
+    assert run(search.search_detail(conn, "termo dois", 12, settings(tmp_path), transport(calls=calls))) == ([], False)
+    assert calls == []
+
+
+def test_local_forte_quando_toda_palavra_da_consulta_e_palavra_do_nome(conn, tmp_path):
+    db.set_alias(conn, "PETR4", "B3", "Petróleo Brasileiro S.A. - Petrobras")
+    db.upsert_catalog_entry(conn, "ABEV3", "B3", "AMBEV S.A.", "Ação")
+    search.invalidate()
+    calls, live = [], settings(tmp_path)
+    t = transport([], calls=calls)
+    for q in ("petrobras", "ambev", "banco brasil", "brasil", "petróleo brasileiro", "bradesco", "luiza"):
+        assert run(search.search(conn, q, 12, live, t)), q
+        assert calls == [], q
+    for n, q in enumerate(("petrob", "bradesc", "magaz", "luiz"), 1):  # palavra pela metade: fraco
+        assert run(search.search(conn, q, 12, live, t)), q
+        assert len(calls) == n, q
+
+
+NICK_B3 = [("VIVT3", "TELEF BRASIL S.A.", "Ação"), ("ROXO34", "ROXO34", "BDR"), ("AAPL34", "AAPL34", "BDR"),
+           ("MGLU3", "MAGAZINE LUIZA S.A.", "Ação"), ("BBAS3", "BCO BRASIL S.A.", "Ação"),
+           ("BBSE3", "BB SEGURIDADE PARTICIPACOES S.A.", "Ação"), ("NATU3", "NATURA S.A.", "Ação")]
+NICK_US = [("NU", "Nu Holdings Ltd.", "Ação"), ("AAPL", "Apple Inc.", "Ação"),
+           ("APLE", "Apple Hospitality REIT", "Ação")]
+
+
+@pytest.fixture
+def marcas(tmp_path):
+    c = db.connect(tmp_path / "marcas.db")
+    db.replace_catalog_market(c, "B3", NICK_B3)
+    db.replace_catalog_market(c, "US", NICK_US)
+    db.set_index_members(c, "SP500", "US", ["AAPL"])
+    return c
+
+
+def test_apelidos_de_marca(marcas, tmp_path):
+    calls, live = [], settings(tmp_path)
+    t = transport([], calls=calls)
+    achou = lambda q: syms(run(search.search(marcas, q, 12, live, t)))
+    assert achou("vivo") == ["VIVT3"] and achou("Vivo") == ["VIVT3"]
+    assert achou("magalu") == ["MGLU3"] and achou("maga") == ["MGLU3"]  # prefixo do apelido com 4+ letras
+    assert achou("nubank") == ["ROXO34", "NU"] and achou("nuba") == ["ROXO34", "NU"]  # ordem de preferência
+    assert achou("bb") == ["BBAS3", "BBSE3"]  # o apelido passa o prefixo de símbolo de BBSE3
+    assert achou("natura") == ["NATU3"]  # NTCO3 não está no catálogo: ignorado em silêncio
+    assert achou("apple") == ["AAPL", "AAPL34", "APLE"]  # o papel americano continua em 1º; o BDR só entra
+    assert calls == []  # apelido que casa é resultado forte
+    assert achou("nub") == [] and achou("mag") == ["MGLU3"]  # 3 letras: só o que a busca normal já acha
+    assert search.search_local(marcas, "nu")[0]["symbol"] == "NU"
+    assert search._rank(marcas, "vivo")[0][0] == 950 and search._rank(marcas, "nubank")[1][0] == 949
+    assert {r[2]["symbol"]: r[0] for r in search._rank(marcas, "apple")}["AAPL34"] == 500
+
+
+def test_apelido_depende_do_que_existe_no_catalogo(marcas, tmp_path):
+    calls, live = [], settings(tmp_path)
+    t = transport([], calls=calls)
+    db.replace_catalog_market(marcas, "B3", [r for r in NICK_B3 if r[0] != "ROXO34"])
+    search.invalidate()
+    assert syms(run(search.search(marcas, "nubank", 12, live, t))) == ["NU"] and calls == []
+    db.replace_catalog_market(marcas, "US", [r for r in NICK_US if r[0] != "NU"])
+    search.invalidate()
+    assert run(search.search(marcas, "nubank", 12, live, t)) == [] and len(calls) == 1  # nenhum existe: vai à rede
+
+
+def test_apelido_fica_abaixo_de_simbolo_exato(marcas):
+    db.upsert_catalog_entry(marcas, "VIVO", "US", "VivoPower International PLC", "Ação")
+    search.invalidate()
+    assert syms(search.search_local(marcas, "vivo")) == ["VIVO", "VIVT3"]
+    assert syms(search.search_local(marcas, "vivt3")) == ["VIVT3"]
+
+
+def test_tabela_de_apelidos_bem_formada():
+    assert len(search.NICKNAMES) == 37
+    for nick, (boost, papers) in search.NICKNAMES.items():
+        assert nick == " ".join(search._words(nick)) and boost in (950, 500) and papers
+        assert all(m in ("B3", "US") and s == s.upper() for s, m in papers)
+    assert {n for n, (b, _) in search.NICKNAMES.items() if b == 500} == {
+        "apple", "microsoft", "tesla", "nvidia", "amazon", "google", "facebook"}
+    assert search.NICKNAMES["nubank"] == (950, (("ROXO34", "B3"), ("NU", "US")))
+
+
+def test_disjuntor_nao_abre_com_corpo_ruim_mas_ha_cache_negativo(monkeypatch):
+    agora, calls = clock(monkeypatch), []
+    ok = transport([eq("BBAS3.SA", "Banco do Brasil S.A.")], calls=calls)
+    for i, ruim in enumerate([transport(calls=calls, body=b"<html>"), transport(calls=calls, body=b'{"quotes": 1}'),
+                              transport(calls=calls, body=b" " * 2_000_000), transport(calls=calls, status=404)]):
+        assert run(search.search_remote(f"consulta {i}", ruim)) == []
+    assert len(calls) == 4  # nenhuma dessas abriu o disjuntor
+    assert syms(run(search.search_remote("outra consulta", ok))) == ["BBAS3"] and len(calls) == 5
+    assert run(search.search_remote("consulta 0", ok)) == [] and len(calls) == 5  # cache negativo de 10 min
+    agora[0] += 601
+    assert syms(run(search.search_remote("consulta 0", ok))) == ["BBAS3"] and len(calls) == 6
+    assert search.NEGATIVE_SECONDS == 600

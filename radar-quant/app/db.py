@@ -251,24 +251,25 @@ def _split(indices: str) -> list[str]:
 
 
 _LIMITED_RE = re.compile(r"\s*-\s*RESPONSABILIDADE LIMITADA\s*$", re.I)
-_KEEP = frozenset({"S.A.", "S.A", "S/A", "SA", "FII", "ETF", "BDR", "ON", "PN", "UNT", "B3", "ABC", "BR"})
+_KEEP = frozenset({"S.A.", "S.A", "S/A"})
 _LOWER = frozenset({"de", "do", "da", "dos", "das", "e", "em"})
 
 
 def _pretty_word(word: str) -> str:
     core = word.strip("()[],;:\"'")
-    if core in _KEEP or any(c.isdigit() for c in word):  # siglas e o que tem número ficam como vieram
-        return word
     low = word.lower()
     if core.lower() in _LOWER:
         return low
+    if core in _KEEP or len(core) <= 3 or any(c.isdigit() for c in word):
+        return word  # siglas (WEG, BCO, FII, S.A.) e o que tem número ficam como vieram
     i = next((i for i, c in enumerate(low) if c.isalpha()), None)
     return word if i is None else low[:i] + low[i].upper() + low[i + 1:]
 
 
 def pretty_name(name: str) -> str:
     """Nome legível: sem o sufixo " - RESPONSABILIDADE LIMITADA" e, se veio todo em maiúsculas (como na fonte
-    da B3), em capitalização de título, com siglas preservadas e preposições em minúsculas."""
+    da B3), em capitalização de título; palavras de até 3 letras ficam como vieram e preposições vão para
+    minúsculas."""
     name = _LIMITED_RE.sub("", name)
     if name != name.upper() or not any(c.isalpha() for c in name):
         return name

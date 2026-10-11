@@ -200,9 +200,13 @@ def create_app() -> FastAPI:
                 "universe": {"total": len(members), "ready": len(ready)}}
 
     @app.get("/api/search")
-    async def search_assets(request: Request, q: Annotated[str, Query(max_length=64)] = "",
-                            limit: Annotated[int, Query(ge=1, le=25)] = 12):
-        return await search.search(conn(request), q, limit, request.app.state.settings)
+    async def search_assets(request: Request, response: Response, q: Annotated[str, Query(max_length=64)] = "",
+                            limit: Annotated[int, Query(ge=1, le=25)] = 12, remote: bool = True):
+        """`remote=0` (a cada tecla): só o catálogo, sem rede. O cabeçalho diz se a fonte on-line foi consultada."""
+        results, consulted = await search.search_detail(conn(request), q, limit, request.app.state.settings,
+                                                        remote=remote)
+        response.headers["X-Search-Remote"] = "1" if consulted else "0"
+        return results
 
     @app.get("/api/assets")
     def list_assets(request: Request):

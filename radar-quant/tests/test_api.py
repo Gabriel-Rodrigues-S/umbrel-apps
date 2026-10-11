@@ -651,3 +651,26 @@ def test_falha_ao_aprender_nomes_nao_derruba_os_lacos(client, monkeypatch):
     monkeypatch.setattr(main.asyncio, "sleep", fake_sleep)
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(main.loop_universe(client.app))  # chegou ao sleep
+
+
+def test_search_em_duas_fases(client, monkeypatch):
+    from dataclasses import replace
+    chamadas = []
+
+    async def fake_consult(q, transport=None):
+        chamadas.append(q)
+        return [], True
+
+    monkeypatch.setattr(search, "_consult", fake_consult)
+    r = client.get("/api/search?q=inexistente")
+    assert r.json() == [] and r.headers["x-search-remote"] == "0"  # sintético: nunca vai à rede
+    client.app.state.settings = replace(client.app.state.settings, provider="live")
+    r = client.get("/api/search?q=inexistente&remote=0")
+    assert r.status_code == 200 and r.json() == [] and r.headers["x-search-remote"] == "0" and chamadas == []
+    r = client.get("/api/search?q=inexistente&remote=1")
+    assert r.json() == [] and r.headers["x-search-remote"] == "1" and chamadas == ["inexistente"]
+    r = client.get("/api/search?q=inexistente")  # sem o parâmetro: como antes
+    assert r.headers["x-search-remote"] == "1" and len(chamadas) == 2
+    r = client.get("/api/search?q=banco%20do%20brasil")
+    assert r.json()[0]["symbol"] == "BBAS3" and r.headers["x-search-remote"] == "0" and len(chamadas) == 2
+    assert client.get("/api/search?q=x&remote=talvez").status_code == 422
