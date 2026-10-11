@@ -251,7 +251,8 @@ def _split(indices: str) -> list[str]:
 
 
 _LIMITED_RE = re.compile(r"\s*-\s*RESPONSABILIDADE LIMITADA\s*$", re.I)
-_KEEP = frozenset({"S.A.", "S.A", "S/A"})
+_KEEP = frozenset("""S.A. S.A S/A SA WEG BCO CIA ABC XP BTG BR B3 FII ETF BDR ON PN UNT CSN JBS BRF CCR CPFL EDP TIM
+    MRV IRB BB CVC TOTVS YDUQS MBRF AXIA INC CO II III IV""".split())  # siglas que ficam em maiúsculas
 _LOWER = frozenset({"de", "do", "da", "dos", "das", "e", "em"})
 
 
@@ -260,15 +261,15 @@ def _pretty_word(word: str) -> str:
     low = word.lower()
     if core.lower() in _LOWER:
         return low
-    if core in _KEEP or len(core) <= 3 or any(c.isdigit() for c in word):
-        return word  # siglas (WEG, BCO, FII, S.A.) e o que tem número ficam como vieram
+    if core in _KEEP or any(c.isdigit() for c in word):
+        return word  # siglas conhecidas e o que tem número ficam como vieram
     i = next((i for i, c in enumerate(low) if c.isalpha()), None)
     return word if i is None else low[:i] + low[i].upper() + low[i + 1:]
 
 
 def pretty_name(name: str) -> str:
     """Nome legível: sem o sufixo " - RESPONSABILIDADE LIMITADA" e, se veio todo em maiúsculas (como na fonte
-    da B3), em capitalização de título; palavras de até 3 letras ficam como vieram e preposições vão para
+    da B3), em capitalização de título; siglas conhecidas ficam em maiúsculas e preposições em
     minúsculas."""
     name = _LIMITED_RE.sub("", name)
     if name != name.upper() or not any(c.isalpha() for c in name):
