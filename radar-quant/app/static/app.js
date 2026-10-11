@@ -224,6 +224,15 @@
     return v > 0 ? "pos" : "neg";
   }
 
+  // Nome da empresa para exibir ao lado do código. Vazio quando não há nome ou
+  // quando ele só repete o código (FIIs, ETFs e BDRs vêm assim do catálogo da B3).
+  function displayName(name, symbol) {
+    if (typeof name !== "string") return "";
+    var text = name.trim();
+    if (!text || text.toUpperCase() === String(symbol || "").trim().toUpperCase()) return "";
+    return text;
+  }
+
   function marketLabel(m) { return MARKET_LABEL[m] || m || ""; }
 
   // ------------------------------------------------------------------- API
@@ -774,7 +783,7 @@
 
   function watchlistSignature() {
     return JSON.stringify([state.selectedId, state.assets.map(function (a) {
-      return [a.id, a.symbol, a.market, a.currency, a.price, a.change_pct, a.status, a.verdict, a.evidence, a.last_error];
+      return [a.id, a.symbol, a.market, a.name, a.currency, a.price, a.change_pct, a.status, a.verdict, a.evidence, a.last_error];
     })]);
   }
 
@@ -820,6 +829,12 @@
         if (a.last_error) sym.appendChild(alertIcon(a.last_error));
         pick.appendChild(sym);
         pick.appendChild(el("span", "wl-price", fmtMoney(a.price, a.currency)));
+        var company = displayName(a.name, a.symbol);
+        if (company) {
+          var nameEl = el("span", "wl-name", company);
+          nameEl.title = company;
+          pick.appendChild(nameEl);
+        }
         var verdict = assetVerdict(a);
         var evidence = a.status === "ok" && EVIDENCE_LABEL[a.evidence] ? a.evidence : "";
         li.dataset.evidence = evidence;
@@ -903,7 +918,7 @@
     alert.title = a && a.last_error ? "Falha na fonte de dados: " + a.last_error : "";
 
     var name = $("chart-name");
-    name.textContent = a && a.name ? a.name : "";
+    name.textContent = a ? displayName(a.name, a.symbol) : "";
     name.title = name.textContent;
     var indices = $("chart-indices");
     clear(indices);
@@ -1601,8 +1616,9 @@
       tr.title = "Abrir " + r.symbol + " no gráfico";
       tr.appendChild(el("td", "num muted", first + i + 1));
       tr.appendChild(el("td", "sym", r.symbol));
-      var nameTd = el("td", "name", r.name || DASH);
-      if (r.name) nameTd.title = r.name;
+      var rowName = displayName(r.name, r.symbol);
+      var nameTd = el("td", "name", rowName || DASH);
+      if (rowName) nameTd.title = rowName;
       tr.appendChild(nameTd);
       tr.appendChild(el("td", "", marketLabel(r.market)));
       numCell(tr, r.price, isNum(r.price) ? fmtNum(r.price, priceDigits(r.price)) : DASH, false);
@@ -1839,9 +1855,12 @@
       row.dataset.symbol = w.symbol;
       row.dataset.assetId = String(w.id);
       var name = dup[w.symbol] > 1 ? w.symbol + " (" + w.market + ")" : w.symbol;
-      var sym = el("span", "w-sym", name);
-      sym.title = name + " · " + marketLabel(w.market);
-      row.appendChild(sym);
+      var company = displayName(w.name, w.symbol);
+      var idCell = el("span", "w-id");
+      idCell.title = name + (company ? " · " + company : "") + " · " + marketLabel(w.market);
+      idCell.appendChild(el("span", "w-sym", name));
+      if (company) idCell.appendChild(el("span", "w-name", company));
+      row.appendChild(idCell);
       var bar = el("span", "w-bar");
       var fill = el("i");
       fill.style.width = (max > 0 && isNum(w.weight) ? Math.max(0, w.weight / max) * 100 : 0) + "%";
@@ -2106,8 +2125,18 @@
   }
 
   // ------------------------------------------------------ busca no catálogo
-  var search = { token: 0, timer: 0, items: [], active: -1, open: false };
+  var search = { token: 0, timer: 0, items: [], active: -1, open: false, busy: false, busyTimer: 0 };
   var SEARCH_DEBOUNCE_MS = 200;
+  // A busca pode ir à rede e levar segundos. O aviso "buscando…" só entra se a
+  // resposta demorar mais que isto, para não piscar a cada tecla na busca local.
+  var SEARCH_BUSY_AFTER_MS = 150;
+
+  function setSearchBusy(on) {
+    window.clearTimeout(search.busyTimer);
+    search.busy = on;
+    var node = $("search-results").querySelector(".search-busy");
+    if (!on && node) node.parentNode.removeChild(node);
+  }
 
   function closeSearch() {
     search.open = false;
@@ -2123,6 +2152,7 @@
     window.clearTimeout(search.timer);
     search.token++;
     search.items = [];
+    setSearchBusy(false);
     closeSearch();
   }
 
@@ -2154,15 +2184,20 @@
       kind.appendChild(el("span", "tag", marketLabel(r.market)));
       if (r.kind) kind.appendChild(document.createTextNode(r.kind));
       li.appendChild(kind);
-      li.appendChild(el("span", "search-name", r.name || ""));
+      li.appendChild(el("span", "search-name", displayName(r.name, r.symbol)));
       var indices = (Array.isArray(r.indices) ? r.indices : []).map(function (c) { return INDEX_LABEL[c] || c; });
       li.appendChild(el("span", "search-idx", indices.join(" · ")));
       li.title = "Abrir " + r.symbol + " no gráfico (sem adicionar à watchlist)";
       root.appendChild(li);
     });
-    if (!search.items.length) {
+    if (search.busy) {
+      // Fica acima dos resultados anteriores, que continuam na lista até a resposta chegar.
+      var busy = el("li", "search-busy", "buscando…");
+      busy.setAttribute("role", "status");
+      root.insertBefore(busy, root.firstChild);
+    } else if (!search.items.length) {
       root.appendChild(el("li", "search-empty",
-        "Nenhum papel encontrado para “" + query + "”. Tente o código, ex.: BBAS3 — a B3 abrevia os nomes. "
+        "Nenhum papel encontrado para “" + query + "”. Tente o código, ex.: BBAS3. "
         + "Para buscar o símbolo direto na fonte, escolha o mercado e use Adicionar."));
     }
     root.hidden = false;
@@ -2176,15 +2211,22 @@
   function runSearch() {
     var query = $("add-symbol").value.trim();
     var token = ++search.token;
+    setSearchBusy(false);
     if (!query) { search.items = []; closeSearch(); return; }
+    search.busyTimer = window.setTimeout(function () {
+      if (token !== search.token) return;
+      search.busy = true;
+      if (document.activeElement === $("add-symbol")) renderSearch(query);
+    }, SEARCH_BUSY_AFTER_MS);
     api("/api/search?q=" + encodeURIComponent(query)).then(function (list) {
       if (token !== search.token) return;
+      setSearchBusy(false);
       search.items = (Array.isArray(list) ? list : []).filter(function (r) {
         return r && typeof r.symbol === "string" && typeof r.market === "string";
       });
       if (document.activeElement === $("add-symbol")) renderSearch(query);
     }, function () {
-      if (token === search.token) { search.items = []; closeSearch(); }  // busca é acessória: falha fica calada
+      if (token === search.token) { setSearchBusy(false); search.items = []; closeSearch(); }  // busca é acessória: falha fica calada
     });
   }
 
@@ -2215,6 +2257,7 @@
       if (search.open) event.preventDefault();
       window.clearTimeout(search.timer);
       search.token++;
+      setSearchBusy(false);
       closeSearch();
     }
   }
