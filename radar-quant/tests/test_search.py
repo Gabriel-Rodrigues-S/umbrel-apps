@@ -655,15 +655,16 @@ def test_apelidos_de_marca(marcas, tmp_path):
     t = transport([], calls=calls)
     achou = lambda q: syms(run(search.search(marcas, q, 12, live, t)))
     assert achou("vivo") == ["VIVT3"] and achou("Vivo") == ["VIVT3"]
-    assert achou("magalu") == ["MGLU3"] and achou("maga") == ["MGLU3"]  # prefixo do apelido com 4+ letras
-    assert achou("nubank") == ["ROXO34", "NU"] and achou("nuba") == ["ROXO34", "NU"]  # ordem de preferência
+    assert achou("magalu") == ["MGLU3"] and achou("magal") == ["MGLU3"]  # prefixo com 5+ letras ainda sugere
+    assert achou("nubank") == ["ROXO34", "NU"] and achou("nuban") == ["ROXO34", "NU"]  # ordem de preferência
     assert achou("bb") == ["BBAS3", "BBSE3"]  # o apelido passa o prefixo de símbolo de BBSE3
-    assert achou("natura") == ["NATU3"]  # NTCO3 não está no catálogo: ignorado em silêncio
+    assert achou("natura") == ["NATU3"]
     assert achou("apple") == ["AAPL", "AAPL34", "APLE"]  # o papel americano continua em 1º; o BDR só entra
     assert calls == []  # apelido que casa é resultado forte
-    assert achou("nub") == [] and achou("mag") == ["MGLU3"]  # 3 letras: só o que a busca normal já acha
+    assert achou("nuba") == [] and achou("mag") == ["MGLU3"]  # menos de 5 letras: só o que a busca normal acha
     assert search.search_local(marcas, "nu")[0]["symbol"] == "NU"
-    assert search._rank(marcas, "vivo")[0][0] == 950 and search._rank(marcas, "nubank")[1][0] == 949
+    assert search._rank(marcas, "vivo")[0][0] == 1050 and search._rank(marcas, "nubank")[1][0] == 1049
+    assert [r[0] for r in search._rank(marcas, "nuban")] == [500, 499]  # prefixo: junta-se à lista, sem ir ao topo
     assert {r[2]["symbol"]: r[0] for r in search._rank(marcas, "apple")}["AAPL34"] == 500
 
 
@@ -678,21 +679,61 @@ def test_apelido_depende_do_que_existe_no_catalogo(marcas, tmp_path):
     assert run(search.search(marcas, "nubank", 12, live, t)) == [] and len(calls) == 1  # nenhum existe: vai à rede
 
 
-def test_apelido_fica_abaixo_de_simbolo_exato(marcas):
+def test_apelido_exato_passa_simbolo_exato(marcas, tmp_path):
     db.upsert_catalog_entry(marcas, "VIVO", "US", "VivoPower International PLC", "Ação")
+    db.upsert_catalog_entry(marcas, "BB", "US", "BlackBerry Limited", "Ação")
+    db.set_index_members(marcas, "SP500", "US", ["AAPL", "VIVO", "BB"])  # nem o bônus de índice passa o apelido
     search.invalidate()
-    assert syms(search.search_local(marcas, "vivo")) == ["VIVO", "VIVT3"]
-    assert syms(search.search_local(marcas, "vivt3")) == ["VIVT3"]
+    calls = []
+    achou = lambda q: syms(run(search.search(marcas, q, 12, settings(tmp_path), transport([], calls=calls))))
+    assert achou("vivo") == ["VIVT3", "VIVO"]  # o dono é brasileiro: Vivo é a Telefônica Brasil
+    assert achou("bb") == ["BBAS3", "BB", "BBSE3"]
+    assert achou("vivt3") == ["VIVT3"] and achou("vivo3") == []  # código inteiro continua sendo código
+    assert len(calls) == 1 and calls[0].url.params["q"] == "vivo3"  # só o que não resolve vai à rede
+    pontos = {r[2]["symbol"]: r[0] for r in search._rank(marcas, "vivo")}
+    assert pontos["VIVO"] > 1050 and pontos["VIVT3"] == pontos["VIVO"] + 50
 
 
-def test_tabela_de_apelidos_bem_formada():
-    assert len(search.NICKNAMES) == 37
+def test_prefixo_de_apelido_nao_pega_carona(tmp_path):
+    c = db.connect(tmp_path / "carona.db")
+    db.replace_catalog_market(c, "B3", [
+        ("PSSA3", "PORTO SEGURO S.A.", "Ação"), ("PTBL3", "PORTOBELLO S.A.", "Ação"),
+        ("RDOR3", "REDE D OR SAO LUIZ S.A.", "Ação"), ("INBR32", "INBR32", "BDR"), ("MELI34", "MELI34", "BDR"),
+        ("SANB11", "BCO SANTANDER (BRASIL) S.A.", "Ação"), ("SANT3", "SANTOS BRASIL S.A.", "Ação"),
+        ("MGLU3", "MAGAZINE LUIZA S.A.", "Ação"), ("MAGA3", "MAGA3", "Ação"), ("MAGAL3", "MAGAL3", "Ação"),
+        ("CMIG4", "CIA ENERGETICA DE MINAS GERAIS", "Ação")])
+    db.replace_catalog_market(c, "US", [("INTC", "Intel Corporation", "Ação"), ("MAGAL", "Magal Inc.", "Ação")])
+    assert syms(search.search_local(c, "port")) == ["PTBL3", "PSSA3"]  # por nome, não por apelido
+    assert search._rank(c, "port")[0][0] < 600 and search._rank(c, "rede")[0][0] < 600
+    assert syms(search.search_local(c, "inte")) == ["INTC"] and syms(search.search_local(c, "merc")) == []
+    assert syms(search.search_local(c, "sant")) == ["SANT3", "SANB11"]  # prefixo de símbolo e nome; sem apelido
+    assert syms(search.search_local(c, "santa")) == ["SANB11"] and search._rank(c, "santa")[0][0] == 500
+    assert syms(search.search_local(c, "mercado l")) == []  # apelido de duas palavras só vale inteiro
+    assert syms(search.search_local(c, "mercado livre")) == ["MELI34"]
+    assert syms(search.search_local(c, "cemi")) == [] and syms(search.search_local(c, "cemig")) == ["CMIG4"]
+    # "magal" sugere MGLU3 (500) sem passar o símbolo exato MAGAL nem o prefixo de símbolo MAGAL3
+    assert syms(search.search_local(c, "magal")) == ["MAGAL", "MAGAL3", "MGLU3"]
+    assert syms(search.search_local(c, "magalu")) == ["MGLU3"]
+
+
+def test_tabela_de_apelidos_conferida(tmp_path):
+    assert len(search.NICKNAMES) == 52
     for nick, (boost, papers) in search.NICKNAMES.items():
-        assert nick == " ".join(search._words(nick)) and boost in (950, 500) and papers
+        assert nick == " ".join(search._words(nick)) and boost in (1050, 500) and papers
         assert all(m in ("B3", "US") and s == s.upper() for s, m in papers)
     assert {n for n, (b, _) in search.NICKNAMES.items() if b == 500} == {
-        "apple", "microsoft", "tesla", "nvidia", "amazon", "google", "facebook"}
-    assert search.NICKNAMES["nubank"] == (950, (("ROXO34", "B3"), ("NU", "US")))
+        "apple", "microsoft", "tesla", "nvidia", "amazon", "google", "facebook", "meta"}
+    assert search.NICKNAMES["nubank"] == (1050, (("ROXO34", "B3"), ("NU", "US")))
+    todos = {p for _, papers in search.NICKNAMES.values() for p in papers}
+    assert not {("OIBR3", "B3"), ("NTCO3", "B3"), ("CPLE6", "B3"), ("AZUL4", "B3")} & todos  # saíram da B3
+    c = db.connect(tmp_path / "apelidos.db")
+    db.replace_catalog_market(c, "B3", [("AXIA3", "AXIA ENERGIA S.A.", "Ação"),
+                                        ("MBRF3", "MBRF GLOBAL FOODS", "Ação"),
+                                        ("UGPA3", "ULTRAPAR PARTICIPACOES S.A.", "Ação")])
+    for q, esperado in (("eletrobras", ["AXIA3"]), ("sadia", ["MBRF3"]), ("perdigao", ["MBRF3"]), ("brf", ["MBRF3"]),
+                        ("Perdigão", ["MBRF3"]), ("ipiranga", ["UGPA3"]), ("ultrapar", ["UGPA3"]),
+                        ("embraer", []), ("vivo", []), ("meta", [])):  # papel fora do catálogo: ignorado
+        assert syms(search.search_local(c, q)) == esperado, q
 
 
 def test_disjuntor_nao_abre_com_corpo_ruim_mas_ha_cache_negativo(monkeypatch):

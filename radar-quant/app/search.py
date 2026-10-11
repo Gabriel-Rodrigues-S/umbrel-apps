@@ -33,8 +33,9 @@ MIN_REMOTE_CHARS = 3  # consulta menor que isso não vai à rede
 CACHE_SECONDS = 24 * 3600
 CACHE_MAX = 256
 SCORE_EXACT, SCORE_PREFIX, SCORE_REMOTE, SCORE_NAME = 1000, 600, 450, 300
-SCORE_NICK, SCORE_NICK_EXTRA = 950, 500  # apelido de marca; EXTRA só acrescenta o papel, sem passar os demais
-MIN_NICK_PREFIX = 4  # letras digitadas para um prefixo de apelido valer
+SCORE_NICK, SCORE_NICK_EXTRA = 1050, 500  # apelido de marca: no topo; EXTRA só junta o papel à lista
+NICK_MARGIN = 50  # distância mínima do apelido exato para o melhor dos outros resultados (símbolo exato)
+MIN_NICK_PREFIX, MIN_NICK_LENGTH = 5, 6  # prefixo de apelido: letras digitadas e tamanho do apelido (1 palavra)
 
 ABBR = {"bco": "banco", "cia": "companhia", "part": "participacoes", "empr": "empreendimentos",
         "energ": "energia", "sid": "siderurgica", "ind": "industria", "com": "comercio",
@@ -54,23 +55,26 @@ def _nicks(boost: int, table: dict[str, str]) -> dict[str, tuple[int, tuple[tupl
     return {nick: (boost, tuple(tuple(p.split("/")) for p in papers.split())) for nick, papers in table.items()}
 
 
-# Apelido de marca (normalizado) -> (pontuação, papéis em ordem de preferência). Nem o catálogo nem a busca
-# on-line ligam "vivo" à VIVT3. Só vale para os papéis que existem no catálogo no momento.
+# Apelido de marca (normalizado) -> (pontuação, papéis em ordem de preferência), conferido no catálogo real.
+# Nem o catálogo nem a busca on-line ligam "vivo" à VIVT3. Só vale para os papéis que existem no catálogo.
 NICKNAMES = {
     **_nicks(SCORE_NICK, {
         "vivo": "VIVT3/B3", "magalu": "MGLU3/B3", "nubank": "ROXO34/B3 NU/US", "nu": "NU/US", "bb": "BBAS3/B3",
         "santander": "SANB11/B3 BSBR/US", "btg": "BPAC11/B3", "xp": "XP/US", "mercado livre": "MELI34/B3 MELI/US",
-        "tim": "TIMS3/B3", "oi": "OIBR3/B3", "americanas": "AMER3/B3", "casas bahia": "BHIA3/B3",
-        "renner": "LREN3/B3", "assai": "ASAI3/B3", "natura": "NATU3/B3 NTCO3/B3", "rede dor": "RDOR3/B3",
-        "porto seguro": "PSSA3/B3", "sabesp": "SBSP3/B3", "copel": "CPLE6/B3 CPLE3/B3",
-        "cemig": "CMIG4/B3 CMIG3/B3", "csn": "CSNA3/B3", "gerdau": "GGBR4/B3", "usiminas": "USIM5/B3",
-        "braskem": "BRKM5/B3", "klabin": "KLBN11/B3", "azul": "AZUL4/B3", "inter": "INBR32/B3",
-        "stone": "STNE/US", "pagbank": "PAGS/US"}),
+        "tim": "TIMS3/B3", "assai": "ASAI3/B3", "natura": "NATU3/B3", "rede dor": "RDOR3/B3",
+        "sabesp": "SBSP3/B3", "copel": "CPLE3/B3", "cemig": "CMIG4/B3 CMIG3/B3", "csn": "CSNA3/B3",
+        "usiminas": "USIM5/B3", "inter": "INBR32/B3 INTR/US", "stone": "STNE/US", "pagbank": "PAGS/US",
+        "pagseguro": "PAGS/US", "eletrobras": "AXIA3/B3", "embraer": "EMBJ3/B3", "brf": "MBRF3/B3",
+        "marfrig": "MBRF3/B3", "sadia": "MBRF3/B3", "perdigao": "MBRF3/B3", "vibra": "VBBR3/B3",
+        "br distribuidora": "VBBR3/B3", "ultragaz": "UGPA3/B3", "ipiranga": "UGPA3/B3", "ultrapar": "UGPA3/B3",
+        "droga raia": "RADL3/B3", "drogasil": "RADL3/B3", "smart fit": "SMFT3/B3", "casas bahia": "BHIA3/B3",
+        "locaweb": "LWSA3/B3", "cvc": "CVCB3/B3", "mrv": "MRVE3/B3", "cyrela": "CYRE3/B3",
+        "iguatemi": "IGTI11/B3", "yduqs": "YDUQ3/B3", "estacio": "YDUQ3/B3"}),
     # a busca por nome já acha o papel americano em 1º: aqui o apelido só acrescenta o BDR da B3
     **_nicks(SCORE_NICK_EXTRA, {
-        "google": "GOGL34/B3 GOOGL/US GOOG/US", "facebook": "M1TA34/B3 META/US", "amazon": "AMZO34/B3 AMZN/US",
-        "tesla": "TSLA34/B3 TSLA/US", "nvidia": "NVDC34/B3 NVDA/US", "microsoft": "MSFT34/B3 MSFT/US",
-        "apple": "AAPL34/B3 AAPL/US"}),
+        "apple": "AAPL34/B3 AAPL/US", "microsoft": "MSFT34/B3 MSFT/US", "tesla": "TSLA34/B3 TSLA/US",
+        "nvidia": "NVDC34/B3 NVDA/US", "amazon": "AMZO34/B3 AMZN/US", "google": "GOGL34/B3 GOOGL/US GOOG/US",
+        "facebook": "M1TA34/B3 META/US", "meta": "M1TA34/B3 META/US"}),
 }
 US_EXCHANGES = frozenset({"NMS", "NGM", "NCM", "NYQ", "ASE", "PCX", "BTS"})
 _B3_RE = re.compile(r"[A-Z0-9]{4,6}[0-9]{1,2}")
@@ -206,9 +210,9 @@ def _rank(conn, q: str) -> list[tuple[float, float, dict, bool]]:
     """Todos os papéis que casam com a consulta, como (pontuação, cobertura, item, resolvido), do melhor para
     o pior. `resolvido`: toda palavra da consulta é uma palavra inteira do nome, ou a consulta é um apelido.
 
-    Símbolo exato 1000; apelido de marca 950; prefixo de símbolo 600; nome 300 (+80 primeira palavra, +40
-    igualdade); mais 150 x cobertura do nome, 40 por índice, 30 se B3/cripto, 20 se ação; direito/recibo da
-    B3 perde 250."""
+    Apelido de marca exato 1050 (sempre acima do resto); símbolo exato 1000; prefixo de símbolo 600; nome
+    300 (+80 primeira palavra, +40 igualdade); mais 150 x cobertura do nome, 40 por índice, 30 se B3/cripto,
+    20 se ação; direito/recibo da B3 perde 250."""
     words = _words(q)
     groups = [_variants(w) for w in ([w for w in words if w not in STOPWORDS] or words)]
     needles = [tuple(" " + v for v in g) for g in groups]
@@ -233,8 +237,12 @@ def _rank(conn, q: str) -> list[tuple[float, float, dict, bool]]:
         out.append((score + COVERAGE_POINTS * coverage + bonus - rights, coverage, item, solid))
     nick = _nicknamed(" ".join(words), by_key)
     if nick:
+        # apelido exato fica acima até de símbolo exato com bônus: para o dono, "vivo" é a VIVT3, não a VIVO
+        lift = max(max((r[0] for r in out), default=0) + NICK_MARGIN - SCORE_NICK, 0)
         rows = {(r[2]["symbol"], r[2]["market"]): r for r in out}
         for key, score in nick.items():
+            if score > SCORE_PREFIX:  # só o apelido exato sobe; prefixo e BDR acrescentado ficam em 500
+                score += lift
             old = rows.get(key, (0, 0.0, by_key[key], True))
             rows[key] = (max(score, old[0]), old[1], old[2], True)
         out = list(rows.values())
@@ -243,13 +251,20 @@ def _rank(conn, q: str) -> list[tuple[float, float, dict, bool]]:
 
 
 def _nicknamed(query: str, by_key: dict) -> dict[tuple[str, str], int]:
-    """Papéis do catálogo que a consulta alcança por apelido de marca (igual, ou prefixo com 4+ letras), com
-    a pontuação de cada um; a ordem de preferência do apelido desempata (950, 949...)."""
+    """Papéis do catálogo que a consulta alcança por apelido de marca, com a pontuação de cada um; a ordem de
+    preferência do apelido desempata (1050, 1049...). Consulta igual ao apelido: a pontuação dele. Prefixo
+    (5+ letras digitadas, apelido de uma palavra com 6+ letras): 500, só se junta à lista."""
     out: dict[tuple[str, str], int] = {}
+    partial = len(query) >= MIN_NICK_PREFIX
     for nick, (boost, papers) in NICKNAMES.items():
-        if query == nick or (len(query) >= MIN_NICK_PREFIX and nick.startswith(query)):
-            for i, key in enumerate(k for k in papers if k in by_key):
-                out[key] = max(out.get(key, 0), boost - i)
+        if query == nick:
+            score = boost
+        elif partial and len(nick) >= MIN_NICK_LENGTH and " " not in nick and nick.startswith(query):
+            score = SCORE_NICK_EXTRA
+        else:
+            continue
+        for i, key in enumerate(k for k in papers if k in by_key):
+            out[key] = max(out.get(key, 0), score - i)
     return out
 
 

@@ -367,7 +367,10 @@ def test_touch_news_renova_so_o_carimbo(conn):
 # ---------- 1.1.1: nomes legíveis ----------
 
 @pytest.mark.parametrize("name, esperado", [
-    ("XP INC", "XP INC"), ("BTG PACTUAL (SP) EM RECUPERACAO", "BTG Pactual (SP) em Recuperacao"),
+    ("RIO GRANDE DO SUL", "Rio Grande do Sul"), ("PETRO RIO S.A.", "Petro Rio S.A."), ("SAO PAULO", "Sao Paulo"),
+    ("INTER CO INC", "Inter CO INC"), ("YDUQS PARTICIPACOES S.A.", "YDUQS Participacoes S.A."),
+    ("TOTVS SA", "TOTVS SA"), ("CPFL ENERGIA III", "CPFL Energia III"), ("LUZ DO SOL (MAR)", "Luz do Sol (Mar)"),
+    ("XP INC", "XP INC"), ("BTG PACTUAL (SP) EM RECUPERACAO", "BTG Pactual (Sp) em Recuperacao"),
     ("BCO SANTANDER (BRASIL) S.A.", "BCO Santander (Brasil) S.A."),
     ("ISHARES IBOVESPA CLASSE DE ÍNDICE - RESPONSABILIDADE LIMITADA", "Ishares Ibovespa Classe de Índice"),
     ("iShares Ibovespa Classe de Índice - Responsabilidade Limitada", "iShares Ibovespa Classe de Índice"),
@@ -376,7 +379,7 @@ def test_touch_news_renova_so_o_carimbo(conn):
     ("BCO ABC BRASIL S/A", "BCO ABC Brasil S/A"), ("ITAUSA SA", "Itausa SA"), ("CIA BRASILEIRA DE DISTRIBUICAO",
                                                                                 "CIA Brasileira de Distribuicao"),
     ("FII KINEA RENDA ETF BDR ON PN UNT B3 BR", "FII Kinea Renda ETF BDR ON PN UNT B3 BR"),
-    ("LOJAS DOS SANTOS E DAS FLORES EM SP DA SERRA DO MAR", "Lojas dos Santos e das Flores em SP da Serra do MAR"),
+    ("LOJAS DOS SANTOS E DAS FLORES EM SP DA SERRA DO MAR", "Lojas dos Santos e das Flores em Sp da Serra do Mar"),
     ("BRADESCO DO 15,43", "Bradesco do 15,43"), ("", ""), ("123", "123"), ("Petrobras PN", "Petrobras PN"),
 ])
 def test_pretty_name(name, esperado):
