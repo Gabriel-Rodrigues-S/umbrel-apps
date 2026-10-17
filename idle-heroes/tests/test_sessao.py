@@ -98,3 +98,11 @@ def test_campo_desconhecido(cliente):
 def test_herois_vazio(cliente):
     conta, _, _ = cenario(cliente)
     assert sessao(cliente, conta, []).status_code == 400
+
+
+def test_conta_e_data_dentro_do_item_sao_rejeitadas(cliente):
+    conta, a, _ = cenario(cliente)
+    for extra in ({"data": "2026-10-10"}, {"conta_id": conta["id"]}):
+        r = sessao(cliente, conta, [{"heroi_id": a["id"], "poder": 5, **extra}])
+        assert r.status_code == 400
+    assert medicoes(cliente) == []
