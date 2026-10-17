@@ -49,6 +49,19 @@ export function formatarDuracao(n) {
   return partes.join(" e ");
 }
 
+// Limites do eixo x; um x só ganha folga (faixa 0 deixa o Chart.js sem pontos nem ticks).
+// passo: em faixa curta (até 10 dias), um tick por dia; senão o Chart.js repete o mesmo dia.
+export function faixaX(xs, modo) {
+  if (!xs.length) return { min: undefined, max: undefined, passo: undefined };
+  const dia = modo === "dia0" ? 1 : DIA_MS;
+  let min = Math.min(...xs), max = Math.max(...xs);
+  if (min === max) {
+    min -= dia;
+    max += dia;
+  }
+  return { min, max, passo: max - min <= 10 * dia ? dia : undefined };
+}
+
 export function tier(nivel) {
   if (nivel == null || nivel < 20) return null;
   return `T${Math.min(Math.floor(nivel / 20), 5)}`;
