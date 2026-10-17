@@ -69,7 +69,13 @@ async function campoForm(col, valor) {
       opcoes = col.campo.slice(7).split(",").map((o) => [o, o]);
     }
     for (const [v, t] of opcoes) controle.append(el("option", { value: v }, t));
-    controle.value = valor == null ? "" : String(valor);
+    const atual = valor == null ? "" : String(valor);
+    // valor gravado fora da lista: mantém como opção extra para não apagar ao salvar
+    if (atual !== "" && !opcoes.some(([v]) => v === atual)) {
+      const eRef = col.campo.startsWith("ref:");
+      controle.append(el("option", { value: atual }, eRef ? `#${atual} (não encontrado)` : `${atual} (fora da lista)`));
+    }
+    controle.value = atual;
   } else {
     const tipo = col.campo === "number" ? "number" : col.campo === "date" ? "date" : "text";
     controle = el("input", { id: nome, name: col.nome, type: tipo });
