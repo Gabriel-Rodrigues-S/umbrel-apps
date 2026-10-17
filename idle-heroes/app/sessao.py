@@ -1,4 +1,6 @@
 """Endpoint de sessão: grava várias medições de uma vez (upsert por conta, herói e data)."""
+from datetime import date
+
 from fastapi import APIRouter, HTTPException
 
 from .db import TABELAS, conectar
@@ -12,6 +14,14 @@ CAMPOS = [c for c in TABELAS["medicoes"]["colunas"] if c not in CHAVES]
 def valor(v):
     """Texto vazio vira NULL, como no limpar() da API genérica."""
     return None if v == "" else v
+
+
+def data_valida(texto):
+    """Só AAAA-MM-DD de verdade (fromisoformat sozinho aceita também AAAAMMDD)."""
+    try:
+        return date.fromisoformat(texto).isoformat() == texto
+    except ValueError:
+        return False
 
 
 @router.post("/api/sessao")
@@ -34,6 +44,8 @@ def gravar_sessao(corpo: dict):
     conta_id, data, herois = corpo.get("conta_id"), corpo.get("data"), corpo.get("herois")
     if not isinstance(conta_id, int) or not data or not isinstance(data, str):
         raise HTTPException(400, "Informe conta_id (inteiro) e data (AAAA-MM-DD)")
+    if not data_valida(data):
+        raise HTTPException(400, f"Data inválida: {data!r} (use AAAA-MM-DD)")
     if not isinstance(herois, list) or not herois:
         raise HTTPException(400, "herois deve ser uma lista com ao menos um item")
 

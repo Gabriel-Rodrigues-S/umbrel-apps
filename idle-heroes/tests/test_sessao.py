@@ -106,3 +106,11 @@ def test_conta_e_data_dentro_do_item_sao_rejeitadas(cliente):
         r = sessao(cliente, conta, [{"heroi_id": a["id"], "poder": 5, **extra}])
         assert r.status_code == 400
     assert medicoes(cliente) == []
+
+
+def test_data_invalida(cliente):
+    conta, a, _ = cenario(cliente)
+    for data in ("17/10/2026", "2026-13-01", "ontem", "2026-10-17T10:00"):
+        r = sessao(cliente, conta, [{"heroi_id": a["id"], "poder": 5}], data=data)
+        assert r.status_code == 400, data
+    assert medicoes(cliente) == []
