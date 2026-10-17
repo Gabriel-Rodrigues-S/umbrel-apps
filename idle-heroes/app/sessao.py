@@ -41,7 +41,7 @@ def gravar_sessao(corpo: dict):
     for item in herois:
         if not isinstance(item, dict) or not isinstance(item.get("heroi_id"), int):
             raise HTTPException(400, "Cada item de herois precisa de heroi_id (inteiro)")
-        desconhecidas = set(item) - CHAVES - set(CAMPOS)
+        desconhecidas = set(item) - {"heroi_id"} - set(CAMPOS)
         if desconhecidas:
             raise HTTPException(400, f"Campos desconhecidos: {', '.join(sorted(desconhecidas))}")
         itens.append((item["heroi_id"], {c: valor(item[c]) for c in CAMPOS if c in item}))
