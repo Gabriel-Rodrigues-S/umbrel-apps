@@ -176,3 +176,28 @@ export function linhasFicha(itens) {
   }
   return linhas;
 }
+
+// Mesmas listas de app/db.py: números são da data medida; estado vale até mudar.
+export const NUMEROS = ["poder", "ataque", "hp", "armadura", "velocidade"];
+export const ESTADO = ["transicao", "transicao_em", "arvore", "nucleo", "sublimacao", "grimorio",
+  "equipamento", "equip_estrelas", "equip_ressonancia", "artefato"];
+
+const vazio = (v) => v == null || v === "";
+
+// Estado herdado da última medição; números dela só viram dica (placeholder).
+export function preencher(ultima) {
+  const valores = {}, dicas = {};
+  if (!ultima) return { valores, dicas };
+  for (const c of ESTADO) valores[c] = ultima[c] ?? null;
+  for (const c of NUMEROS) dicas[c] = ultima[c] ?? null;
+  return { valores, dicas };
+}
+
+// Item do POST /api/sessao: estado sempre; número só se digitado; limpo vira null.
+export function montarItem(heroi_id, valores, editados, limpos) {
+  const item = { heroi_id };
+  for (const c of ESTADO) if (!vazio(valores[c])) item[c] = valores[c];
+  for (const c of NUMEROS) if (editados.has(c) && !vazio(valores[c])) item[c] = valores[c];
+  for (const c of limpos) item[c] = null;
+  return item;
+}
