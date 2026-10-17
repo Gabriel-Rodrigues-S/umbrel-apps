@@ -74,11 +74,13 @@ export function serie(item, campo, modo) {
     const x = modo === "dia0" ? dias(zero.data, m.data) : ms(m.data);
     pontos.push({ x, y: m[campo], data: m.data });
   }
-  let inicio = null;
-  if (zero.data) inicio = modo === "dia0" ? 0 : ms(zero.data);
-  if (zero.origem === "primeira_medicao") avisos.push(AVISO_DESCONHECIDA);
-  if (modo === "dia0" && zero.aproximada) avisos.push(AVISO_APROXIMADA);
-  if (zero.origem === "conta" && pontos.some((p) => p.x < inicio)) avisos.push(AVISO_ANTERIOR);
+  // Datas reais: cada linha começa na primeira medição (sem trecho nem avisos de dia 0).
+  const inicio = modo === "dia0" && zero.data ? 0 : null;
+  if (modo === "dia0") {
+    if (zero.origem === "primeira_medicao") avisos.push(AVISO_DESCONHECIDA);
+    if (zero.aproximada) avisos.push(AVISO_APROXIMADA);
+    if (zero.origem === "conta" && pontos.some((p) => p.x < 0)) avisos.push(AVISO_ANTERIOR);
+  }
   return { pontos, inicio, avisos };
 }
 

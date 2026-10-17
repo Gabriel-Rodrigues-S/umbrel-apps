@@ -176,6 +176,21 @@ const pluginSemMedicoes = {
         ctx.fillText("sem medições", (x0 + x1) / 2, y - 8);
       }
     });
+    // Datas reais: etiqueta "início do registro" no primeiro ponto de cada linha.
+    if (estado.modo === "datas") {
+      chart.data.datasets.forEach((ds, i) => {
+        const p = ds.extra.pontos[0];
+        if (!p || chart.getDatasetMeta(i).hidden) return;
+        const px = x.getPixelForValue(p.x), py = chart.scales.y.getPixelForValue(p.y);
+        ctx.globalAlpha = 0.9;
+        ctx.setLineDash([]);
+        ctx.fillStyle = ds.borderColor;
+        ctx.font = "11px system-ui, sans-serif";
+        ctx.textAlign = px > area.right - 80 ? "right" : "left";
+        ctx.textBaseline = "bottom";
+        ctx.fillText("início do registro", px + (ctx.textAlign === "left" ? -4 : 4), Math.max(py - 8, area.top + 12));
+      });
+    }
     // Marco de Transição sem ponto no atributo: losango na base, sem valor de y.
     chart.data.datasets.forEach((ds, i) => {
       const m = ds.extra.marcoSolto;
@@ -270,7 +285,10 @@ function opcoes(dados) {
         callbacks: {
           title: (ctx) => (ctx[0] ? `${dataBR(ctx[0].raw.data)} · ${formatarX(ctx[0].raw.x)}` : ""),
           label: (ctx) => `${ctx.dataset.label}: ${ctx.raw.y.toLocaleString("pt-BR")}`,
-          afterLabel: (ctx) => ctx.raw.marco || "",
+          afterLabel: (ctx) => [
+            ...(estado.modo === "datas" && ctx.dataIndex === 0 ? ["Início do registro"] : []),
+            ...(ctx.raw.marco ? [ctx.raw.marco] : []),
+          ],
         },
       },
     },
