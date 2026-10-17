@@ -2,7 +2,7 @@
 import { api } from "./api.js";
 import { el } from "./dom.js";
 import {
-  TIERS, serie, marcoTransicao, linhasFicha, formatarDuracao, dataBR, dataBRDeMs, ms, dias, diaZero,
+  TIERS, serie, marcoTransicao, linhasFicha, formatarDuracao, dataBR, dataBRDeMs, ms, dias, diaZero, faixaX,
 } from "./logica.js";
 
 const ATRIBUTOS = [
@@ -134,7 +134,7 @@ async function carregar() {
   } catch (err) {
     if (n !== pedido) return;
     estado.itens = [];
-    $("#avisos").replaceChildren(el("li", { class: "erro" }, `Erro ao carregar: ${err.message}`));
+    desenhar(`Erro ao carregar: ${err.message}`);
     return;
   }
   desenhar();
@@ -256,15 +256,15 @@ function formatarX(v) {
 function opcoes(dados) {
   const xs = dados.flatMap((d) => [...d.data.map((p) => p.x), ...(d.extra.inicio != null && d.data.length ? [d.extra.inicio] : [])]);
   const arvore = estado.campo === "arvore";
+  const { min, max, passo } = faixaX(xs, estado.modo);
   return {
     responsive: true, maintainAspectRatio: false, animation: false,
     parsing: false, interaction: { mode: "nearest", intersect: false },
     scales: {
       x: {
         type: "linear",
-        min: xs.length ? Math.min(...xs) : undefined,
-        max: xs.length ? Math.max(...xs) : undefined,
-        ticks: { callback: formatarX, maxRotation: 0, autoSkip: true, maxTicksLimit: 6, includeBounds: false },
+        min, max,
+        ticks: { callback: formatarX, stepSize: passo, maxRotation: 0, autoSkip: true, maxTicksLimit: 6, includeBounds: false },
         title: { display: true, text: estado.modo === "dia0" ? "Tempo de conta" : "Data da medição" },
       },
       // Árvore começa abaixo de 0 para o trecho "sem medições" não parecer nível 0.
@@ -286,28 +286,29 @@ function opcoes(dados) {
   };
 }
 
-function desenhar() {
+// erro: mensagem no lugar dos avisos; gráfico e ficha ficam vazios (nada antigo na tela).
+function desenhar(erro = null) {
   const dados = conjuntos();
   const avisos = dados.flatMap((d) => [
     ...d.extra.avisos.map((a) => `${d.label}: ${a}`),
     ...(d.extra.marcoSolto != null ? [`${d.label}: ${d.extra.marco.rotulo} (sem ${nomeCampo()} medido nesse dia; losango na base)`] : []),
     ...(d.data.length ? [] : [`${d.label}: sem medições deste atributo`]),
   ]);
-  $("#avisos").replaceChildren(...avisos.map((a) => el("li", {}, a)));
+  $("#avisos").replaceChildren(...(erro ? [el("li", { class: "erro" }, erro)] : avisos.map((a) => el("li", {}, a))));
   const vazio = $("#vazio-grafico");
   vazio.hidden = estado.itens.length > 0;
-  vazio.textContent = "Marque ao menos um herói · conta para ver o gráfico.";
+  vazio.textContent = erro ? "Gráfico indisponível." : "Marque ao menos um herói · conta para ver o gráfico.";
   if (grafico) grafico.destroy();
   grafico = new Chart($("#canvas"), { type: "line", data: { datasets: dados }, options: opcoes(dados), plugins: [pluginTiers, pluginSemMedicoes] });
-  desenharFicha();
+  desenharFicha(erro);
 }
 
 // --- Ficha ---
 
-function desenharFicha() {
+function desenharFicha(erro = null) {
   const caixa = $("#ficha");
   if (!estado.itens.length) {
-    caixa.replaceChildren(el("p", { class: "suave" }, "Nada escolhido."));
+    caixa.replaceChildren(el("p", { class: "suave" }, erro ? "Ficha indisponível." : "Nada escolhido."));
     return;
   }
   const cab = el("tr", {}, el("th", { scope: "col" }, ""), ...estado.itens.map((i) => {

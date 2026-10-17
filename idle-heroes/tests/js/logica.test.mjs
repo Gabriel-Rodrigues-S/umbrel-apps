@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  dias, formatarDuracao, diaZero, serie, marcoTransicao, linhasFicha, preencher, montarItem, NUMEROS, ESTADO,
+  dias, formatarDuracao, diaZero, faixaX, serie, marcoTransicao, linhasFicha, preencher, montarItem, NUMEROS, ESTADO,
 } from "../../app/static/js/logica.js";
 
 const NUMS = ["poder", "ataque", "hp", "armadura", "velocidade"];
@@ -217,4 +217,22 @@ test("montarItem: estado esvaziado à mão (em limpos) vira null, mesmo com valo
   const item = montarItem(7, { arvore: null, notas: null }, new Set(), new Set(["arvore", "notas"]));
   assert.equal(item.arvore, null);
   assert.equal(item.notas, null);
+});
+
+test("faixaX: lista vazia não fixa limites", () => {
+  assert.deepEqual(faixaX([], "dia0"), { min: undefined, max: undefined, passo: undefined });
+  assert.deepEqual(faixaX([], "datas"), { min: undefined, max: undefined, passo: undefined });
+});
+
+test("faixaX: um x só ganha folga (senão o gráfico fica vazio)", () => {
+  assert.deepEqual(faixaX([0, 0], "dia0"), { min: -1, max: 1, passo: 1 });
+  const d = Date.UTC(2026, 9, 17);
+  assert.deepEqual(faixaX([d], "datas"), { min: d - 86400000, max: d + 86400000, passo: 86400000 });
+});
+
+test("faixaX: faixa curta marca de dia em dia; longa deixa o Chart.js escolher", () => {
+  assert.deepEqual(faixaX([5, -3, 7], "dia0"), { min: -3, max: 7, passo: 1 });
+  assert.deepEqual(faixaX([0, 400], "dia0"), { min: 0, max: 400, passo: undefined });
+  const d = Date.UTC(2026, 9, 17);
+  assert.equal(faixaX([d, d + 30 * 86400000], "datas").passo, undefined);
 });
