@@ -56,3 +56,18 @@ h2 { margin: 0 0 12px; font-size: 1.1rem; }
 .ficha thead th { white-space: nowrap; }
 .ficha tr.grupo th { padding-top: 14px; font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; color: var(--destaque); }
 .ficha tr.difere td, .ficha tr.difere th[scope="row"] { background: var(--difere); }
+
+/* Tela de sessão */
+.cartao-heroi { border: 1px solid var(--borda); border-radius: var(--raio); padding: 12px; margin-bottom: var(--espaco); }
+.cartao-heroi h3, .sessao-escolha h3 { margin: 0 0 8px; font-size: 1rem; }
+.cartao-heroi fieldset { border: 0; border-top: 1px solid var(--borda); margin: 8px 0 0; padding: 4px 0 0; min-width: 0; }
+.cartao-heroi legend { padding: 0 6px 0 0; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--destaque); }
+.campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap: 8px; }
+.campo { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.campo label { display: flex; flex-direction: column; font-size: .85rem; color: var(--suave); }
+.campo input, .campo select, .campo textarea { width: 100%; font: inherit; color: var(--texto); background: var(--painel); border: 1px solid var(--borda); border-radius: var(--raio); padding: 6px 10px; }
+.campo input.limpo, .campo select.limpo { border-style: dashed; border-color: var(--erro); }
+button.secundario { align-self: flex-start; background: transparent; color: var(--suave); border-color: transparent; padding: 0 4px; font-size: .8rem; text-decoration: underline; }
+.aviso { color: var(--aviso); margin: 4px 0; }
+.ok { color: var(--destaque); }
+.barra-salvar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; background: var(--painel); padding: 8px 0; }

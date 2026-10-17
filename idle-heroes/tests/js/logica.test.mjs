@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  dias, formatarDuracao, diaZero, serie, marcoTransicao, linhasFicha,
+  dias, formatarDuracao, diaZero, serie, marcoTransicao, linhasFicha, preencher, montarItem, NUMEROS, ESTADO,
 } from "../../app/static/js/logica.js";
 
 const NUMS = ["poder", "ataque", "hp", "armadura", "velocidade"];
@@ -171,4 +171,38 @@ test("linhasFicha: casinhas com inquilinos", () => {
   const l = linhasFicha([i]);
   assert.equal(linha(l, "Quantidade").valores[0], "2");
   assert.equal(linha(l, "Inquilinos").valores[0], "Heroi B (12%), —");
+});
+
+test("preencher: estado vai para valores e números só para dicas", () => {
+  const { valores, dicas } = preencher(med("2026-10-10", { poder: 500, hp: 90, arvore: 40, artefato: "Artefato Z" }));
+  assert.equal(valores.arvore, 40);
+  assert.equal(valores.artefato, "Artefato Z");
+  assert.ok(!("poder" in valores));
+  assert.deepEqual(Object.keys(valores).sort(), [...ESTADO].sort());
+  assert.equal(dicas.poder, 500);
+  assert.equal(dicas.hp, 90);
+  assert.deepEqual(Object.keys(dicas).sort(), [...NUMEROS].sort());
+});
+
+test("preencher(null) devolve objetos vazios", () => {
+  assert.deepEqual(preencher(null), { valores: {}, dicas: {} });
+});
+
+test("montarItem: número só entra se editado e preenchido", () => {
+  const { valores } = preencher(med("2026-10-10", { poder: 500, arvore: 40 }));
+  const sem = montarItem(7, valores, new Set(), new Set());
+  assert.equal(sem.heroi_id, 7);
+  assert.ok(!("poder" in sem));
+  assert.equal(sem.arvore, 40);
+  const com = montarItem(7, { ...valores, poder: 600, ataque: "" }, new Set(["poder", "ataque"]), new Set());
+  assert.equal(com.poder, 600);
+  assert.ok(!("ataque" in com));
+});
+
+test("montarItem: campo limpo vira null", () => {
+  const { valores } = preencher(med("2026-10-10", { artefato: "Artefato Z", arvore: 40 }));
+  const item = montarItem(7, valores, new Set(), new Set(["artefato", "poder"]));
+  assert.equal(item.artefato, null);
+  assert.equal(item.poder, null);
+  assert.equal(item.arvore, 40);
 });

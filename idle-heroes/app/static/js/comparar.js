@@ -1,5 +1,6 @@
 // Tela 'comparar': escolha de herói·conta, gráfico de evolução e ficha lado a lado.
 import { api } from "./api.js";
+import { el } from "./dom.js";
 import {
   TIERS, serie, marcoTransicao, linhasFicha, formatarDuracao, dataBR, dataBRDeMs, ms, dias, diaZero,
 } from "./logica.js";
@@ -17,16 +18,6 @@ const cores = new Map();
 let contas = [], herois = [], paresComMedicao = [], grafico = null, pedido = 0;
 
 const $ = (sel) => document.querySelector(sel);
-function el(tag, attrs = {}, ...filhos) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (k === "class") e.className = v;
-    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
-    else e.setAttribute(k, v);
-  }
-  for (const f of filhos) if (f != null) e.append(f);
-  return e;
-}
 const nomeDe = (lista, id) => (lista.find((x) => x.id === id) || {}).nome || `#${id}`;
 const rotuloPar = (chave) => {
   const [c, h] = chave.split(":").map(Number);
