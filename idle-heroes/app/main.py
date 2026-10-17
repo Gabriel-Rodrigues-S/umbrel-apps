@@ -2,9 +2,11 @@
 importado pela interface a partir do JSON da comunidade e fica só no volume."""
 import json
 import re
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from .db import TABELAS, conectar, criar_tabelas
 
@@ -16,10 +18,22 @@ def iniciar():
     criar_tabelas()
 
 
-@app.get("/")
+ESTATICO = Path(__file__).parent / "static"
+
+
+@app.get("/", include_in_schema=False)
 def index():
-    # Sem interface própria por enquanto: a página inicial abre a tela automática da API.
-    return RedirectResponse("docs")
+    return FileResponse(ESTATICO / "index.html")
+
+
+@app.get("/sessao", include_in_schema=False)
+def pagina_sessao():
+    return FileResponse(ESTATICO / "sessao.html")
+
+
+@app.get("/dados", include_in_schema=False)
+def pagina_dados():
+    return FileResponse(ESTATICO / "dados.html")
 
 
 @app.get("/api/meta")
@@ -191,3 +205,7 @@ async def importar(arquivo: UploadFile):
     except Exception:
         raise HTTPException(400, "Arquivo não é o JSON de heróis esperado")
     return importar_catalogo(registros, f"MushroomGecko/Idle-Heroes-Transcendence-Heroes ({arquivo.filename})")
+
+
+# Montado por último para não encobrir as rotas /api.
+app.mount("/static", StaticFiles(directory=ESTATICO), name="static")
