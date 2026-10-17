@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .comparacao import router as comparacao_router
 from .db import TABELAS, conectar, criar_tabelas
+from .sessao import router as sessao_router
 
 app = FastAPI(title="Idle Heroes CRUD")
 
@@ -39,6 +40,7 @@ def pagina_dados():
 
 # Antes das rotas genéricas, senão /api/{nome} captura "comparacao".
 app.include_router(comparacao_router)
+app.include_router(sessao_router)
 
 
 @app.get("/api/meta")
