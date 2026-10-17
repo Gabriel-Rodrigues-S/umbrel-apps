@@ -76,7 +76,24 @@ test("serie dia0 com criada_em: início antes do primeiro ponto", () => {
   assert.equal(s.pontos[0].x, 7);
   assert.deepEqual(s.avisos, []);
   const d = serie(item({ conta: { criada_em: "2026-10-01" }, medicoes: [med("2026-10-08", { poder: 100 })] }), "poder", "datas");
-  assert.equal(d.inicio, Date.UTC(2026, 9, 1));
+  assert.equal(d.inicio, null);
+});
+
+test("serie datas: sem trecho e sem avisos de data da conta", () => {
+  const meds = [med("2026-10-08", { poder: 100 }), med("2026-10-18", { poder: 150 })];
+  const desc = serie(item({ medicoes: meds }), "poder", "datas");
+  assert.equal(desc.inicio, null);
+  assert.deepEqual(desc.avisos, []);
+  const ap = serie(item({ conta: { criada_em: "2026-10-01", criada_em_aproximada: 1 }, medicoes: meds }), "poder", "datas");
+  assert.equal(ap.inicio, null);
+  assert.deepEqual(ap.avisos, []);
+  const ant = serie(item({ conta: { criada_em: "2026-10-17" }, medicoes: meds }), "poder", "datas");
+  assert.deepEqual(ant.avisos, []);
+});
+
+test("serie dia0: aviso de data aproximada", () => {
+  const s = serie(item({ conta: { criada_em: "2026-10-01", criada_em_aproximada: 1 }, medicoes: [med("2026-10-08", { poder: 100 })] }), "poder", "dia0");
+  assert.ok(s.avisos.includes("Data de criação da conta aproximada: dia 0 estimado"));
 });
 
 test("serie: medição antes de criada_em fica negativa e avisa", () => {
