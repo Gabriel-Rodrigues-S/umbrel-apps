@@ -50,6 +50,12 @@ function montar() {
   $("#add-heroi").append(...herois.map((h) => el("option", { value: h.id }, h.nome)));
   $("#conta").value = estado.conta ?? "";
   $("#data").value = estado.data;
+  if (edicao) {
+    // Corrigir não troca conta nem data: o upsert pela data nova criaria outra medição.
+    $("#conta").disabled = true;
+    $("#data").disabled = true;
+    $(".sessao-escolha .linha-form").after(el("p", { class: "suave" }, "Para mudar a data ou a conta, apague a medição e registre de novo."));
+  }
 }
 
 // Heróis com medição na conta, depois os adicionados à mão.
@@ -115,6 +121,8 @@ function rebase(c) {
   // O que a pessoa mexeu fica; o resto acompanha a herança.
   for (const k of Object.keys(c.valores)) if (!c.tocados.has(k)) delete c.valores[k];
   for (const [k, v] of Object.entries(valores)) if (!c.tocados.has(k)) c.valores[k] = v;
+  // Notas não se herdam, mas a da medição do próprio dia aparece (senão salvar a substituiria às cegas).
+  if (!c.tocados.has("notas")) c.valores.notas = c.existente ? c.existente.notas ?? null : null;
 }
 
 // propagar: quem chama trata o erro (senão a mensagem de erro é mostrada aqui).
@@ -165,8 +173,11 @@ function campoEntrada(c, nome) {
   if (tipo === "bool") {
     entrada = el("select", { onchange: mudou }, el("option", { value: "" }, "—"), el("option", { value: "0" }, "não"), el("option", { value: "1" }, "sim"));
   } else if (tipo.startsWith("select:")) {
+    const opcoes = tipo.slice(7).split(",");
     entrada = el("select", { onchange: mudou }, el("option", { value: "" }, "—"),
-      ...tipo.slice(7).split(",").map((o) => el("option", { value: o }, o)));
+      ...opcoes.map((o) => el("option", { value: o }, o)));
+    // Valor gravado fora da lista aparece como está (senão a tela mostraria "—").
+    if (texto !== "" && !opcoes.includes(texto)) entrada.append(el("option", { value: texto }, `${texto} (fora da lista)`));
   } else if (tipo === "textarea") {
     entrada = el("textarea", { rows: "2", oninput: mudou });
   } else {
@@ -188,7 +199,8 @@ function campoEntrada(c, nome) {
 }
 
 function cartao(id, c) {
-  const aviso = c.existente
+  // Corrigindo uma medição: a existente é ela mesma, não há o que avisar.
+  const aviso = c.existente && !edicao
     ? el("p", { class: "aviso" }, `Já existe medição deste herói nesta data (${dataBR(estado.data)}) — salvar vai atualizar`)
     : null;
   const base = c.base

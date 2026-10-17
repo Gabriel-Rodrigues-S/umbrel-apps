@@ -55,9 +55,10 @@ async function campoForm(col, valor) {
     controle = el("textarea", { id: nome, name: col.nome, rows: "3" });
     controle.value = valor ?? "";
   } else if (col.campo === "bool") {
-    controle = el("input", { id: nome, name: col.nome, type: "checkbox" });
-    controle.checked = !!valor;
-    return el("div", { class: "campo campo-bool" }, controle, rotulo);
+    // Três opções: "—" (não informado, vira NULL) é diferente de "não".
+    controle = el("select", { id: nome, name: col.nome },
+      el("option", { value: "" }, "—"), el("option", { value: "0" }, "não"), el("option", { value: "1" }, "sim"));
+    controle.value = valor == null || valor === "" ? "" : Number(valor) ? "1" : "0";
   } else if (col.campo.startsWith("select:") || col.campo.startsWith("ref:")) {
     controle = el("select", { id: nome, name: col.nome }, el("option", { value: "" }, "—"));
     let opcoes;
@@ -89,8 +90,7 @@ function lerForm(form, colunas) {
   const dados = {};
   for (const col of colunas) {
     const c = form.elements[col.nome];
-    if (col.campo === "bool") dados[col.nome] = c.checked ? 1 : 0;
-    else if (col.campo === "number") dados[col.nome] = c.value === "" ? "" : Number(c.value);
+    if (col.campo === "bool" || col.campo === "number") dados[col.nome] = c.value === "" ? "" : Number(c.value);
     else if (col.campo.startsWith("ref:")) dados[col.nome] = c.value === "" ? "" : Number(c.value);
     else dados[col.nome] = c.value;
   }

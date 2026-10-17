@@ -78,8 +78,6 @@ button.secundario { align-self: flex-start; background: transparent; color: var(
 .abas .aba { background: var(--painel); color: var(--texto); border-color: var(--borda); }
 .abas .aba[aria-pressed="true"] { background: var(--destaque); color: var(--destaque-texto); border-color: var(--destaque); }
 .dados h3 { margin: 12px 0 8px; font-size: 1rem; }
-.campo-bool { flex-direction: row; align-items: center; gap: 8px; }
-.campo-bool label { flex-direction: row; }
 .tabela-dados td.longo { cursor: pointer; min-width: 12rem; max-width: 28rem; }
 .tabela-dados td.longo.aberto { white-space: pre-wrap; }
 .tabela-dados td.acoes { white-space: nowrap; }
