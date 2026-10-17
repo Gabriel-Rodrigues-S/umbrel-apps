@@ -1,0 +1,4 @@
+.venv/
+fontes/
+__pycache__/
+*.db

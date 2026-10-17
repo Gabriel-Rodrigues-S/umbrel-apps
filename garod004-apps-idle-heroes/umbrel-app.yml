@@ -1,0 +1,27 @@
+manifestVersion: 1
+id: garod004-apps-idle-heroes
+name: Idle Heroes CRUD
+tagline: Catálogo de heróis, medições da conta, casinhas e testes
+icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-idle-heroes/icon.svg
+category: gaming
+version: '1.0.0'
+port: 8020
+description: >-
+  CRUD pessoal para acompanhar contas de Idle Heroes: catálogo de heróis,
+  habilidades e pivôs, medições datadas, casinhas e testes. O app não traz dados
+  do jogo; o catálogo é importado pelo usuário e fica só no armazenamento do app.
+  Interface provisória: a tela automática da API em /docs.
+developer: garod004
+website: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
+dependencies: []
+repo: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
+support: https://github.com/Gabriel-Rodrigues-S/umbrel-apps/issues
+gallery:
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-idle-heroes/icon.svg
+path: ''
+defaultUsername: ''
+defaultPassword: ''
+releaseNotes: >-
+  1.0.0: primeira versão. API com banco SQLite e importação do catálogo; interface pela tela /docs.
+submitter: garod004
+submission: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
