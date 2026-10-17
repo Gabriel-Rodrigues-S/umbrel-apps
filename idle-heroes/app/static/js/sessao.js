@@ -199,8 +199,8 @@ function campoEntrada(c, nome) {
 }
 
 function cartao(id, c) {
-  // Corrigindo uma medição: a existente é ela mesma, não há o que avisar.
-  const aviso = c.existente && !edicao
+  // Corrigindo uma medição: se a existente é ela mesma, não há o que avisar.
+  const aviso = c.existente && !(edicao && c.existente.id === edicao.id)
     ? el("p", { class: "aviso" }, `Já existe medição deste herói nesta data (${dataBR(estado.data)}) — salvar vai atualizar`)
     : null;
   const base = c.base
