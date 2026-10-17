@@ -8,7 +8,7 @@ def criar(c, tabela, **dados):
 
 
 def cenario(c):
-    x = criar(c, "contas", nome="Conta X", criada_em="2022-08-11", criada_em_aproximada=1)
+    x = criar(c, "contas", nome="Conta X", criada_em="2021-03-15", criada_em_aproximada=1)
     y = criar(c, "contas", nome="Conta Y")
     a = criar(c, "herois", nome="Heroi A")
     b = criar(c, "herois", nome="Heroi B")
@@ -30,7 +30,7 @@ def test_dois_pares_mesmo_heroi_contas_diferentes(cliente):
     assert itens[0]["heroi"]["nome"] == "Heroi A"
     assert [m["poder"] for m in itens[0]["medicoes"]] == [200]
     assert [m["poder"] for m in itens[1]["medicoes"]] == [100]
-    assert itens[1]["conta"]["criada_em"] == "2022-08-11"
+    assert itens[1]["conta"]["criada_em"] == "2021-03-15"
     assert itens[1]["conta"]["criada_em_aproximada"] == 1
 
 
