@@ -197,7 +197,8 @@ export function preencher(ultima) {
 export function montarItem(heroi_id, valores, editados, limpos) {
   const item = { heroi_id };
   for (const c of ESTADO) if (!vazio(valores[c])) item[c] = valores[c];
-  for (const c of NUMEROS) if (editados.has(c) && !vazio(valores[c])) item[c] = valores[c];
+  // Número mexido à mão e esvaziado apaga o gravado (null); intocado não entra.
+  for (const c of NUMEROS) if (editados.has(c)) item[c] = vazio(valores[c]) ? null : valores[c];
   for (const c of limpos) item[c] = null;
   return item;
 }

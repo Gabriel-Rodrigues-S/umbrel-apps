@@ -196,7 +196,7 @@ test("montarItem: número só entra se editado e preenchido", () => {
   assert.equal(sem.arvore, 40);
   const com = montarItem(7, { ...valores, poder: 600, ataque: "" }, new Set(["poder", "ataque"]), new Set());
   assert.equal(com.poder, 600);
-  assert.ok(!("ataque" in com));
+  assert.equal(com.ataque, null); // editado e esvaziado apaga o gravado
 });
 
 test("montarItem: campo limpo vira null", () => {
@@ -205,4 +205,16 @@ test("montarItem: campo limpo vira null", () => {
   assert.equal(item.artefato, null);
   assert.equal(item.poder, null);
   assert.equal(item.arvore, 40);
+});
+
+test("montarItem: número editado e esvaziado vira null; não editado fica de fora", () => {
+  const item = montarItem(7, { poder: "", hp: 10 }, new Set(["poder"]), new Set());
+  assert.equal(item.poder, null);
+  assert.ok(!("hp" in item));
+});
+
+test("montarItem: estado esvaziado à mão (em limpos) vira null, mesmo com valor null", () => {
+  const item = montarItem(7, { arvore: null, notas: null }, new Set(), new Set(["arvore", "notas"]));
+  assert.equal(item.arvore, null);
+  assert.equal(item.notas, null);
 });
