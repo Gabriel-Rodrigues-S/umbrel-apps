@@ -35,7 +35,7 @@ function item({ conta = {}, heroi = "Heroi A", medicoes = [], casinhas = [] } = 
 const linha = (linhas, rotulo) => linhas.find((l) => l.rotulo === rotulo);
 
 test("dias entre datas", () => {
-  assert.equal(dias("2022-08-11", "2026-10-17"), 1528);
+  assert.equal(dias("2021-03-15", "2026-10-17"), 2042);
   assert.equal(dias("2026-10-17", "2026-10-08"), -9);
 });
 
@@ -43,12 +43,12 @@ test("formatarDuracao", () => {
   assert.equal(formatarDuracao(0), "0 dias");
   assert.equal(formatarDuracao(45), "1 mês");
   assert.equal(formatarDuracao(400), "1 ano e 1 mês");
-  assert.equal(formatarDuracao(1528), "4 anos e 2 meses");
+  assert.equal(formatarDuracao(2042), "5 anos e 7 meses");
 });
 
 test("diaZero: conta, primeira medição, sem medições", () => {
-  const c = item({ conta: { criada_em: "2022-08-11", criada_em_aproximada: 1 }, medicoes: [med("2026-10-08")] });
-  assert.deepEqual(diaZero(c), { data: "2022-08-11", origem: "conta", aproximada: true });
+  const c = item({ conta: { criada_em: "2021-03-15", criada_em_aproximada: 1 }, medicoes: [med("2026-10-08")] });
+  assert.deepEqual(diaZero(c), { data: "2021-03-15", origem: "conta", aproximada: true });
   const p = item({ medicoes: [med("2026-10-08"), med("2026-10-17")] });
   assert.deepEqual(diaZero(p), { data: "2026-10-08", origem: "primeira_medicao", aproximada: false });
   assert.equal(diaZero(item()).data, null);
@@ -146,10 +146,10 @@ test("linhasFicha: número de data anterior mostra a data", () => {
 });
 
 test("linhasFicha: tempo de conta aproximado e desconhecido", () => {
-  const ap = item({ conta: { criada_em: "2022-08-11", criada_em_aproximada: 1 }, medicoes: [med("2026-10-17")] });
+  const ap = item({ conta: { criada_em: "2021-03-15", criada_em_aproximada: 1 }, medicoes: [med("2026-10-17")] });
   const t = linha(linhasFicha([ap]), "Tempo de conta").valores[0];
   assert.ok(t.startsWith("~"));
-  assert.equal(t, "~4 anos e 2 meses");
+  assert.equal(t, "~5 anos e 7 meses");
   const desc = linha(linhasFicha([item({ medicoes: [med("2026-10-17")] })]), "Tempo de conta").valores[0];
   assert.equal(desc, "data da conta desconhecida");
 });
