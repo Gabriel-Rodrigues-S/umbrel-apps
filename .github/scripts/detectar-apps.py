@@ -73,6 +73,12 @@ APPS = {
         "manifest": "garod004-apps-terraria",
         "paths": ["terraria/"],
     },
+    "idle-heroes": {
+        "image": "idle-heroes-crud",
+        "context": "./idle-heroes",
+        "manifest": "garod004-apps-idle-heroes",
+        "paths": ["idle-heroes/"],
+    },
 }
 
 VERSAO_RE = re.compile(r"^version:\s*['\"]?(\d+\.\d+\.\d+)['\"]?\s*$", re.MULTILINE)
