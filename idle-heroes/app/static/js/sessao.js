@@ -117,7 +117,8 @@ function rebase(c) {
   for (const [k, v] of Object.entries(valores)) if (!c.tocados.has(k)) c.valores[k] = v;
 }
 
-async function carregar() {
+// propagar: quem chama trata o erro (senão a mensagem de erro é mostrada aqui).
+async function carregar(propagar = false) {
   const n = ++pedido;
   const ids = [...estado.cartoes.keys()];
   if (ids.length) {
@@ -129,6 +130,7 @@ async function carregar() {
         if (c) { c.itens = it; rebase(c); }
       }
     } catch (err) {
+      if (propagar) throw err;
       if (n === pedido) msg(`Erro ao carregar: ${err.message}`, true);
       return;
     }
@@ -138,17 +140,24 @@ async function carregar() {
 
 // --- Cartões ---
 
+function dicaDe(c, nome) {
+  return c.dicas[nome] != null ? `última: ${c.dicas[nome]}` : "";
+}
+
 function campoEntrada(c, nome) {
   const col = colunas[nome];
   const tipo = col.campo;
   const mudou = (e) => {
     c.tocados.add(nome);
-    c.limpos.delete(nome);
     if (NUMEROS.includes(nome)) c.editados.add(nome);
     const bruto = e.target.value;
+    // Esvaziar à mão apaga o valor gravado (null); preencher de novo desfaz.
+    if (bruto === "") c.limpos.add(nome); else c.limpos.delete(nome);
     c.valores[nome] = bruto === "" ? null
       : (tipo === "number" || tipo === "bool") ? Number(bruto) : bruto;
-    e.target.classList.remove("limpo");
+    e.target.classList.toggle("limpo", bruto === "");
+    if (bruto !== "") e.target.setAttribute("placeholder", dicaDe(c, nome));
+    else e.target.setAttribute("placeholder", "será apagado");
   };
   const atual = c.valores[nome];
   const texto = atual == null ? "" : String(atual);
@@ -219,10 +228,15 @@ async function salvar() {
     const r = await api.post("api/sessao", { conta_id: estado.conta, data: estado.data, herois: herois_ });
     const c = r.criadas.length, a = r.atualizadas.length;
     msg(`Sessão salva: ${c} ${c === 1 ? "criada" : "criadas"}, ${a} ${a === 1 ? "atualizada" : "atualizadas"}.`);
-    medicoes = await api.get("api/medicoes");
-    for (const x of estado.cartoes.values()) { x.tocados.clear(); x.editados.clear(); x.limpos.clear(); x.valores = {}; }
-    listarHerois();
-    await carregar();
+    // Gravou: a partir daqui erro de recarga não pode virar "Não salvou".
+    try {
+      medicoes = await api.get("api/medicoes");
+      for (const x of estado.cartoes.values()) { x.tocados.clear(); x.editados.clear(); x.limpos.clear(); x.valores = {}; }
+      listarHerois();
+      await carregar(true);
+    } catch (err) {
+      msg(`Sessão salva (${c} ${c === 1 ? "criada" : "criadas"}, ${a} ${a === 1 ? "atualizada" : "atualizadas"}), mas não consegui recarregar a tela: ${err.message}`, true);
+    }
   } catch (err) {
     msg(`Não salvou: ${err.message}`, true);
   } finally {
