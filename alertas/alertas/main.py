@@ -16,7 +16,8 @@ from typing import Literal
 import anyio
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError, field_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -25,6 +26,9 @@ from .identidade import gateway_do_conteiner, usuario_confiavel
 from .remetentes import Remetentes
 
 log = logging.getLogger("alertas")
+
+ESTATICOS = Path(__file__).resolve().parent / "static"
+SEM_CACHE = {"Cache-Control": "no-cache"}
 
 ROTAS_PUBLICAS = {("POST", "/api/alertas"), ("GET", "/saude")}
 LIMITE_CORPO = 64 * 1024
@@ -216,10 +220,23 @@ def criar_app(dados: Path, *, ip_host: str | None = None, usuario_permitido: str
         com_banco(banco.salvar_inscricao, sub.model_dump())
         return {"ok": True}
 
+    # Interface (PWA). Tudo passa pelo middleware de identidade, inclusive /static, sw.js e manifest.
     @app.get("/")
     def raiz():
-        # interface de verdade vem na Tarefa 10 (design do Claude Design)
-        return PlainTextResponse("alertas")
+        return FileResponse(ESTATICOS / "index.html", media_type="text/html; charset=utf-8", headers=SEM_CACHE)
+
+    @app.get("/sw.js")
+    def service_worker():
+        # na raiz, para o escopo do service worker cobrir "/"
+        return FileResponse(ESTATICOS / "sw.js", media_type="text/javascript; charset=utf-8",
+                            headers={**SEM_CACHE, "Service-Worker-Allowed": "/"})
+
+    @app.get("/manifest.webmanifest")
+    def manifesto():
+        return FileResponse(ESTATICOS / "manifest.webmanifest", media_type="application/manifest+json",
+                            headers=SEM_CACHE)
+
+    app.mount("/static", StaticFiles(directory=ESTATICOS), name="static")
 
     return app
 
