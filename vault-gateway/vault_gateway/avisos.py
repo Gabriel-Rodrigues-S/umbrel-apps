@@ -23,8 +23,8 @@ MAX_DETALHES = 19000  # folga sob os 20000 aceitos
 MAX_CORPO = 60 * 1024  # folga sob os 64 KiB aceitos
 MARCA_CORTE = "… (cortado)"
 MAX_FILA = 5000
-# respostas que valem nova tentativa; outro 4xx = recusa definitiva
-REPETIR = {401, 403, 408, 429}
+# respostas que valem nova tentativa (404/405: URL do alertas errada, o alerta fica na fila); outro 4xx = recusa definitiva
+REPETIR = {401, 403, 404, 405, 408, 429}
 
 
 def _txt(valor) -> str:

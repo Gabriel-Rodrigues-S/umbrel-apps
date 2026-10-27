@@ -68,7 +68,7 @@ def test_guardar_nao_usa_rede(tmp_path):
     assert len(pendentes(tmp_path / "fila")) == 1
 
 
-@pytest.mark.parametrize("status", [500, 503, 401, 403, 408, 429])
+@pytest.mark.parametrize("status", [500, 503, 401, 403, 404, 405, 408, 429])
 def test_falha_temporaria_fica_na_fila(tmp_path, status):
     a = Avisos("http://x", "t", tmp_path / "fila", cliente=cliente_com(lambda r: httpx.Response(status)))
     a.enviar("grave", "a", "b")
@@ -76,7 +76,7 @@ def test_falha_temporaria_fica_na_fila(tmp_path, status):
     assert not (tmp_path / "fila" / "invalidos").exists()
 
 
-@pytest.mark.parametrize("status", [400, 404, 413, 422])
+@pytest.mark.parametrize("status", [400, 413, 422])
 def test_recusa_definitiva_vai_para_invalidos_e_segue(tmp_path, status, capsys):
     fila = tmp_path / "fila"
     estado = {"n": 0, "titulos": []}
