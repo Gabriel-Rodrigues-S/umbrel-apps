@@ -25,7 +25,8 @@ Rode, no servidor (as credenciais sao digitadas por voce, nunca guardadas aqui):
 
   sudo docker exec -it $CONTAINER ob login
   sudo docker exec -it $CONTAINER sh -c 'cd /data/vault && ob sync-setup --vault "<nome-do-cofre-remoto>"'
-  sudo docker exec -it $CONTAINER sh -c 'cd /data/vault && ob sync-config --conflict-strategy merge'
+  sudo docker exec -it $CONTAINER sh -c 'cd /data/vault && ob sync-config --mode pull-only --conflict-strategy merge'
+  # So rode o passo abaixo depois que o sync-setup tiver dado certo:
   sudo docker exec -it $CONTAINER touch /data/ob-home/.configurado
 
 Depois reinicie o app (Umbrel > app > reiniciar). Aguardando configuracao...
