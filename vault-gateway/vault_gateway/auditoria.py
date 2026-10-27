@@ -1,15 +1,30 @@
-"""Log de acesso em JSONL (uma linha por chamada)."""
+"""Log de acesso em JSONL (uma linha por chamada), com rotação por tamanho."""
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
 MOTIVOS = {"token_ausente", "token_invalido", "fora_do_vault", "excluido", "ferramenta_desconhecida"}
 RESULTADOS = {"permitida", "negada"}
 MAX_ALVO = 500
+MAX_BYTES = 50 * 1024 * 1024  # 50 MB por arquivo
+COPIAS = 5  # acesso.jsonl.1 … .5; a mais antiga é descartada
+
+
+def _rotacionar(log: Path, copias: int) -> None:
+    """acesso.jsonl → .1, .1 → .2 … ; a .<copias> some. Chamar sob a trava do log."""
+    for n in range(copias - 1, 0, -1):
+        origem = log.with_name(f"{log.name}.{n}")
+        if origem.exists():
+            os.replace(origem, log.with_name(f"{log.name}.{n + 1}"))
+    os.replace(log, log.with_name(f"{log.name}.1"))
 
 
 def registrar(log: Path, *, cliente: str | None, ferramenta: str, alvo: str,
-              resultado: str, motivo: str | None) -> dict:
+              resultado: str, motivo: str | None, max_bytes: int = MAX_BYTES,
+              copias: int = COPIAS) -> dict:
+    """Acrescenta uma linha; se passar de max_bytes, rotaciona antes. Não é seguro entre
+    processos: o servidor chama sob a própria trava (um worker só)."""
     if resultado not in RESULTADOS:
         raise ValueError(f"resultado inválido: {resultado!r}")
     if resultado == "negada" and motivo not in MOTIVOS:
@@ -22,8 +37,15 @@ def registrar(log: Path, *, cliente: str | None, ferramenta: str, alvo: str,
         "resultado": resultado,
         "motivo": motivo,
     }
+    linha = (json.dumps(registro, ensure_ascii=False) + "\n").encode("utf-8", "replace")
     log = Path(log)
     log.parent.mkdir(parents=True, exist_ok=True)
-    with log.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(registro, ensure_ascii=False) + "\n")
+    try:
+        tamanho = log.stat().st_size
+    except FileNotFoundError:
+        tamanho = 0
+    if tamanho and tamanho + len(linha) > max_bytes:
+        _rotacionar(log, copias)
+    with log.open("ab") as f:
+        f.write(linha)
     return registro
