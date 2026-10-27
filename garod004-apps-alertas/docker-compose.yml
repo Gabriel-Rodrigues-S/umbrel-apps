@@ -14,8 +14,10 @@ services:
     # Exceção documentada à regra "sem ports:" (mesma ideia do Terraria): a porta é publicada só no
     # loopback do host, para o Tailscale (rede do host) alcançar o app sem passar pelo login do
     # painel e sem expô-lo na rede local.
+    # Porta do host 8446 (não 8445): o umbreld já escuta em 127.0.0.1:8445 (porta do manifesto).
+    # O Tailscale Serve deve apontar para http://127.0.0.1:8446.
     ports:
-      - "127.0.0.1:8445:8445"
+      - "127.0.0.1:8446:8445"
     # Endurecimento: sem NET_RAW (evita falsificação de ARP na rede Docker compartilhada).
     cap_drop:
       - NET_RAW

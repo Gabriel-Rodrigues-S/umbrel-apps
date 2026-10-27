@@ -1,6 +1,6 @@
 """Identidade do Tailscale: o cabeçalho só vale se o pedido vier do host.
 
-O Tailscale Serve roda no host e repassa para 127.0.0.1:8445; o Docker entrega
+O Tailscale Serve roda no host e repassa para 127.0.0.1:8446 (porta do host -> 8445 no contêiner); o Docker entrega
 esse pedido ao contêiner com origem no gateway da rede (o host). Outros
 contêineres da mesma rede chegam direto, com o próprio IP, e podem forjar o
 cabeçalho: por isso o IP de origem tem de ser exatamente o gateway.

@@ -87,7 +87,7 @@ Acesso somente leitura, por conector MCP, a uma cópia de notas mantida no servi
 - Quatro ferramentas de consulta: listar, ler, buscar e recentes
 - Token por cliente, revogável sem reiniciar; log de auditoria de cada acesso
 - Três serviços: gateway, histórico de alterações e sincronização (modo só download, configurada uma vez por terminal)
-- Porta **8440** publicada só no loopback do host (exceção documentada, para o Tailscale); o vault é montado `:ro` no gateway e no histórico
+- Publicado só no loopback do host em **127.0.0.1:8441** (exceção documentada; a 8440 do loopback é do umbreld). O Tailscale Funnel/Serve aponta para `http://127.0.0.1:8441`; o vault é montado `:ro` no gateway e no histórico
 - Avisa o app Alertas sobre tentativas negadas e divergências
 
 **Imagens Docker:** `ghcr.io/gabriel-rodrigues-s/vault-gateway` e `ghcr.io/gabriel-rodrigues-s/vault-sync`
@@ -101,7 +101,7 @@ Central de alertas dos apps do servidor, com notificação push genérica.
 - Cada remetente autorizado usa um token próprio; histórico guardado por 365 dias
 - Gravidades grave, normal e informativa (a informativa nunca gera push)
 - Push sempre genérico ("Novo alerta no servidor"); detalhes só dentro do app
-- PWA instalável; porta **8445** publicada só no loopback do host (exceção documentada, para o Tailscale)
+- PWA instalável; publicado só no loopback do host em **127.0.0.1:8446** (exceção documentada; a 8445 do loopback é do umbreld). O Tailscale Serve aponta para `http://127.0.0.1:8446`
 
 **Imagem Docker:** `ghcr.io/gabriel-rodrigues-s/alertas:latest`
 **Porta:** 8445
