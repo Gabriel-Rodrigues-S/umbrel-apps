@@ -1,0 +1,9 @@
+[Unit]
+Description=Conferência do vault Obsidian (PC x Umbrel) a cada 15 minutos
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

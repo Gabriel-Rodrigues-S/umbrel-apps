@@ -1,0 +1,6 @@
+[Unit]
+Description=Conferência do vault Obsidian: PC x Umbrel (somente leitura)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/share/conferencia-vault/conferencia.py
