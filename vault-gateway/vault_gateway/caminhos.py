@@ -59,28 +59,33 @@ def resolver(raiz: Path, relativo: str, *, para_ler: bool) -> Path:
     if ".." in partes:
         raise Negado("fora_do_vault")
 
-    atual = raiz_r
-    for parte in partes:
-        atual = atual / _achar(atual, parte)
+    # erros de sistema (nome longo, laço de links) viram Negado, sem vazar caminho
+    try:
+        atual = raiz_r
+        for parte in partes:
+            atual = atual / _achar(atual, parte)
 
-    # links simbólicos resolvidos antes de checar o limite
-    final = atual.resolve(strict=False)
-    if not final.is_relative_to(raiz_r):
-        raise Negado("fora_do_vault")
+        # links simbólicos resolvidos antes de checar o limite
+        final = atual.resolve(strict=False)
+        if not final.is_relative_to(raiz_r):
+            raise Negado("fora_do_vault")
 
-    # exclusão vale para o caminho pedido e para o destino real (links internos)
-    partes_reais = final.relative_to(raiz_r).parts
-    if _tem_pasta_excluida(partes) or _tem_pasta_excluida(partes_reais):
-        raise Negado("excluido")
-
-    if final.is_dir():
-        if para_ler:
-            raise IsADirectoryError(relativo)
-        return final
-    if para_ler or final.is_file():
-        pedido = Path(partes[-1]) if partes else final
-        if not (_ext_legivel(pedido) and _ext_legivel(final)):
+        # exclusão vale para o caminho pedido e para o destino real (links internos)
+        partes_reais = final.relative_to(raiz_r).parts
+        if _tem_pasta_excluida(partes) or _tem_pasta_excluida(partes_reais):
             raise Negado("excluido")
+
+        eh_dir = final.is_dir()
+        if not eh_dir and (para_ler or final.is_file()):
+            pedido = Path(partes[-1]) if partes else final
+            if not (_ext_legivel(pedido) and _ext_legivel(final)):
+                raise Negado("excluido")
+    except (OSError, RuntimeError):
+        raise Negado("fora_do_vault") from None
+
+    # fora do try: IsADirectoryError é deliberado (mensagem só com o caminho relativo)
+    if eh_dir and para_ler:
+        raise IsADirectoryError(relativo)
     return final
 
 
@@ -93,10 +98,10 @@ def visivel(raiz: Path, caminho: Path) -> bool:
             return False
         reais = real.relative_to(raiz_r).parts
         pedidas = Path(os.path.abspath(caminho)).relative_to(raiz_r).parts
-    except (ValueError, OSError):
+        if _tem_pasta_excluida(reais) or _tem_pasta_excluida(pedidas):
+            return False
+        if real.is_file():
+            return _ext_legivel(real) and _ext_legivel(Path(caminho))
+        return True
+    except (ValueError, OSError, RuntimeError):
         return False
-    if _tem_pasta_excluida(reais) or _tem_pasta_excluida(pedidas):
-        return False
-    if real.is_file():
-        return _ext_legivel(real) and _ext_legivel(Path(caminho))
-    return True

@@ -159,3 +159,38 @@ def test_nao_visivel(vault, rel):
 def test_nao_visivel_fora(vault):
     assert not visivel(vault, vault.parent / "fora.md")
     assert not visivel(vault, vault / "link-arquivo-fora.md")
+
+
+# erros de sistema não vazam: viram Negado/False sem caminho absoluto
+@pytest.mark.parametrize("para_ler", [True, False])
+def test_nome_longo_negado(vault, para_ler):
+    with pytest.raises(Negado) as e:
+        resolver(vault, "a" * 300 + ".md", para_ler=para_ler)
+    assert str(vault) not in str(e.value)
+
+
+def test_nome_longo_visivel_false(vault):
+    assert visivel(vault, vault / ("a" * 300 + ".md")) is False
+
+
+@pytest.fixture
+def laco(vault):
+    (vault / "laco1").symlink_to(vault / "laco2")
+    (vault / "laco2").symlink_to(vault / "laco1")
+
+
+@pytest.mark.parametrize("para_ler", [True, False])
+def test_laco_de_links_negado(vault, laco, para_ler):
+    with pytest.raises(Negado) as e:
+        resolver(vault, "laco1", para_ler=para_ler)
+    assert str(vault) not in str(e.value)
+
+
+def test_laco_de_links_visivel_false(vault, laco):
+    assert visivel(vault, vault / "laco1") is False
+
+
+def test_isadirectory_sem_caminho_absoluto(vault):
+    with pytest.raises(IsADirectoryError) as e:
+        resolver(vault, "Referências", para_ler=True)
+    assert str(vault) not in str(e.value)
