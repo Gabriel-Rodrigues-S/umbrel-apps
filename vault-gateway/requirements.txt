@@ -1,1 +1,2 @@
 # Sem dependências externas ainda (as próximas tarefas acrescentam)
+httpx==0.28.1

@@ -25,3 +25,31 @@ def vault(tmp_path):
     (raiz / "atalho.md").symlink_to(raiz / "Referências" / "Nota com acento.md")
     (raiz / "atalho-obsidian.json").symlink_to(raiz / ".obsidian" / "x.json")
     return raiz
+
+
+class _ServidorFalso:
+    """Alertas falso: falha (ConnectError) até .ligar(), depois responde 201."""
+
+    def __init__(self):
+        import httpx
+
+        self.url = "http://alertas.teste"
+        self.ligado = False
+        self.recebidos = []
+        self.cliente = httpx.Client(transport=httpx.MockTransport(self._tratar))
+
+    def _tratar(self, request):
+        import httpx
+
+        if not self.ligado:
+            raise httpx.ConnectError("fora do ar", request=request)
+        self.recebidos.append(request)
+        return httpx.Response(201, json={"ok": True})
+
+    def ligar(self):
+        self.ligado = True
+
+
+@pytest.fixture
+def servidor_falso():
+    return _ServidorFalso()
