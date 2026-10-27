@@ -1,0 +1,27 @@
+version: '3.7'
+
+services:
+  app_proxy:
+    environment:
+      APP_HOST: garod004-apps-alertas_server_1
+      APP_PORT: 8445
+
+  server:
+    image: ghcr.io/gabriel-rodrigues-s/alertas:1.0.0
+    restart: on-failure
+    # O --no-proxy-headers impede que cabeçalhos X-Forwarded-* de outros contêineres alterem o IP do cliente.
+    command: ["uvicorn", "alertas.main:app", "--host", "0.0.0.0", "--port", "8445", "--workers", "1", "--no-proxy-headers"]
+    # Exceção documentada à regra "sem ports:" (mesma ideia do Terraria): a porta é publicada só no
+    # loopback do host, para o Tailscale (rede do host) alcançar o app sem passar pelo login do
+    # painel e sem expô-lo na rede local.
+    ports:
+      - "127.0.0.1:8445:8445"
+    # Endurecimento: sem NET_RAW (evita falsificação de ARP na rede Docker compartilhada).
+    cap_drop:
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ${APP_DATA_DIR}/data:/app/data
+    environment:
+      TZ: America/Manaus

@@ -79,6 +79,24 @@ APPS = {
         "manifest": "garod004-apps-idle-heroes",
         "paths": ["idle-heroes/"],
     },
+    "vault-gateway": {
+        "image": "vault-gateway",
+        "context": "./vault-gateway",
+        "manifest": "garod004-apps-vault-gateway",
+        "paths": ["vault-gateway/"],
+    },
+    "vault-sync": {
+        "image": "vault-sync",
+        "context": "./vault-sync",
+        "manifest": "garod004-apps-vault-gateway",
+        "paths": ["vault-sync/"],
+    },
+    "alertas": {
+        "image": "alertas",
+        "context": "./alertas",
+        "manifest": "garod004-apps-alertas",
+        "paths": ["alertas/"],
+    },
 }
 
 VERSAO_RE = re.compile(r"^version:\s*['\"]?(\d+\.\d+\.\d+)['\"]?\s*$", re.MULTILINE)

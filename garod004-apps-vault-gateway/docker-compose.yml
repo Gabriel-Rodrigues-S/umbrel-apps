@@ -1,0 +1,67 @@
+version: '3.7'
+
+services:
+  app_proxy:
+    environment:
+      APP_HOST: garod004-apps-vault-gateway_server_1
+      APP_PORT: 8440
+
+  server:
+    image: ghcr.io/gabriel-rodrigues-s/vault-gateway:1.0.0
+    restart: on-failure
+    # O --no-proxy-headers impede que cabeçalhos X-Forwarded-* de outros contêineres alterem o IP do cliente.
+    command: ["uvicorn", "vault_gateway.servidor:app", "--host", "0.0.0.0", "--port", "8440", "--workers", "1", "--no-proxy-headers"]
+    # Exceção documentada à regra "sem ports:" (mesma ideia do Terraria): a porta é publicada só no
+    # loopback do host, para o Tailscale (rede do host) alcançar o gateway sem passar pelo login do
+    # painel e sem expô-lo na rede local.
+    ports:
+      - "127.0.0.1:8440:8440"
+    # Endurecimento: sem NET_RAW (evita falsificação de ARP na rede Docker compartilhada).
+    cap_drop:
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      # O vault é só leitura aqui; quem escreve é o serviço sync.
+      - ${APP_DATA_DIR}/data/vault:/data/vault:ro
+      - ${APP_DATA_DIR}/data/logs:/data/logs
+      - ${APP_DATA_DIR}/data/config:/data/config
+      - ${APP_DATA_DIR}/data/fila-avisos:/data/fila-avisos
+    environment:
+      VAULT_DIR: /data/vault
+      DADOS_DIR: /data
+      TZ: America/Manaus
+
+  historico:
+    image: ghcr.io/gabriel-rodrigues-s/vault-gateway:1.0.0
+    restart: on-failure
+    command: ["python", "-m", "vault_gateway.historico"]
+    cap_drop:
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ${APP_DATA_DIR}/data/vault:/data/vault:ro
+      - ${APP_DATA_DIR}/data/logs:/data/logs
+      - ${APP_DATA_DIR}/data/config:/data/config
+      - ${APP_DATA_DIR}/data/fila-avisos:/data/fila-avisos
+      - ${APP_DATA_DIR}/data/historico.git:/data/historico.git
+    environment:
+      VAULT_DIR: /data/vault
+      DADOS_DIR: /data
+      TZ: America/Manaus
+
+  sync:
+    image: ghcr.io/gabriel-rodrigues-s/vault-sync:1.0.0
+    restart: on-failure
+    cap_drop:
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      # Único serviço com escrita no vault e acesso às credenciais do ob.
+      - ${APP_DATA_DIR}/data/vault:/data/vault
+      - ${APP_DATA_DIR}/data/ob-home:/data/ob-home
+      - ${APP_DATA_DIR}/data/logs:/data/logs
+    environment:
+      TZ: America/Manaus

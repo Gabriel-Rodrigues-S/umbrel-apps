@@ -1,0 +1,29 @@
+manifestVersion: 1
+id: garod004-apps-alertas
+name: Alertas
+tagline: Central de alertas do servidor com notificação push genérica
+icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-alertas/icon.svg
+category: developer
+version: '1.0.0'
+port: 8445
+description: >-
+  Central de alertas dos apps do servidor e de verificações externas. Cada remetente
+  autorizado envia seus alertas com um token próprio, o app guarda o histórico por 365 dias
+  e avisa o aparelho cadastrado por notificação push. O texto do push é sempre genérico
+  ("Novo alerta no servidor"); os detalhes só aparecem dentro do app, para o usuário autorizado.
+  Gravidades: grave, normal e informativa (a informativa nunca gera push).
+  Funciona como PWA instalável no celular.
+developer: garod004
+website: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
+dependencies: []
+repo: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
+support: https://github.com/Gabriel-Rodrigues-S/umbrel-apps/issues
+gallery:
+  - https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-alertas/icon.svg
+path: ''
+defaultUsername: ''
+defaultPassword: ''
+releaseNotes: >-
+  1.0.0: primeira versão, com API de alertas por remetente, retenção de 365 dias e push genérico.
+submitter: garod004
+submission: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
