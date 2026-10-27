@@ -4,7 +4,12 @@
 Compara os SHA-256 do vault no PC com a cópia no servidor (via ssh, só
 leitura). Se a MESMA divergência persistir em 2 execuções seguidas, envia um
 aviso "normal" ao app de alertas. Só biblioteca padrão.
+
+Caminhos com algum componente começando por "." (.obsidian, .git, .trash,
+.gitignore...) são ignorados dos dois lados: o Obsidian Sync não os sincroniza.
+A chave opcional "ignorar" (globs fnmatch sobre o caminho relativo) exclui mais.
 """
+import fnmatch
 import hashlib
 import json
 import os
@@ -17,13 +22,17 @@ import unicodedata
 import urllib.request
 from pathlib import Path
 
-PASTAS_IGNORADAS = (".obsidian", ".git", ".trash")
 TITULO_FALHA = "Conferência do vault falhou"
 INTERVALO_FALHA = 24 * 3600
 TITULO = "Cópias do vault divergentes"
 LIMITE_DETALHES = 200
 TIMEOUT_SSH = 300
 TIMEOUT_POST = 10
+# limites do app de alertas (alertas/alertas/main.py: NovoAlerta e LIMITE_CORPO)
+MAX_TITULO = 120
+MAX_DETALHES = 19000
+MAX_CORPO = 60 * 1024
+MARCA_CORTE = "… (cortado)"
 
 
 class SshIndisponivel(Exception):
@@ -55,8 +64,10 @@ def somas_locais(vault: Path) -> dict[str, str]:
     vault = Path(vault)
     r: dict[str, str] = {}
     for raiz, pastas, arquivos in os.walk(vault, followlinks=False):
-        pastas[:] = [p for p in pastas if p not in PASTAS_IGNORADAS]
+        pastas[:] = [p for p in pastas if not p.startswith(".")]
         for nome in arquivos:
+            if nome.startswith("."):
+                continue  # o Sync não sincroniza arquivos ocultos
             caminho = Path(raiz) / nome
             if caminho.is_symlink():
                 continue
@@ -111,13 +122,20 @@ def parse_sha256sum(saida: str) -> dict[str, str]:
 
 
 def _comando_remoto(caminho_remoto: str) -> str:
-    excl = " ".join(
-        f"-not -path './{p}/*' -not -path '*/{p}/*'" for p in PASTAS_IGNORADAS
-    )
+    # '*/.*' pula qualquer componente oculto (pasta ou arquivo), como no lado local
     return (
         f"cd {shlex.quote(caminho_remoto)} && "
-        f"find . -type f {excl} -exec sha256sum {{}} +"
+        "find . -type f -not -path '*/.*' -exec sha256sum {} +"
     )
+
+
+def filtrar(somas: dict[str, str], ignorar: list[str]) -> dict[str, str]:
+    """Remove caminhos ocultos e os que casam com algum glob de "ignorar"."""
+    return {
+        k: v for k, v in somas.items()
+        if not any(parte.startswith(".") for parte in k.split("/"))
+        and not any(fnmatch.fnmatchcase(k, g) for g in ignorar)
+    }
 
 
 def somas_remotas(ssh_host: str, caminho_remoto: str, runner=subprocess.run) -> dict[str, str]:
@@ -199,6 +217,27 @@ def marcar_alertado(diffs: list[str], estado: Path) -> None:
     _gravar_estado(estado, dados)
 
 
+def _cortar(s: str, limite: int) -> str:
+    if len(s) <= limite:
+        return s
+    return s[:max(0, limite - len(MARCA_CORTE))] + MARCA_CORTE
+
+
+def _bytes_corpo(corpo: dict) -> bytes:
+    return json.dumps(corpo, ensure_ascii=False).encode("utf-8", "replace")
+
+
+def limitar_corpo(corpo: dict) -> dict:
+    """Título até 120, detalhes até 19000 e corpo abaixo de 64 KiB (limites do app)."""
+    c = dict(corpo)
+    c["titulo"] = _cortar(c["titulo"], MAX_TITULO)
+    c["detalhes"] = _cortar(c["detalhes"], MAX_DETALHES)
+    while len(_bytes_corpo(c)) > MAX_CORPO and len(c["detalhes"]) > len(MARCA_CORTE):
+        novo = int(len(c["detalhes"]) * MAX_CORPO / len(_bytes_corpo(c)) * 0.95) - 1
+        c["detalhes"] = _cortar(c["detalhes"], max(len(MARCA_CORTE), novo))
+    return c
+
+
 def montar_corpo_falha(codigo: int) -> dict:
     return {"gravidade": "normal", "titulo": TITULO_FALHA,
             "detalhes": f"código de saída: {codigo}"}
@@ -214,7 +253,7 @@ def montar_corpo(diffs: list[str]) -> dict:
 def enviar_alerta(url: str, token: str, diffs: list[str], corpo: dict | None = None) -> None:
     req = urllib.request.Request(
         url,
-        data=json.dumps(corpo or montar_corpo(diffs), ensure_ascii=False).encode("utf-8"),
+        data=_bytes_corpo(limitar_corpo(corpo or montar_corpo(diffs))),
         headers={
             "Content-Type": "application/json; charset=utf-8",
             "Authorization": f"Bearer {token}",
@@ -240,7 +279,10 @@ def main(config_dir=None, estado=None, vault=None,
         caminho_remoto = cfg["caminho_remoto"]
         url = cfg["url_alertas"]
         caminho_local = Path(cfg["caminho_local"])
-    except (OSError, ValueError, KeyError, TypeError) as e:
+        ignorar = cfg.get("ignorar", [])
+        if not (isinstance(ignorar, list) and all(isinstance(g, str) for g in ignorar)):
+            raise TypeError("ignorar deve ser uma lista de textos")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
         _erro(f"configuração ausente ou inválida ({type(e).__name__})")
         return 2
     token_path = config_dir / "token"
@@ -256,9 +298,9 @@ def main(config_dir=None, estado=None, vault=None,
         _erro("arquivo do token vazio")
         return 2
 
-    locais = somas_locais(caminho_local)
+    locais = filtrar(somas_locais(caminho_local), ignorar)
     try:
-        remotas = somas_remotas_fn(ssh_host, caminho_remoto)
+        remotas = filtrar(somas_remotas_fn(ssh_host, caminho_remoto), ignorar)
     except SshIndisponivel as e:
         _erro(f"servidor inacessível, nada feito: {e}")
         return 0

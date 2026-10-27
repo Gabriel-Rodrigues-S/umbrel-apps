@@ -25,9 +25,29 @@ repositório):
   "ssh_host": "<host ssh do Umbrel, com chave>",
   "caminho_remoto": "<pasta do vault no Umbrel>",
   "caminho_local": "<pasta do vault no PC>",
-  "url_alertas": "<URL do endpoint de alertas>"
+  "url_alertas": "<URL do endpoint de alertas>",
+  "ignorar": ["*.py", "Anexos/*.html"]
 }
 ```
+
+### O que é comparado
+
+- Qualquer caminho com um componente começando por `.` é ignorado **nos dois
+  lados** (`.obsidian/`, `.git/`, `.trash/`, `.gitignore`, `pasta/.oculto.md`...):
+  o Obsidian Sync nunca sincroniza arquivos e pastas ocultos, então eles
+  sempre divergiriam.
+- `ignorar` (opcional): lista de globs `fnmatch` aplicados ao caminho relativo
+  (separador `/`), também nos dois lados. Atenção: no `fnmatch` o `*` também
+  casa com `/` (`*.py` pega `.py` em qualquer pasta).
+- O Sync só leva ao Umbrel os tipos de arquivo ligados em **Configurações →
+  Sincronização → "Other file types"** (e imagens, áudio, vídeo, PDF conforme
+  as opções). Se "other file types" estiver desligado, `.py`, `.json`, `.csv`,
+  `.html` etc. ficam só no PC: inclua esses padrões em `ignorar` (ex.:
+  `["*.py", "*.json", "*.csv", "*.html"]`), senão a divergência é permanente e
+  qualquer mudança passageira volta a gerar alerta.
+
+Os avisos respeitam os limites do app de alertas: título até 120 caracteres,
+detalhes até ~19000 (com "… (cortado)") e corpo abaixo de 64 KiB.
 
 Token do remetente `conferencia-pc` (uma linha) e permissões:
 

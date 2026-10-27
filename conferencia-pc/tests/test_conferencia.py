@@ -128,9 +128,7 @@ def test_somas_remotas_argv():
     assert "cd '/dados/meu vault; rm -rf x' &&" in cmd
     assert "find . -type f" in cmd
     assert "-exec sha256sum {} +" in cmd
-    for nome in (".obsidian", ".git", ".trash"):
-        assert f"-not -path './{nome}/*'" in cmd
-        assert f"-not -path '*/{nome}/*'" in cmd
+    assert "-not -path '*/.*'" in cmd
 
 
 @pytest.mark.parametrize("modo", ["rc255", "timeout", "nossh"])
@@ -437,3 +435,94 @@ def test_falha_remota_post_falho_retenta(amb):
     kw["enviar_fn"] = lambda *a: env.append(a)
     main(**kw)
     assert len(env) == 1
+
+
+# ---- ocultos e "ignorar" (o Sync não leva arquivos ocultos) ----
+def test_local_ignora_qualquer_componente_oculto(tmp_path):
+    (tmp_path / ".gitignore").write_text("x")
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a/.oculto.md").write_text("x")
+    (tmp_path / ".pasta/b").mkdir(parents=True)
+    (tmp_path / ".pasta/b/n.md").write_text("x")
+    (tmp_path / "a/ok.md").write_text("ok")
+    assert set(somas_locais(tmp_path)) == {"a/ok.md"}
+
+
+def test_find_remoto_real_ignora_ocultos(tmp_path):
+    """Roda o mesmo comando do ssh localmente (sh), para conferir o filtro do find."""
+    (tmp_path / ".gitignore").write_text("x")
+    (tmp_path / "a/.git").mkdir(parents=True)
+    (tmp_path / "a/.git/config").write_text("x")
+    (tmp_path / "a/.oculto.md").write_text("x")
+    (tmp_path / "a/ok.md").write_text("ok")
+    (tmp_path / "raiz.md").write_text("r")
+    cmd = conferencia._comando_remoto(str(tmp_path))
+    saida = subprocess.run(["sh", "-c", cmd], capture_output=True, text=True, check=True).stdout
+    assert set(parse_sha256sum(saida)) == {"a/ok.md", "raiz.md"}
+    assert set(parse_sha256sum(saida)) == set(somas_locais(tmp_path))
+
+
+def test_filtrar_globs_e_ocultos():
+    s = {"a.md": "1", "b/x.py": "2", "c.csv": "3", "d/.e.md": "4", "f/g.md": "5"}
+    assert conferencia.filtrar(s, ["*.py", "c.*"]) == {"a.md": "1", "f/g.md": "5"}
+    assert conferencia.filtrar(s, []) == {"a.md": "1", "b/x.py": "2", "c.csv": "3", "f/g.md": "5"}
+
+
+def test_main_ignorar_vale_nos_dois_lados(amb):
+    (amb["vault"] / "so-no-pc.py").write_text("x")
+    cfg = json.loads((amb["config_dir"] / "config.json").read_text())
+    cfg["ignorar"] = ["*.py", "Anexos/*"]
+    (amb["config_dir"] / "config.json").write_text(json.dumps(cfg))
+    from conferencia import somas_locais as sl
+
+    def remoto(*a, **k):
+        r = {k: v for k, v in sl(amb["vault"]).items() if not k.endswith(".py")}
+        r["Anexos/so-no-umbrel.html"] = "f" * 64
+        return r
+
+    enviados = []
+    kw = dict(**amb, somas_remotas_fn=remoto, enviar_fn=lambda *a: enviados.append(a))
+    main(**kw)
+    main(**kw)
+    assert enviados == []
+
+
+def test_main_ignorar_invalido(amb, capsys):
+    cfg = json.loads((amb["config_dir"] / "config.json").read_text())
+    cfg["ignorar"] = "*.py"
+    (amb["config_dir"] / "config.json").write_text(json.dumps(cfg))
+    assert main(**amb, somas_remotas_fn=diverge, enviar_fn=lambda *a: pytest.fail("x")) == 2
+    assert "configuração" in capsys.readouterr().err
+
+
+# ---- limites do app de alertas ----
+@pytest.mark.parametrize("letra", ["a", "é", "😀", "\x01"])
+def test_limitar_corpo(letra):
+    c = conferencia.limitar_corpo({"gravidade": "normal", "titulo": letra * 300,
+                                   "detalhes": (letra * 4000 + "\n") * 200})
+    assert len(c["titulo"]) <= 120 and len(c["detalhes"]) <= 19000
+    assert c["detalhes"].endswith(conferencia.MARCA_CORTE)
+    assert len(conferencia._bytes_corpo(c)) <= 60 * 1024
+
+
+def test_post_corta_caminhos_longos():
+    recebido = {}
+
+    class H(BaseHTTPRequestHandler):
+        def do_POST(self):
+            recebido["body"] = self.rfile.read(int(self.headers["Content-Length"]))
+            self.send_response(201)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        diffs = [("ç" * 1000) + f"{i}.md" for i in range(200)]
+        conferencia.enviar_alerta(f"http://127.0.0.1:{srv.server_port}/a", "t", diffs)
+    finally:
+        srv.shutdown()
+    assert len(recebido["body"]) <= 60 * 1024
+    assert len(json.loads(recebido["body"])["detalhes"]) <= 19000
