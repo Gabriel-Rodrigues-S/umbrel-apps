@@ -39,9 +39,9 @@ repositório):
 - `ignorar` (opcional): lista de globs `fnmatch` aplicados ao caminho relativo
   (separador `/`), também nos dois lados. Atenção: no `fnmatch` o `*` também
   casa com `/` (`*.py` pega `.py` em qualquer pasta).
-- O Sync só leva ao Umbrel os tipos de arquivo ligados em **Configurações →
-  Sincronização → "Other file types"** (e imagens, áudio, vídeo, PDF conforme
-  as opções). Se "other file types" estiver desligado, `.py`, `.json`, `.csv`,
+- O Sync só leva ao Umbrel os tipos de arquivo ligados na sincronização
+  seletiva do Obsidian Sync (imagens, áudio, vídeo, PDF e "other file types" /
+  "Sync all other types"). Se "other file types" estiver desligado, `.py`, `.json`, `.csv`,
   `.html` etc. ficam só no PC: inclua esses padrões em `ignorar` (ex.:
   `["*.py", "*.json", "*.csv", "*.html"]`), senão a divergência é permanente e
   qualquer mudança passageira volta a gerar alerta.
