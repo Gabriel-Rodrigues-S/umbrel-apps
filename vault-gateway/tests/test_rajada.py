@@ -26,3 +26,12 @@ def test_contador_do_dia():
     assert r.total_do_dia() == 5
     r.zerar_dia()
     assert r.total_do_dia() == 0
+
+
+def test_na_janela_conta_so_a_janela_atual():
+    r = Rajada()
+    for t in range(5):
+        r.contar(t)
+    assert r.na_janela() == 5
+    r.contar(700)
+    assert r.na_janela() == 1

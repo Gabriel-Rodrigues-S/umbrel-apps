@@ -1,2 +1,6 @@
-# Sem dependências externas ainda (as próximas tarefas acrescentam)
 httpx==0.28.1
+mcp==1.30.0
+starlette==1.10.0
+uvicorn==0.54.0
+pydantic==2.14.1
+anyio==4.15.1

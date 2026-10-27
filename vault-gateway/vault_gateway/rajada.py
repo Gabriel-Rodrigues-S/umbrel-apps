@@ -33,3 +33,8 @@ class Rajada:
     def zerar_dia(self) -> None:
         with self._trava:
             self._dia = 0
+
+    def na_janela(self) -> int:
+        """Falhas na janela atual (após o último contar)."""
+        with self._trava:
+            return len(self._falhas)
