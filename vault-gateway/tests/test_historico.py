@@ -93,7 +93,7 @@ def amb(tmp_path):
     return v, tmp_path / "historico.git", tmp_path / "logs" / "sync.log", AvisosFalso()
 
 
-def hist(amb, modo, envio=None, download=None, **kw):
+def hist(amb, modo, envio=None, download=None, **kw):  # kw: tolerancia_s, posicao
     v, g, log, av = amb
     det = DetectorEnvio(re.compile(envio) if envio else None, re.compile(download) if download else None)
     return Historico(v, g, log, av, modo=modo, detector=det, **kw)
@@ -231,3 +231,67 @@ def test_ler_deteccao(tmp_path):
     assert modo == "B" and isinstance(det, DetectorEnvio)
     (cfg / "avisos.json").write_text(json.dumps({"deteccao": {"modo": "A", "envio": "u (?P<caminho>.+)"}}))
     assert ler_deteccao(tmp_path)[0] == "A"
+
+
+def test_log_ilegivel_nao_impede_commit(amb, capsys):
+    v, g, log, av = amb
+    log.mkdir()  # sync.log é um diretório
+    (v / "a.md").write_text("a")
+    h = hist(amb, "A", envio=r"Uploading (?P<caminho>.+)$")
+    h.passo(0)  # não levanta
+    assert git(g, v, "rev-list", "--count", "HEAD").strip() == "1"
+    assert "sync.log" in capsys.readouterr().err
+    assert av.enviados == []
+
+
+def test_log_sem_permissao_nao_impede_commit(amb):
+    import os
+    if os.geteuid() == 0:
+        pytest.skip("root ignora permissões")
+    v, g, log, av = amb
+    log.write_text("Uploading x.md\n")
+    log.chmod(0)
+    (v / "a.md").write_text("a")
+    h = hist(amb, "B", download=r"Downloading (?P<caminho>.+)$")
+    h.passo(0)
+    log.chmod(0o644)
+    assert git(g, v, "rev-list", "--count", "HEAD").strip() == "1"
+
+
+def test_retoma_posicao_apos_reinicio(amb, tmp_path):
+    v, g, log, av = amb
+    pos = tmp_path / "logs" / "historico-posicao.json"
+    h1 = hist(amb, "A", envio=r"Uploading (?P<caminho>.+)$", posicao=pos)
+    log.write_text("Uploading a.md\n")
+    h1.passo(1)
+    assert pos.exists() and len(av.enviados) == 1
+    h2 = hist(amb, "A", envio=r"Uploading (?P<caminho>.+)$", posicao=pos)  # "reinício"
+    h2.passo(2)
+    assert len(av.enviados) == 1  # nada repetido
+    with open(log, "a") as f:
+        f.write("Uploading b.md\n")
+    h2.passo(3)
+    assert av.enviados[-1][2] == "b.md" and len(av.enviados) == 2
+
+
+def test_log_rotacionado_apos_reinicio_le_do_zero(amb, tmp_path):
+    v, g, log, av = amb
+    pos = tmp_path / "logs" / "historico-posicao.json"
+    h1 = hist(amb, "A", envio=r"Uploading (?P<caminho>.+)$", posicao=pos)
+    log.write_text("Uploading aaaaaaaa.md\n")
+    h1.passo(1)
+    log.unlink()
+    log.write_text("Uploading zzzzzzzzzzzzzzzz.md\nUploading y.md\n")  # outro conteúdo, maior
+    h2 = hist(amb, "A", envio=r"Uploading (?P<caminho>.+)$", posicao=pos)
+    h2.passo(2)
+    assert av.enviados[-1][2] == "zzzzzzzzzzzzzzzz.md\ny.md"
+
+
+def test_posicao_corrompida_le_do_zero(amb, tmp_path):
+    v, g, log, av = amb
+    pos = tmp_path / "logs" / "historico-posicao.json"
+    pos.parent.mkdir(exist_ok=True)
+    pos.write_text("{lixo")
+    log.write_text("Uploading a.md\n")
+    hist(amb, "A", envio=r"Uploading (?P<caminho>.+)$", posicao=pos).passo(1)
+    assert len(av.enviados) == 1

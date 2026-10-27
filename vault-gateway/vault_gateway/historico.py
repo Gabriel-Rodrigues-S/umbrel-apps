@@ -111,11 +111,39 @@ def mudancas_sem_download(alterados: list[str], downloads_recentes: dict[str, fl
 class _LeitorLog:
     """Lê só as linhas novas; reinicia se o arquivo encolheu ou foi trocado."""
 
-    def __init__(self, caminho: Path):
+    def __init__(self, caminho: Path, posicao: Path | None = None):
         self.caminho = Path(caminho)
+        self.posicao = Path(posicao) if posicao else None
         self.offset = 0
         self.inode = None
         self.inicio = b""
+        self._carregar()
+
+    def _carregar(self) -> None:
+        """Retoma de onde parou; se a impressão digital não bater, novas() recomeça do 0."""
+        if self.posicao is None:
+            return
+        try:
+            d = json.loads(self.posicao.read_text(encoding="utf-8"))
+            offset, inicio = int(d["offset"]), bytes.fromhex(d["inicio"])
+            if offset >= 0:
+                self.offset, self.inicio = offset, inicio
+        except FileNotFoundError:
+            pass
+        except Exception:
+            _erro("posição do log inválida: relendo do início")
+
+    def _salvar(self) -> None:
+        if self.posicao is None:
+            return
+        try:
+            self.posicao.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.posicao.with_name(self.posicao.name + ".tmp")
+            tmp.write_text(json.dumps({"offset": self.offset, "inicio": self.inicio.hex()}),
+                           encoding="utf-8")
+            os.replace(tmp, self.posicao)
+        except Exception:
+            _erro("falha ao gravar a posição do log")
 
     def novas(self) -> list[str]:
         try:
@@ -123,7 +151,7 @@ class _LeitorLog:
             with open(self.caminho, "rb") as f:
                 # impressão digital: inode pode ser reaproveitado numa rotação
                 inicio = f.read(64)
-                trocado = (st.st_ino != self.inode or st.st_size < self.offset
+                trocado = ((self.inode is not None and st.st_ino != self.inode) or st.st_size < self.offset
                            or inicio[:len(self.inicio)] != self.inicio[:len(inicio)])
                 if trocado:
                     self.offset = 0
@@ -135,8 +163,11 @@ class _LeitorLog:
             return []
         fim = dados.rfind(b"\n")
         if fim < 0:
+            if trocado:
+                self._salvar()
             return []  # linha incompleta (ou nada novo): espera o resto
         self.offset += fim + 1
+        self._salvar()
         return [l.decode("utf-8", "replace").rstrip("\r") for l in dados[:fim].split(b"\n")]
 
 
@@ -150,13 +181,14 @@ def formatar_detalhes(caminhos: list[str]) -> str:
 
 class Historico:
     def __init__(self, vault: Path, git_dir: Path, log: Path, avisos, *, modo: str | None,
-                 detector: DetectorEnvio | None, tolerancia_s: float = TOLERANCIA_S):
+                 detector: DetectorEnvio | None, tolerancia_s: float = TOLERANCIA_S,
+                 posicao: Path | None = None):
         self.vault, self.git_dir = Path(vault), Path(git_dir)
         self.avisos = avisos
         self.modo = modo if detector is not None else None
         self.detector = detector
         self.tolerancia_s = tolerancia_s
-        self._leitor = _LeitorLog(log)
+        self._leitor = _LeitorLog(log, posicao)
         self._pendentes: dict[str, float] = {}  # modo B: caminho -> quando mudou
         self._avisou_inicio = False
 
@@ -175,10 +207,13 @@ class Historico:
             _erro("falha ao reenviar a fila de avisos")
         caminhos: list[str] = []
         if self.detector is not None:
-            for texto in self._leitor.novas():
-                c = self.detector.linha(texto, agora)
-                if c and self.modo == "A":
-                    caminhos.append(c)
+            try:
+                for texto in self._leitor.novas():
+                    c = self.detector.linha(texto, agora)
+                    if c and self.modo == "A":
+                        caminhos.append(c)
+            except Exception as e:  # o commit nunca depende do log estar legível
+                _erro(f"falha ao ler o sync.log: {type(e).__name__}")
         try:
             res = _commitar(self.vault, self.git_dir)
         except Exception as e:
@@ -231,7 +266,8 @@ def main() -> None:
     dados = Path(os.environ.get("DADOS_DIR", "/data"))
     det = ler_deteccao(dados)
     h = Historico(vault, dados / "historico.git", dados / "logs/sync.log", avisos_de_config(dados),
-                  modo=det[0] if det else None, detector=det[1] if det else None)
+                  modo=det[0] if det else None, detector=det[1] if det else None,
+                  posicao=dados / "logs/historico-posicao.json")
     parar = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: parar.set())
     signal.signal(signal.SIGINT, lambda *_: parar.set())
