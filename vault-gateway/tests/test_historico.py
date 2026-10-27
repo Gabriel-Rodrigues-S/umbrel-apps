@@ -220,7 +220,7 @@ def test_ler_deteccao(tmp_path):
     assert ler_deteccao(tmp_path) is None  # ausente
     (cfg / "avisos.json").write_text("{ruim")
     assert ler_deteccao(tmp_path) is None
-    (cfg / "avisos.json").write_text(json.dumps({"url": "http://x", "token": "t"}))
+    (cfg / "avisos.json").write_text(json.dumps({"url": "http://x", "tokens": {"gateway": "a", "historico": "b"}}))
     assert ler_deteccao(tmp_path) is None
     (cfg / "avisos.json").write_text(json.dumps({"deteccao": {"modo": "A", "envio": "(["}}))
     assert ler_deteccao(tmp_path) is None  # regex inválida
@@ -295,3 +295,23 @@ def test_posicao_corrompida_le_do_zero(amb, tmp_path):
     log.write_text("Uploading a.md\n")
     hist(amb, "A", envio=r"Uploading (?P<caminho>.+)$", posicao=pos).passo(1)
     assert len(av.enviados) == 1
+
+
+def test_grave_real_fica_na_fila_do_historico_com_alertas_fora(amb, tmp_path):
+    """Avisos real (fila própria do histórico): o grave fica no disco se o alertas cair."""
+    import httpx
+    from vault_gateway.avisos import Avisos
+
+    def fora(req):
+        raise httpx.ConnectError("fora", request=req)
+
+    v, g, log, _ = amb
+    fila = tmp_path / "fila-avisos" / "historico"
+    av = Avisos("http://alertas.teste", "TH", fila, cliente=httpx.Client(transport=httpx.MockTransport(fora)))
+    h = Historico(v, g, log, av, modo="A",
+                  detector=DetectorEnvio(re.compile(r"Uploading (?P<caminho>.+)$"), None))
+    log.write_text("Uploading a.md\n")
+    h.passo(1)
+    arquivos = list(fila.glob("*.json"))
+    assert len(arquivos) == 1
+    assert json.loads(arquivos[0].read_text())["gravidade"] == "grave"

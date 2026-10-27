@@ -45,12 +45,14 @@ class AvisosFalsos:
         self.reenvios = 0
         self.espera = espera
 
-    def enviar(self, gravidade, titulo, detalhes):
-        if self.espera:
-            time.sleep(self.espera)
+    def guardar(self, gravidade, titulo, detalhes):
         self.enviados.append({"gravidade": gravidade, "titulo": titulo, "detalhes": detalhes})
+        return True
 
     def reenviar_fila(self):
+        # a rede lenta fica só no drenador
+        if self.espera:
+            time.sleep(self.espera)
         self.reenvios += 1
         return 0
 
@@ -320,8 +322,9 @@ async def test_aviso_lento_nao_trava_requisicao(vault, dados, token):
             res = await chamar(c, "ler", {"caminho": "../fora.md"})
             assert time.monotonic() - inicio < 1.0
             assert texto(res) == "Acesso negado."
+            # fila primeiro: já gravado antes de qualquer rede
+            assert lento.enviados[-1]["gravidade"] == "grave"
             await esperar(app)
-    assert lento.enviados[-1]["gravidade"] == "grave"
 
 
 async def test_lifespan_reenvia_fila_ao_iniciar(app, avisos_falsos):
@@ -348,7 +351,7 @@ def test_resumo_diario_envia_info_e_zera():
     for t in range(5):
         r.contar(t)
     av = AvisosFalsos()
-    resumo_diario(r, av.enviar)
+    resumo_diario(r, av.guardar)
     assert av.enviados == [{"gravidade": "info", "titulo": "Resumo diário",
                             "detalhes": "Tentativas com token ausente ou inválido nas últimas 24 h: 5"}]
     assert r.total_do_dia() == 0
@@ -356,10 +359,47 @@ def test_resumo_diario_envia_info_e_zera():
 
 # --- configuração padrão de avisos ---
 
-def test_sem_avisos_json_guarda_na_fila(vault, dados, token):
+def test_sem_avisos_json_guarda_na_fila(vault, dados, token, monkeypatch):
+    monkeypatch.setenv("REMETENTE", "gateway")
     app = criar_app(vault, dados)
     app.state.avisos.enviar("grave", "t", "d")
-    assert len(list((dados / "fila-avisos").glob("*.json"))) == 1
+    assert len(list((dados / "fila-avisos" / "gateway").glob("*.json"))) == 1
+
+
+async def test_rajada_de_avisos_drena_uma_vez_por_vez(vault, dados, token):
+    """Vários avisos com o alertas lento: tudo gravado; drenagens não se empilham."""
+    lento = AvisosFalsos(espera=0.3)
+    app = criar_app(vault, dados, avisos=lento)
+    async with LifespanManager(app) as m:
+        cab = {**ACEITA, "Authorization": f"Bearer {token}"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(m.app),
+                                     base_url="http://gateway.teste", headers=cab) as c:
+            for _ in range(5):
+                await chamar(c, "ler", {"caminho": "../fora.md"})
+            await esperar(app)
+    assert [a["gravidade"] for a in lento.enviados] == ["grave"] * 5
+    assert lento.reenvios <= 4  # 1 do início + no máximo 1 ativa e 1 na espera por rajada
+
+
+async def test_gateway_real_grava_na_fila_antes_da_rede(vault, dados, token):
+    """Com Avisos real e alertas fora do ar, o grave fica no disco (sobrevive a SIGKILL)."""
+    from vault_gateway.avisos import Avisos
+
+    def fora(req):
+        raise httpx.ConnectError("fora", request=req)
+
+    av = Avisos("http://alertas.teste", "t", dados / "fila-avisos" / "gateway",
+                cliente=httpx.Client(transport=httpx.MockTransport(fora)))
+    app = criar_app(vault, dados, avisos=av)
+    async with LifespanManager(app) as m:
+        cab = {**ACEITA, "Authorization": f"Bearer {token}"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(m.app),
+                                     base_url="http://gateway.teste", headers=cab) as c:
+            await chamar(c, "ler", {"caminho": "../fora.md"})
+            arquivos = list((dados / "fila-avisos" / "gateway").glob("*.json"))
+            assert len(arquivos) == 1  # gravado já no caminho da requisição
+            assert json.loads(arquivos[0].read_text())["gravidade"] == "grave"
+            await esperar(app)
 
 
 async def test_initialize_e_notificacao(cliente_autenticado):

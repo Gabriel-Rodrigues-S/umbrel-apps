@@ -82,29 +82,51 @@ def resumo_diario(rajada: Rajada, enviar: Callable[[str, str, str], None]) -> No
 
 
 class _Despachante:
-    """Uma única thread executa todos os envios e reenvios, em ordem (nunca no event loop)."""
+    """Fila primeiro: grava o aviso no disco já na chamada; uma única thread drena (posta e apaga).
+
+    A rede nunca roda no event loop nem no caminho da requisição.
+    """
 
     def __init__(self, avisos):
         self.avisos = avisos
         self._exec = ThreadPoolExecutor(max_workers=1, thread_name_prefix="avisos")
+        self._trava = threading.Lock()
+        self._drenagem_pendente = False
 
-    def _seguro(self, fn, *args):
+    def _drenar(self):
+        with self._trava:
+            self._drenagem_pendente = False
         try:
-            return fn(*args)
+            return self.avisos.reenviar_fila()
         except Exception:
-            _erro_stderr("falha ao enviar aviso")
+            _erro_stderr("falha ao reenviar avisos")
+            return None
+
+    def _agendar(self):
+        """No máximo uma drenagem na espera (rajadas não empilham tentativas de rede)."""
+        with self._trava:
+            if self._drenagem_pendente:
+                return None
+            self._drenagem_pendente = True
+        try:
+            return self._exec.submit(self._drenar)
+        except RuntimeError:
+            with self._trava:
+                self._drenagem_pendente = False
             return None
 
     def enviar(self, gravidade: str, titulo: str, detalhes: str) -> None:
-        """Não bloqueia: só enfileira."""
+        """Escrita local rápida (chamar fora do event loop); a rede fica com a thread."""
         try:
-            self._exec.submit(self._seguro, self.avisos.enviar, gravidade, titulo, detalhes)
-        except RuntimeError:
-            _erro_stderr("aviso perdido: despachante encerrado")
+            self.avisos.guardar(gravidade, titulo, detalhes)
+        except Exception:
+            _erro_stderr("falha ao gravar aviso na fila")
+        self._agendar()
 
     async def reenviar(self) -> None:
-        fut = self._exec.submit(self._seguro, self.avisos.reenviar_fila)
-        await asyncio.wrap_future(fut)
+        fut = self._agendar()
+        if fut is not None:
+            await asyncio.wrap_future(fut)
 
     def esperar(self, timeout: float = 30) -> None:
         """Bloqueia até tudo o que foi enfileirado antes terminar (para testes)."""
@@ -170,8 +192,8 @@ class _Autenticacao:
         if self.rajada.contar(time.time()):
             n = self.rajada.na_janela()
             minutos = round(self.rajada.janela_s / 60)
-            self.despachante.enviar(
-                "normal", "Rajada de tokens inválidos",
+            await anyio.to_thread.run_sync(
+                self.despachante.enviar, "normal", "Rajada de tokens inválidos",
                 f"{n} tentativas com token ausente ou inválido nos últimos {minutos} minutos")
         resp = JSONResponse({"erro": "não autorizado"}, status_code=401,
                             headers={"WWW-Authenticate": "Bearer"})
@@ -314,7 +336,7 @@ def criar_app(raiz: Path, dados: Path, *, tokens: Tokens | None = None, avisos=N
             # dorme em pedaços: robusto a ajuste de relógio e suspensão
             while (falta := (alvo - datetime.now().astimezone()).total_seconds()) > 0:
                 await asyncio.sleep(min(falta, 300))
-            resumo_diario(rajada, despachante.enviar)
+            await anyio.to_thread.run_sync(resumo_diario, rajada, despachante.enviar)
 
     @asynccontextmanager
     async def ciclo(_app):

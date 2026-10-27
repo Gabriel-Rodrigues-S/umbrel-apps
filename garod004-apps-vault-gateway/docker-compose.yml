@@ -32,6 +32,8 @@ services:
     environment:
       VAULT_DIR: /data/vault
       DADOS_DIR: /data
+      # token de remetente próprio (config/avisos.json → tokens.gateway) e fila fila-avisos/gateway
+      REMETENTE: gateway
       TZ: America/Manaus
 
   historico:
@@ -51,6 +53,8 @@ services:
     environment:
       VAULT_DIR: /data/vault
       DADOS_DIR: /data
+      # token de remetente próprio (config/avisos.json → tokens.historico) e fila fila-avisos/historico
+      REMETENTE: historico
       TZ: America/Manaus
 
   sync:
