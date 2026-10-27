@@ -10,6 +10,7 @@ import pytest
 
 import conferencia
 from conferencia import (
+    RemotoFalhou,
     SshIndisponivel,
     decidir,
     diferencas,
@@ -117,6 +118,7 @@ def test_somas_remotas_argv():
     argv, kw = chamadas[0]
     assert isinstance(argv, list)
     assert argv[0] == "ssh"
+    assert argv[-3:-1] == ["--", "srv"]
     assert argv[argv.index("-o") + 1] == "BatchMode=yes"
     assert "ConnectTimeout=10" in argv
     assert "srv" in argv
@@ -131,7 +133,7 @@ def test_somas_remotas_argv():
         assert f"-not -path '*/{nome}/*'" in cmd
 
 
-@pytest.mark.parametrize("modo", ["rc", "timeout", "nossh"])
+@pytest.mark.parametrize("modo", ["rc255", "timeout", "nossh"])
 def test_somas_remotas_falha(modo):
     def runner(argv, **kw):
         if modo == "timeout":
@@ -164,7 +166,7 @@ def test_decidir_divergencia_diferente(tmp_path):
     assert decidir(["a"], e) is False
     assert decidir(["a", "b"], e) is False
     assert decidir(["b", "a"], e) is True
-    assert json.loads(e.read_text()) == {"anterior": ["a", "b"]}
+    assert json.loads(e.read_text()) == {"anterior": ["a", "b"], "alertado": []}
 
 
 def test_decidir_estado_corrompido(tmp_path):
@@ -327,3 +329,111 @@ def test_post_erro_http_levanta():
             conferencia.enviar_alerta(f"http://127.0.0.1:{srv.server_port}/a", "t", ["a"])
     finally:
         srv.shutdown()
+
+
+def test_somas_remotas_falha_remota_nao_e_inacessivel():
+    def runner(argv, **kw):
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="x" * 500)
+
+    with pytest.raises(RemotoFalhou) as ei:
+        somas_remotas("srv", "/x", runner=runner)
+    assert ei.value.codigo == 1 and len(ei.value.stderr) == 300
+
+
+def _kw(amb, enviados, falhar=False):
+    def env(*a):
+        if falhar:
+            raise OSError("rede")
+        enviados.append(a)
+
+    return dict(**amb, somas_remotas_fn=diverge, enviar_fn=env)
+
+
+def test_nao_repete_alerta_apos_sucesso(amb):
+    env = []
+    kw = _kw(amb, env)
+    for _ in range(5):
+        assert main(**kw) == 0
+    assert len(env) == 1
+
+
+def test_post_falho_e_retentado(amb):
+    env = []
+    main(**_kw(amb, env, falhar=True))
+    assert main(**_kw(amb, env, falhar=True)) == 1
+    assert main(**_kw(amb, env, falhar=True)) == 1
+    assert main(**_kw(amb, env)) == 0
+    assert len(env) == 1
+    main(**_kw(amb, env))
+    assert len(env) == 1
+
+
+def test_some_e_reaparece_alerta_de_novo(amb):
+    env = []
+    main(**_kw(amb, env)); main(**_kw(amb, env))
+    assert len(env) == 1
+    iguais = lambda *a, **k: somas_locais(amb["vault"])
+    main(**amb, somas_remotas_fn=iguais, enviar_fn=lambda *a: None)
+    kw = _kw(amb, env)
+    main(**kw)
+    assert len(env) == 1
+    main(**kw)
+    assert len(env) == 2
+
+
+def test_divergencia_mudada_alerta_de_novo(amb):
+    env = []
+    kw = _kw(amb, env)
+    main(**kw); main(**kw)
+    (amb["vault"] / "b.md").write_text("b")
+    main(**kw)
+    assert len(env) == 1
+    main(**kw)
+    assert len(env) == 2
+
+
+def test_decidir_alertado_contrato(tmp_path):
+    e = tmp_path / "e.json"
+    decidir(["a"], e)
+    assert decidir(["a"], e) is True
+    conferencia.marcar_alertado(["a"], e)
+    assert decidir(["a"], e) is False
+
+
+def test_falha_remota_alerta_uma_vez_por_dia(amb, capsys):
+    def falha(*a, **k):
+        raise RemotoFalhou(1, "No such file /segredo/caminho")
+
+    env, t = [], [1000.0]
+    kw = dict(**amb, somas_remotas_fn=falha,
+              enviar_fn=lambda *a: env.append(a), agora=lambda: t[0])
+    assert main(**kw) == 0
+    assert len(env) == 1
+    url, token, diffs, corpo = env[0]
+    assert corpo["titulo"] == "Conferência do vault falhou"
+    assert corpo["gravidade"] == "normal"
+    assert corpo["detalhes"] == "código de saída: 1"
+    assert "segredo" not in json.dumps(corpo)
+    err = capsys.readouterr().err
+    assert "código 1" in err and "No such file" in err
+    t[0] += 3600
+    main(**kw)
+    assert len(env) == 1
+    t[0] += 24 * 3600
+    main(**kw)
+    assert len(env) == 2
+
+
+def test_falha_remota_post_falho_retenta(amb):
+    def falha(*a, **k):
+        raise RemotoFalhou(2, "")
+
+    def ruim(*a):
+        raise OSError("x")
+
+    kw = dict(**amb, somas_remotas_fn=falha, enviar_fn=ruim)
+    assert main(**kw) == 1
+    env = []
+    kw["enviar_fn"] = lambda *a: env.append(a)
+    main(**kw)
+    assert len(env) == 1

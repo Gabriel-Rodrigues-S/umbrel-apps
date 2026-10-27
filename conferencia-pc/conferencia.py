@@ -12,11 +12,14 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import unicodedata
 import urllib.request
 from pathlib import Path
 
 PASTAS_IGNORADAS = (".obsidian", ".git", ".trash")
+TITULO_FALHA = "Conferência do vault falhou"
+INTERVALO_FALHA = 24 * 3600
 TITULO = "Cópias do vault divergentes"
 LIMITE_DETALHES = 200
 TIMEOUT_SSH = 300
@@ -24,7 +27,16 @@ TIMEOUT_POST = 10
 
 
 class SshIndisponivel(Exception):
-    """O servidor não respondeu ao ssh (falha, timeout ou ssh ausente)."""
+    """O servidor não respondeu ao ssh (conexão, timeout ou ssh ausente)."""
+
+
+class RemotoFalhou(Exception):
+    """O ssh conectou, mas o comando remoto falhou (caminho errado, find etc.)."""
+
+    def __init__(self, codigo: int, stderr: str = ""):
+        super().__init__(f"comando remoto falhou (código {codigo})")
+        self.codigo = codigo
+        self.stderr = stderr
 
 
 def _nfc(s: str) -> str:
@@ -111,7 +123,7 @@ def _comando_remoto(caminho_remoto: str) -> str:
 def somas_remotas(ssh_host: str, caminho_remoto: str, runner=subprocess.run) -> dict[str, str]:
     argv = [
         "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
-        ssh_host, _comando_remoto(caminho_remoto),
+        "--", ssh_host, _comando_remoto(caminho_remoto),
     ]
     try:
         p = runner(argv, capture_output=True, text=True, timeout=TIMEOUT_SSH)
@@ -119,8 +131,10 @@ def somas_remotas(ssh_host: str, caminho_remoto: str, runner=subprocess.run) -> 
         raise SshIndisponivel("ssh excedeu o tempo limite") from e
     except OSError as e:
         raise SshIndisponivel(f"não foi possível executar ssh: {e}") from e
+    if p.returncode == 255:
+        raise SshIndisponivel("ssh não conseguiu conectar (código 255)")
     if p.returncode != 0:
-        raise SshIndisponivel(f"ssh terminou com código {p.returncode}")
+        raise RemotoFalhou(p.returncode, (p.stderr or "")[:300])
     return parse_sha256sum(p.stdout)
 
 
@@ -128,26 +142,30 @@ def diferencas(a: dict[str, str], b: dict[str, str]) -> list[str]:
     return sorted(k for k in a.keys() | b.keys() if a.get(k) != b.get(k))
 
 
-def _ler_anterior(estado: Path) -> set[str]:
+def _ler_estado(estado: Path) -> dict:
     try:
         dados = json.loads(Path(estado).read_text(encoding="utf-8"))
-        ant = dados["anterior"]
-        if isinstance(ant, list) and all(isinstance(x, str) for x in ant):
-            return set(ant)
-    except (OSError, ValueError, KeyError, TypeError):
+        if isinstance(dados, dict):
+            return dados
+    except (OSError, ValueError):
         pass
+    return {}
+
+
+def _lista(dados: dict, chave: str) -> set[str]:
+    v = dados.get(chave)
+    if isinstance(v, list) and all(isinstance(x, str) for x in v):
+        return set(v)
     return set()
 
 
-def decidir(diffs: list[str], estado: Path) -> bool:
+def _gravar_estado(estado: Path, dados: dict) -> None:
     estado = Path(estado)
-    anterior = _ler_anterior(estado)
-    atual = set(diffs)
     estado.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=estado.parent, prefix=".estado-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"anterior": sorted(atual)}, f, ensure_ascii=False)
+            json.dump(dados, f, ensure_ascii=False)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, estado)
@@ -157,7 +175,33 @@ def decidir(diffs: list[str], estado: Path) -> bool:
         except OSError:
             pass
         raise
-    return bool(atual) and atual == anterior
+
+
+def decidir(diffs: list[str], estado: Path) -> bool:
+    """True se a mesma divergência persiste em 2 execuções e ainda não foi
+    alertada com sucesso (ver marcar_alertado)."""
+    dados = _ler_estado(estado)
+    anterior = _lista(dados, "anterior")
+    alertado = _lista(dados, "alertado")
+    atual = set(diffs)
+    if atual != alertado:
+        alertado = set()  # divergência sumiu ou mudou: pode alertar de novo
+    dados["anterior"] = sorted(atual)
+    dados["alertado"] = sorted(alertado)
+    _gravar_estado(estado, dados)
+    return bool(atual) and atual == anterior and atual != alertado
+
+
+def marcar_alertado(diffs: list[str], estado: Path) -> None:
+    """Chamar só depois de um POST bem-sucedido."""
+    dados = _ler_estado(estado)
+    dados["alertado"] = sorted(set(diffs))
+    _gravar_estado(estado, dados)
+
+
+def montar_corpo_falha(codigo: int) -> dict:
+    return {"gravidade": "normal", "titulo": TITULO_FALHA,
+            "detalhes": f"código de saída: {codigo}"}
 
 
 def montar_corpo(diffs: list[str]) -> dict:
@@ -167,10 +211,10 @@ def montar_corpo(diffs: list[str]) -> dict:
     return {"gravidade": "normal", "titulo": TITULO, "detalhes": "\n".join(linhas)}
 
 
-def enviar_alerta(url: str, token: str, diffs: list[str]) -> None:
+def enviar_alerta(url: str, token: str, diffs: list[str], corpo: dict | None = None) -> None:
     req = urllib.request.Request(
         url,
-        data=json.dumps(montar_corpo(diffs), ensure_ascii=False).encode("utf-8"),
+        data=json.dumps(corpo or montar_corpo(diffs), ensure_ascii=False).encode("utf-8"),
         headers={
             "Content-Type": "application/json; charset=utf-8",
             "Authorization": f"Bearer {token}",
@@ -187,7 +231,7 @@ def _erro(msg: str) -> None:
 
 
 def main(config_dir=None, estado=None, vault=None,
-         somas_remotas_fn=somas_remotas, enviar_fn=enviar_alerta) -> int:
+         somas_remotas_fn=somas_remotas, enviar_fn=enviar_alerta, agora=time.time) -> int:
     config_dir = Path(config_dir or Path.home() / ".config" / "conferencia-vault")
     estado = Path(estado or Path.home() / ".local/state/conferencia-vault/estado.json")
     try:
@@ -218,6 +262,21 @@ def main(config_dir=None, estado=None, vault=None,
     except SshIndisponivel as e:
         _erro(f"servidor inacessível, nada feito: {e}")
         return 0
+    except RemotoFalhou as e:
+        _erro(f"{e}; stderr: {e.stderr[:300]!r}")
+        dados = _ler_estado(estado)
+        t = agora()
+        ultimo = dados.get("falha_alertada_em")
+        if isinstance(ultimo, (int, float)) and 0 <= t - ultimo < INTERVALO_FALHA:
+            return 0
+        try:
+            enviar_fn(url, token, [], montar_corpo_falha(e.codigo))
+        except Exception as e2:
+            _erro(f"falha ao enviar o aviso ({type(e2).__name__})")
+            return 1
+        dados["falha_alertada_em"] = t
+        _gravar_estado(estado, dados)
+        return 0
 
     diffs = diferencas(locais, remotas)
     if decidir(diffs, estado):
@@ -226,6 +285,7 @@ def main(config_dir=None, estado=None, vault=None,
         except Exception as e:  # nunca incluir o token na mensagem
             _erro(f"falha ao enviar o aviso ({type(e).__name__})")
             return 1
+        marcar_alertado(diffs, estado)
     return 0
 
 
