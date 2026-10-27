@@ -24,7 +24,7 @@ from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Route
 
 from . import auditoria, ferramentas
-from .avisos import Avisos
+from .avisos import Avisos, avisos_de_config
 from .caminhos import Negado
 from .rajada import Rajada
 from .tokens import Tokens
@@ -79,21 +79,6 @@ def resumo_diario(rajada: Rajada, enviar: Callable[[str, str, str], None]) -> No
     rajada.zerar_dia()
     enviar("info", "Resumo diário",
            f"Tentativas com token ausente ou inválido nas últimas 24 h: {total}")
-
-
-def _avisos_padrao(dados: Path) -> Avisos:
-    """Lê config/avisos.json; ausente ou inválido → url vazia (todo envio falha e vai para a fila)."""
-    fila = dados / "fila-avisos"
-    try:
-        cfg = json.loads((dados / "config/avisos.json").read_text(encoding="utf-8"))
-        url, token = cfg["url"], cfg["token"]
-        if not (isinstance(url, str) and url.startswith(("http://", "https://"))
-                and isinstance(token, str) and token):
-            raise ValueError
-    except Exception:
-        _erro_stderr("config/avisos.json ausente ou inválido: avisos ficam na fila")
-        url, token = "", ""
-    return Avisos(url, token, fila)
 
 
 class _Despachante:
@@ -226,7 +211,7 @@ class _MCPGateway(FastMCP):
 def criar_app(raiz: Path, dados: Path, *, tokens: Tokens | None = None, avisos=None) -> Starlette:
     raiz, dados = Path(raiz), Path(dados)
     tokens = tokens or Tokens(dados / "config/tokens.json")
-    avisos = avisos if avisos is not None else _avisos_padrao(dados)
+    avisos = avisos if avisos is not None else avisos_de_config(dados)
     log = dados / "logs/acesso.jsonl"
     rajada = Rajada()
     despachante = _Despachante(avisos)

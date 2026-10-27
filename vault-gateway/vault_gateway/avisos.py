@@ -83,3 +83,18 @@ class Avisos:
             os.replace(arq, destino / arq.name)
         except Exception:
             print("aviso: arquivo inválido na fila não pôde ser isolado", file=sys.stderr)
+
+
+def avisos_de_config(dados: Path) -> Avisos:
+    """Lê config/avisos.json; ausente ou inválido → url vazia (todo envio falha e vai para a fila)."""
+    fila = Path(dados) / "fila-avisos"
+    try:
+        cfg = json.loads((Path(dados) / "config/avisos.json").read_text(encoding="utf-8"))
+        url, token = cfg["url"], cfg["token"]
+        if not (isinstance(url, str) and url.startswith(("http://", "https://"))
+                and isinstance(token, str) and token):
+            raise ValueError
+    except Exception:
+        print("config/avisos.json ausente ou inválido: avisos ficam na fila", file=sys.stderr)
+        url, token = "", ""
+    return Avisos(url, token, fila)
