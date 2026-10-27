@@ -25,7 +25,9 @@ def test_revogar_sem_reiniciar(tmp_path):
     assert tk.cliente_do(b) is None and tk.cliente_do(a) == "claude"
 
 
-@pytest.mark.parametrize("conteudo", [None, "", "{quebrado", "[]", '{"a": 1}', '{"a": null}'])
+@pytest.mark.parametrize("conteudo", [None, "", "{quebrado", "[]", '{"a": 1}', '{"a": null}',
+    '{"claude": "é"}', '{"claude": "\\ud800"}', '{"claude": "abc123"}',
+    '{"claude": "' + "g" * 64 + '"}', '{"claude": "' + "A" * 64 + '"}'])
 def test_arquivo_ruim_nega_tudo(tmp_path, conteudo):
     arq = tmp_path / "tokens.json"
     if conteudo is not None:
@@ -135,3 +137,12 @@ def test_cli_modulo_real(tmp_path):
         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     )
     assert r.returncode == 0 and len(r.stdout.strip()) >= 40
+
+
+def test_hash_malformado_nao_edita(tmp_path):
+    arq = tmp_path / "tokens.json"
+    arq.write_text('{"claude": "é"}')
+    with pytest.raises(ValueError):
+        criar(arq, "outro")
+    with pytest.raises(ValueError):
+        revogar(arq, "claude")

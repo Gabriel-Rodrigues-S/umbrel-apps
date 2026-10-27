@@ -9,6 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+PADRAO_HASH = re.compile(r"[0-9a-f]{64}")
 PADRAO_NOME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 ARQUIVO_PADRAO = "/data/config/tokens.json"
 
@@ -24,7 +25,8 @@ def _ler(caminho: Path) -> dict[str, str]:
     except (OSError, ValueError) as e:  # UnicodeDecodeError e JSONDecodeError são ValueError
         raise ValueError("arquivo de tokens ilegível") from e
     if not isinstance(dados, dict) or not all(
-        isinstance(k, str) and isinstance(v, str) for k, v in dados.items()
+        isinstance(k, str) and isinstance(v, str) and PADRAO_HASH.fullmatch(v)
+        for k, v in dados.items()
     ):
         raise ValueError("arquivo de tokens malformado")
     return dados
