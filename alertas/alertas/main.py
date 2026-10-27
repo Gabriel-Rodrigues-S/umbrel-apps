@@ -30,6 +30,15 @@ log = logging.getLogger("alertas")
 ESTATICOS = Path(__file__).resolve().parent / "static"
 SEM_CACHE = {"Cache-Control": "no-cache"}
 
+
+class EstaticosSemCache(StaticFiles):
+    """Arquivos de /static sempre revalidados (ETag), para uma atualização da imagem pegar na hora."""
+
+    def file_response(self, *args, **kwargs):
+        r = super().file_response(*args, **kwargs)
+        r.headers["Cache-Control"] = "no-cache"
+        return r
+
 ROTAS_PUBLICAS = {("POST", "/api/alertas"), ("GET", "/saude")}
 LIMITE_CORPO = 64 * 1024
 JANELA_DESCONHECIDO = 600  # no máximo 1 alerta de remetente desconhecido a cada 10 min
@@ -236,7 +245,7 @@ def criar_app(dados: Path, *, ip_host: str | None = None, usuario_permitido: str
         return FileResponse(ESTATICOS / "manifest.webmanifest", media_type="application/manifest+json",
                             headers=SEM_CACHE)
 
-    app.mount("/static", StaticFiles(directory=ESTATICOS), name="static")
+    app.mount("/static", EstaticosSemCache(directory=ESTATICOS), name="static")
 
     return app
 

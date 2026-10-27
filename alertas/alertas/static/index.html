@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="/static/estilo.css">
 </head>
 <body>
-<div id="app" data-vista="lista">
+<main id="app" data-vista="lista">
 
   <!-- navegação lateral (PC) -->
   <nav class="nav-pc" aria-label="Seções do app">
@@ -38,13 +38,13 @@
     <header class="lista-topo">
       <div class="lista-titulos">
         <h1>Alertas</h1>
-        <p id="subtitulo">Tudo em dia</p>
+        <p id="subtitulo"></p>
       </div>
       <button type="button" class="atualizar" id="atualizar" aria-label="Atualizar lista">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"></path><path d="M20 4v5h-5"></path></svg>
       </button>
     </header>
-    <main class="lista-itens" id="itens"></main>
+    <div class="lista-itens" id="itens"></div>
     <div class="vazia" id="vazia" hidden>
       <div class="vazia-icone">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>
@@ -63,7 +63,7 @@
       </a>
     </header>
 
-    <main class="detalhe-corpo" id="corpo-normal" hidden>
+    <article class="detalhe-corpo" id="corpo-normal" hidden>
       <div class="detalhe-cabeca">
         <span class="selo selo-grande" id="d-selo">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 2 21h20L12 3z"></path><path d="M12 10v5"></path><path d="M12 18h.01"></path></svg>
@@ -83,9 +83,9 @@
       <div class="acoes">
         <button type="button" class="botao-lido" id="d-lido">Marcar como lido</button>
       </div>
-    </main>
+    </article>
 
-    <main class="detalhe-corpo" id="corpo-resumo" hidden>
+    <article class="detalhe-corpo" id="corpo-resumo" hidden>
       <div class="detalhe-cabeca">
         <span class="selo selo-grande selo-info selo-texto">Info · sem notificação</span>
         <h2>Resumo diário</h2>
@@ -100,12 +100,12 @@
       <div class="acoes">
         <button type="button" class="botao-lido botao-lido-contorno" id="r-lido">Marcar como lido</button>
       </div>
-    </main>
+    </article>
   </section>
 
   <!-- ativar notificações -->
   <section class="notif" id="vista-notif">
-    <main class="notif-corpo">
+    <div class="notif-corpo">
       <div class="notif-icone">
         <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path></svg>
       </div>
@@ -131,7 +131,7 @@
         <a class="botao-texto" id="agora-nao" href="#/">Agora não</a>
         <p>No iPhone, funciona com o app adicionado à Tela de Início.</p>
       </div>
-    </main>
+    </div>
   </section>
 
   <!-- navegação inferior (celular) -->
@@ -145,7 +145,7 @@
       Conversa · em breve
     </button>
   </nav>
-</div>
+</main>
 
 <template id="modelo-item">
   <a class="item">

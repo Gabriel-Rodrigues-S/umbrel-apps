@@ -60,6 +60,11 @@ async def test_tipos_de_conteudo(gabriel):
     assert "manifest+json" in (await gabriel.get("/manifest.webmanifest")).headers["content-type"]
 
 
+async def test_cache_revalida(gabriel):
+    for caminho in ("/static/app.js", "/static/estilo.css", "/sw.js", "/"):
+        assert "no-cache" in (await gabriel.get(caminho)).headers.get("cache-control", ""), caminho
+
+
 async def test_sw_no_escopo_raiz(gabriel):
     r = await gabriel.get("/sw.js")
     assert r.headers.get("service-worker-allowed", "/") == "/"
@@ -103,3 +108,7 @@ def test_fontes_locais_com_licenca():
     for nome in ("IBMPlexSans-var", "IBMPlexMono-400", "IBMPlexMono-500"):
         assert (d / f"{nome}.woff2").read_bytes()[:4] == b"wOF2"
     assert "SIL Open Font License" in (d / "OFL.txt").read_text(encoding="utf-8")
+
+
+def test_index_com_um_unico_main():
+    assert ler("static/index.html").count("<main") == 1

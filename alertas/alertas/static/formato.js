@@ -68,3 +68,11 @@ export function base64urlParaBytes(texto) {
   for (let i = 0; i < bin.length; i++) saida[i] = bin.charCodeAt(i);
   return saida;
 }
+
+// Cabeçalho e estado vazio conforme o resultado do carregamento.
+// "Tudo em dia" / "Nenhum alerta" só valem depois de um carregamento que deu certo.
+export function cabecalho({ tentou, falhou, alertas }) {
+  if (falhou) return { subtitulo: "Não foi possível carregar", mostrarVazia: false };
+  if (!tentou) return { subtitulo: "", mostrarVazia: false };
+  return { subtitulo: subtitulo(alertas), mostrarVazia: alertas.length === 0 };
+}

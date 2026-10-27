@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   quando, subtitulo, contar, numeroDoResumo, ehResumo, periodoResumo, temExplicacao, diaRelativo,
-  base64urlParaBytes,
+  base64urlParaBytes, cabecalho,
 } from "../../alertas/static/formato.js";
 
 const AGORA = new Date(2026, 9, 27, 14, 30, 0); // 27/10/2026 14:30 (hora local)
@@ -76,4 +76,24 @@ test("frase explicativa só para tentativa negada", () => {
 test("base64url para bytes", () => {
   assert.deepEqual([...base64urlParaBytes("AQID")], [1, 2, 3]);
   assert.deepEqual([...base64urlParaBytes("-_8")], [251, 255]);
+});
+
+test("cabecalho: falha no primeiro carregamento nunca diz que está tudo em dia", () => {
+  const c = cabecalho({ tentou: true, falhou: true, alertas: [] });
+  assert.deepEqual(c, { subtitulo: "Não foi possível carregar", mostrarVazia: false });
+});
+
+test("cabecalho: falha ao recarregar com dados antigos", () => {
+  const c = cabecalho({ tentou: true, falhou: true, alertas: [al("normal", true)] });
+  assert.deepEqual(c, { subtitulo: "Não foi possível carregar", mostrarVazia: false });
+});
+
+test("cabecalho: antes do primeiro carregamento fica vazio", () => {
+  assert.deepEqual(cabecalho({ tentou: false, falhou: false, alertas: [] }), { subtitulo: "", mostrarVazia: false });
+});
+
+test("cabecalho: sucesso sem alertas e só com lidos", () => {
+  assert.deepEqual(cabecalho({ tentou: true, falhou: false, alertas: [] }), { subtitulo: "Tudo em dia", mostrarVazia: true });
+  assert.deepEqual(cabecalho({ tentou: true, falhou: false, alertas: [al("grave", true)] }), { subtitulo: "Tudo em dia", mostrarVazia: false });
+  assert.deepEqual(cabecalho({ tentou: true, falhou: false, alertas: [al("grave")] }), { subtitulo: "1 não lido · 1 grave", mostrarVazia: false });
 });

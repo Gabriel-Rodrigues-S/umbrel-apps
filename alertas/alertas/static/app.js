@@ -1,14 +1,15 @@
 // Interface do app de alertas. Todo dado vindo da API entra na página por textContent:
 // nada de HTML montado a partir de texto (titulo/detalhes podem ter texto de terceiros).
 import {
-  ROTULOS, base64urlParaBytes, contar, ehResumo, numeroDoResumo, periodoResumo, quando, subtitulo, temExplicacao,
+  ROTULOS, base64urlParaBytes, cabecalho, contar, ehResumo, numeroDoResumo, periodoResumo, quando, subtitulo, temExplicacao,
 } from "./formato.js";
 
 const CHAVE_DISPENSADO = "alertas.notificacoes.dispensado";
 const ATUALIZAR_A_CADA_MS = 60000;
 
+const PC = window.matchMedia("(min-width: 900px)");
 const $ = (id) => document.getElementById(id);
-const estado = { alertas: [], carregado: false, falhou: false, notificacoes: false };
+const estado = { alertas: [], tentou: false, falhou: false, notificacoes: false };
 
 // ---------- API ----------
 
@@ -21,7 +22,7 @@ async function carregar() {
   } catch {
     estado.falhou = true;
   }
-  estado.carregado = true;
+  estado.tentou = true;
   desenhar();
 }
 
@@ -59,7 +60,8 @@ function desenhar() {
   app.dataset.vista = estado.notificacoes ? "notif" : pedido ? "detalhe" : "lista";
 
   const { naoLidos } = contar(estado.alertas);
-  $("subtitulo").textContent = estado.falhou && !estado.carregado ? "Não foi possível carregar" : subtitulo(estado.alertas);
+  const cab = cabecalho(estado);
+  $("subtitulo").textContent = cab.subtitulo;
   const contador = $("contador");
   contador.hidden = naoLidos === 0;
   contador.textContent = String(naoLidos);
@@ -75,7 +77,7 @@ function desenharLista(selecionado) {
     const el = modelo.content.firstElementChild.cloneNode(true);
     el.href = `#/alerta/${a.id}`;
     el.classList.toggle("lido", a.lido);
-    if (selecionado && selecionado.id === a.id) el.setAttribute("aria-current", "true");
+    if (selecionado && selecionado.id === a.id && (idDaRota() !== null || PC.matches)) el.setAttribute("aria-current", "true");
     const selo = el.querySelector(".selo");
     selo.classList.add(`selo-${a.gravidade}`);
     el.querySelector(".item-rotulo").textContent = ROTULOS[a.gravidade] ?? a.gravidade;
@@ -85,7 +87,7 @@ function desenharLista(selecionado) {
     return el;
   });
   $("itens").replaceChildren(...itens);
-  $("vazia").hidden = estado.alertas.length > 0 || !estado.carregado;
+  $("vazia").hidden = !cabecalho(estado).mostrarVazia;
 }
 
 function desenharDetalhe(a) {
@@ -111,6 +113,7 @@ function desenharDetalhe(a) {
   $("d-origem").textContent = a.origem;
   $("d-quando").textContent = quando(a.criado_em, agora);
   $("d-detalhes").textContent = a.detalhes;
+  $("d-detalhes").hidden = !a.detalhes;
   $("d-detalhes").parentElement.hidden = !a.detalhes && !temExplicacao(a);
   $("d-explica").hidden = !temExplicacao(a);
   $("d-lido").hidden = a.lido;
@@ -196,6 +199,7 @@ function iniciar() {
     dispensar();
     sairDasNotificacoes();
   });
+  PC.addEventListener("change", desenhar);
   window.addEventListener("hashchange", () => {
     estado.notificacoes = false;
     desenhar();
