@@ -4,7 +4,7 @@ name: Alertas
 tagline: Central de alertas do servidor com notificação push genérica
 icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-alertas/icon.svg
 category: developer
-version: '1.0.0'
+version: '1.0.1'
 port: 8445
 description: >-
   Central de alertas dos apps do servidor e de verificações externas. Cada remetente
@@ -24,6 +24,7 @@ path: ''
 defaultUsername: ''
 defaultPassword: ''
 releaseNotes: >-
+  1.0.1: sem conexão, o app mostra "Não foi possível carregar" com dicas (Tailscale, Retransmissão Privada do iCloud) em vez de tela preta.
   1.0.0: primeira versão, com API de alertas por remetente, retenção de 365 dias e push genérico.
 submitter: garod004
 submission: https://github.com/Gabriel-Rodrigues-S/umbrel-apps
