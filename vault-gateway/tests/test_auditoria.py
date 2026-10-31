@@ -40,7 +40,9 @@ def test_validacoes(tmp_path):
     with pytest.raises(ValueError):
         registrar(log, cliente="c", ferramenta="ler", alvo="a", resultado="negada", motivo=None)
     assert not log.exists()
-    assert MOTIVOS == {"token_ausente", "token_invalido", "fora_do_vault", "excluido", "ferramenta_desconhecida"}
+    assert MOTIVOS == {"token_ausente", "token_invalido", "fora_do_vault", "excluido", "ferramenta_desconhecida",
+                       "fora_da_inbox", "nome_invalido", "ja_existe", "limite", "sem_permissao",
+                       "conteudo_invalido", "argumentos_invalidos"}
 
 
 # --- rotação por tamanho ---
@@ -104,3 +106,21 @@ def test_rotacao_segura_sob_trava_com_threads(tmp_path):
         t.join()
     linhas = [json.loads(l) for p in tmp_path.iterdir() for l in p.read_text().splitlines()]
     assert len(linhas) == 200
+
+
+@pytest.mark.parametrize("motivo", ["fora_da_inbox", "nome_invalido", "ja_existe", "limite",
+                                    "sem_permissao", "conteudo_invalido", "argumentos_invalidos"])
+def test_motivos_da_inbox_aceitos(tmp_path, motivo):
+    assert motivo in MOTIVOS
+    r = registrar(tmp_path / "a.jsonl", cliente="claude", ferramenta="criar_nota", alvo="x.md",
+                  resultado="negada", motivo=motivo)
+    assert r["motivo"] == motivo
+
+
+def test_bytes_opcional(tmp_path):
+    log = tmp_path / "a.jsonl"
+    registrar(log, cliente="c", ferramenta="criar_nota", alvo="x.md", resultado="permitida",
+              motivo=None, bytes_=5)
+    registrar(log, cliente="c", ferramenta="ler", alvo="x.md", resultado="permitida", motivo=None)
+    a, b = [json.loads(x) for x in log.read_text().splitlines()]
+    assert a["bytes"] == 5 and "bytes" not in b

@@ -4,7 +4,9 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-MOTIVOS = {"token_ausente", "token_invalido", "fora_do_vault", "excluido", "ferramenta_desconhecida"}
+MOTIVOS = {"token_ausente", "token_invalido", "fora_do_vault", "excluido", "ferramenta_desconhecida",
+           "fora_da_inbox", "nome_invalido", "ja_existe", "limite", "sem_permissao",
+           "conteudo_invalido", "argumentos_invalidos"}
 RESULTADOS = {"permitida", "negada"}
 MAX_ALVO = 500
 MAX_BYTES = 50 * 1024 * 1024  # 50 MB por arquivo
@@ -22,7 +24,7 @@ def _rotacionar(log: Path, copias: int) -> None:
 
 def registrar(log: Path, *, cliente: str | None, ferramenta: str, alvo: str,
               resultado: str, motivo: str | None, max_bytes: int = MAX_BYTES,
-              copias: int = COPIAS) -> dict:
+              copias: int = COPIAS, bytes_: int | None = None) -> dict:
     """Acrescenta uma linha; se passar de max_bytes, rotaciona antes. Não é seguro entre
     processos: o servidor chama sob a própria trava (um worker só)."""
     if resultado not in RESULTADOS:
@@ -37,6 +39,8 @@ def registrar(log: Path, *, cliente: str | None, ferramenta: str, alvo: str,
         "resultado": resultado,
         "motivo": motivo,
     }
+    if bytes_ is not None:
+        registro["bytes"] = bytes_
     linha = (json.dumps(registro, ensure_ascii=False) + "\n").encode("utf-8", "replace")
     log = Path(log)
     log.parent.mkdir(parents=True, exist_ok=True)

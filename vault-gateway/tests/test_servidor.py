@@ -76,6 +76,8 @@ def avisos_falsos():
 
 @pytest.fixture
 def app(vault, dados, token, avisos_falsos):
+    (dados / "config").mkdir(exist_ok=True)
+    (dados / "config/inbox.json").write_text('{"clientes": ["claude"]}', encoding="utf-8")
     return criar_app(vault, dados, avisos=avisos_falsos)
 
 
@@ -128,9 +130,9 @@ async def test_sem_token_401_e_registrado(cliente, dados):
     assert reg["motivo"] == "token_ausente" and reg["resultado"] == "negada"
 
 
-async def test_token_valido_lista_4_ferramentas(cliente_autenticado):
+async def test_token_valido_lista_5_ferramentas(cliente_autenticado):
     nomes = {t["name"] for t in await listar_ferramentas(cliente_autenticado)}
-    assert nomes == {"listar", "ler", "buscar", "recentes"}
+    assert nomes == {"listar", "ler", "buscar", "recentes", "criar_nota"}
 
 
 async def test_token_valido_fora_do_vault_gera_aviso_grave(cliente_autenticado, avisos_falsos, app, dados):
@@ -178,7 +180,7 @@ async def test_token_invalido_registrado_sem_o_token(cliente, dados):
 async def test_barra_final_funciona_sem_redirecionar(cliente_autenticado):
     r = await cliente_autenticado.post("/mcp/", json=rpc("tools/list"))
     assert r.status_code == 200
-    assert len(r.json()["result"]["tools"]) == 4
+    assert len(r.json()["result"]["tools"]) == 5
 
 
 async def test_barra_final_sem_token_401(cliente):
@@ -410,3 +412,95 @@ async def test_initialize_e_notificacao(cliente_autenticado):
     assert r.json()["result"]["serverInfo"]["name"] == "vault-gateway"
     r = await cliente_autenticado.post("/mcp", json={"jsonrpc": "2.0", "method": "notifications/initialized"})
     assert r.status_code == 202
+
+
+# --- criar_nota (Inbox) ---
+
+SUCESSO = "Nota guardada: Inbox/T.md. Ela entra no vault quando o PC buscar."
+MENSAGENS = {
+    "fora_da_inbox": "Acesso negado: a nota só pode ser criada na Inbox, sem pastas no nome.",
+    "nome_invalido": "Nome inválido: use só o nome do arquivo .md (letras, números, espaço, - _ . ( )).",
+    "ja_existe": "Já existe uma nota com esse nome na Inbox.",
+    "conteudo_invalido": "Conteúdo inválido: texto não vazio, até 100 KB.",
+    "sem_permissao": "Acesso negado.",
+}
+
+
+async def test_criar_nota_grava_registra_e_avisa_normal(cliente_autenticado, avisos_falsos, app, dados):
+    res = await chamar(cliente_autenticado, "criar_nota", {"nome": "T.md", "conteudo": "corpo"})
+    assert not res.get("isError") and texto(res) == SUCESSO
+    assert (dados / "inbox" / "T.md").read_text() == "corpo"
+    await esperar(app)
+    linha = ultima_linha(dados / "logs/acesso.jsonl")
+    assert (linha["ferramenta"], linha["alvo"], linha["resultado"], linha["bytes"]) == (
+        "criar_nota", "T.md", "permitida", 5)
+    assert "corpo" not in json.dumps(linha)
+    a = avisos_falsos.enviados[-1]
+    assert a["gravidade"] == "normal" and a["titulo"] == "Nota nova na Inbox"
+    assert a["detalhes"] == "nome: T.md\ntamanho: 5 bytes\ncliente: claude"
+    assert "corpo" not in json.dumps(avisos_falsos.enviados)
+
+
+async def checar_negada(c, app, avisos, dados, args, motivo, mensagem):
+    res = await chamar(c, "criar_nota", args)
+    assert res["isError"] is True and texto(res) == mensagem
+    await esperar(app)
+    linha = ultima_linha(dados / "logs/acesso.jsonl")
+    assert linha["resultado"] == "negada" and linha["motivo"] == motivo
+    a = avisos.enviados[-1]
+    assert a["gravidade"] == "grave" and a["titulo"] == "Tentativa negada: cliente claude"
+    assert f"motivo: {motivo}" in a["detalhes"]
+
+
+@pytest.mark.parametrize("nome,motivo", [("../x.md", "fora_da_inbox"), ("x.txt", "nome_invalido")])
+async def test_criar_nota_negada_gera_grave(cliente_autenticado, avisos_falsos, app, dados, nome, motivo):
+    await checar_negada(cliente_autenticado, app, avisos_falsos, dados,
+                        {"nome": nome, "conteudo": "x"}, motivo, MENSAGENS[motivo])
+
+
+async def test_criar_nota_ja_existe_grave(cliente_autenticado, avisos_falsos, app, dados):
+    args = {"nome": "T.md", "conteudo": "x"}
+    await chamar(cliente_autenticado, "criar_nota", args)
+    await checar_negada(cliente_autenticado, app, avisos_falsos, dados, args,
+                        "ja_existe", MENSAGENS["ja_existe"])
+    assert (dados / "inbox" / "T.md").read_text() == "x"
+
+
+async def test_criar_nota_conteudo_invalido_grave(cliente_autenticado, avisos_falsos, app, dados):
+    await checar_negada(cliente_autenticado, app, avisos_falsos, dados,
+                        {"nome": "T.md", "conteudo": ""}, "conteudo_invalido",
+                        MENSAGENS["conteudo_invalido"])
+
+
+@pytest.mark.parametrize("args", [{"nome": "x.md"}, {"nome": 1, "conteudo": "x"}])
+async def test_criar_nota_argumentos_invalidos_grave(cliente_autenticado, avisos_falsos, app, dados, args):
+    await checar_negada(cliente_autenticado, app, avisos_falsos, dados, args,
+                        "argumentos_invalidos", "Argumentos inválidos.")
+
+
+async def test_ler_com_argumento_faltando_continua_sem_alerta(cliente_autenticado, avisos_falsos, app, dados):
+    res = await chamar(cliente_autenticado, "ler", {})
+    assert res["isError"] is True and texto(res) == "Argumentos inválidos."
+    await esperar(app)
+    assert avisos_falsos.enviados == []
+    assert linhas(dados / "logs/acesso.jsonl") == []
+
+
+async def test_sem_inbox_json_leitura_funciona(cliente_autenticado, avisos_falsos, app, dados):
+    (dados / "config/inbox.json").unlink()
+    await checar_negada(cliente_autenticado, app, avisos_falsos, dados,
+                        {"nome": "T.md", "conteudo": "x"}, "sem_permissao", MENSAGENS["sem_permissao"])
+    res = await chamar(cliente_autenticado, "listar", {})
+    assert not res.get("isError")
+
+
+async def test_limpeza_ao_iniciar(vault, dados, token, avisos_falsos):
+    (dados / "inbox").mkdir()
+    velho = dados / "inbox" / "velha.md"
+    velho.write_text("x")
+    t = time.time() - 31 * 86400
+    os.utime(velho, (t, t))
+    app = criar_app(vault, dados, avisos=avisos_falsos)
+    async with LifespanManager(app):
+        pass
+    assert not velho.exists()

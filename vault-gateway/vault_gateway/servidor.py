@@ -26,15 +26,31 @@ from starlette.routing import Route
 from . import auditoria, ferramentas
 from .avisos import Avisos, avisos_de_config
 from .caminhos import Negado
+from .inbox import Inbox, InboxNegada
 from .rajada import Rajada
 from .tokens import Tokens
 
-NOMES = ("listar", "ler", "buscar", "recentes")
+NOMES = ("listar", "ler", "buscar", "recentes", "criar_nota")
 INTERVALO_REENVIO_S = 60
 HORA_RESUMO = 8
 MAX_ALVO_LOG = 300
 MAX_ALVO_AVISO = 200
 MAX_FERRAMENTA = 64
+
+# mensagens ao cliente por motivo de negação da Inbox
+MENSAGENS_INBOX = {
+    "ja_existe": "Já existe uma nota com esse nome na Inbox.",
+    "limite": "Limite da Inbox atingido (5 notas por 24 horas).",
+    "nome_invalido": "Nome inválido: use só o nome do arquivo .md (letras, números, espaço, - _ . ( )).",
+    "fora_da_inbox": "Acesso negado: a nota só pode ser criada na Inbox, sem pastas no nome.",
+    "conteudo_invalido": "Conteúdo inválido: texto não vazio, até 100 KB.",
+    "sem_permissao": "Acesso negado.",
+    "argumentos_invalidos": "Argumentos inválidos.",
+}
+DESCRICAO_CRIAR_NOTA = (
+    "Grava uma nota NOVA na Inbox do vault; não edita nem sobrescreve. 'nome' é só o nome do "
+    "arquivo .md, sem pastas. A nota entra no vault quando o PC do Gabriel a buscar "
+    "(a cada 15 min, com o PC ligado).")
 
 # cliente autenticado da requisição atual (copiado para as tarefas do MCP)
 _cliente: contextvars.ContextVar[str | None] = contextvars.ContextVar("cliente", default=None)
@@ -203,9 +219,10 @@ class _Autenticacao:
 class _MCPGateway(FastMCP):
     """FastMCP que trata ferramenta desconhecida e nunca devolve detalhes internos."""
 
-    def __init__(self, *args, negar_desconhecida, **kwargs):
+    def __init__(self, *args, negar_desconhecida, negar_argumentos, **kwargs):
         super().__init__(*args, **kwargs)
         self._negar_desconhecida = negar_desconhecida
+        self._negar_argumentos = negar_argumentos
 
     async def call_tool(self, name: str, arguments: dict[str, Any]):
         cliente = _cliente.get()
@@ -222,7 +239,9 @@ class _MCPGateway(FastMCP):
             if isinstance(causa, _ErroNeutro):
                 return _erro(str(causa))
             if isinstance(causa, ValidationError):
-                return _erro("Argumentos inválidos.")
+                if name == "criar_nota":  # só a Inbox deixa rastro de argumento malformado
+                    await anyio.to_thread.run_sync(self._negar_argumentos, cliente)
+                return _erro(MENSAGENS_INBOX["argumentos_invalidos"])
             _erro_stderr(f"erro inesperado na ferramenta {name}: {type(causa or e).__name__}")
             return _erro("Erro interno.")
         except Exception as e:
@@ -230,10 +249,12 @@ class _MCPGateway(FastMCP):
             return _erro("Erro interno.")
 
 
-def criar_app(raiz: Path, dados: Path, *, tokens: Tokens | None = None, avisos=None) -> Starlette:
+def criar_app(raiz: Path, dados: Path, *, tokens: Tokens | None = None, avisos=None,
+              inbox: Inbox | None = None) -> Starlette:
     raiz, dados = Path(raiz), Path(dados)
     tokens = tokens or Tokens(dados / "config/tokens.json")
     avisos = avisos if avisos is not None else avisos_de_config(dados)
+    inbox = inbox or Inbox(dados / "inbox", raiz, dados / "config/inbox.json")
     log = dados / "logs/acesso.jsonl"
     rajada = Rajada()
     despachante = _Despachante(avisos)
@@ -258,7 +279,12 @@ def criar_app(raiz: Path, dados: Path, *, tokens: Tokens | None = None, avisos=N
                   motivo="ferramenta_desconhecida")
         avisar_negada(cliente, nome, "", "ferramenta_desconhecida")
 
-    def executar(ferramenta: str, alvo: str, fn: Callable[[], Any]) -> str:
+    def negar_argumentos(cliente: str) -> None:
+        registrar(cliente=cliente, ferramenta="criar_nota", alvo="", resultado="negada",
+                  motivo="argumentos_invalidos")
+        avisar_negada(cliente, "criar_nota", "", "argumentos_invalidos")
+
+    def executar(ferramenta: str, alvo: str, fn: Callable[[], Any], bytes_de=None) -> Any:
         """Roda numa thread: chama a ferramenta, registra e traduz erros para mensagens neutras."""
         cliente = _cliente.get()
         alvo = _limpo(alvo, MAX_ALVO_LOG)
@@ -269,6 +295,11 @@ def criar_app(raiz: Path, dados: Path, *, tokens: Tokens | None = None, avisos=N
                       resultado="negada", motivo=e.motivo)
             avisar_negada(cliente, ferramenta, alvo, e.motivo)
             raise _ErroNeutro("Acesso negado.") from None
+        except InboxNegada as e:
+            registrar(cliente=cliente, ferramenta=ferramenta, alvo=alvo,
+                      resultado="negada", motivo=e.motivo)
+            avisar_negada(cliente, ferramenta, alvo, e.motivo)
+            raise _ErroNeutro(MENSAGENS_INBOX.get(e.motivo, "Acesso negado.")) from None
         except ferramentas.NaoEncontrado:
             registrar(cliente=cliente, ferramenta=ferramenta, alvo=alvo,
                       resultado="permitida", motivo=None)
@@ -281,20 +312,25 @@ def criar_app(raiz: Path, dados: Path, *, tokens: Tokens | None = None, avisos=N
             _erro_stderr(f"erro inesperado em {ferramenta}: {type(e).__name__}")
             raise _ErroNeutro("Erro interno.") from None
         registrar(cliente=cliente, ferramenta=ferramenta, alvo=alvo,
-                  resultado="permitida", motivo=None)
+                  resultado="permitida", motivo=None,
+                  bytes_=bytes_de(resultado) if bytes_de else None)
+        if bytes_de:  # criar_nota: o chamador monta a resposta
+            return resultado
         return resultado if isinstance(resultado, str) else _json(resultado)
 
-    async def rodar(ferramenta: str, alvo: str, fn: Callable[[], Any]) -> str:
+    async def rodar(ferramenta: str, alvo: str, fn: Callable[[], Any], bytes_de=None) -> str:
         # E/S do vault fora do event loop (contextvars seguem para a thread)
-        return await anyio.to_thread.run_sync(executar, ferramenta, alvo, fn)
+        return await anyio.to_thread.run_sync(executar, ferramenta, alvo, fn, bytes_de)
 
     mcp = _MCPGateway(
         "vault-gateway",
-        instructions="Acesso somente de leitura a um vault Obsidian.",
+        instructions=("Leitura de um vault Obsidian. criar_nota só cria notas novas na Inbox; "
+                      "não edita nem apaga."),
         stateless_http=True,
         json_response=True,
         log_level="WARNING",
         negar_desconhecida=negar_desconhecida,
+        negar_argumentos=negar_argumentos,
         # proteção de DNS rebinding desligada: o acesso exige token e o Host vem do Funnel
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     )
@@ -321,9 +357,27 @@ def criar_app(raiz: Path, dados: Path, *, tokens: Tokens | None = None, avisos=N
         n = max(1, min(100, n))
         return await rodar("recentes", str(n), lambda: ferramentas.recentes(raiz, n))
 
+    @mcp.tool(name="criar_nota", description=DESCRICAO_CRIAR_NOTA, structured_output=False)
+    async def criar_nota(nome: str, conteudo: str) -> str:
+        cliente = _cliente.get()
+
+        # o conteúdo nunca sai daqui: log e aviso levam só nome e tamanho
+        armazenado, tamanho = await rodar(
+            "criar_nota", nome, lambda: inbox.criar(cliente, nome, conteudo), lambda r: r[1])
+        await anyio.to_thread.run_sync(
+            despachante.enviar, "normal", "Nota nova na Inbox",
+            f"nome: {_limpo(armazenado, MAX_ALVO_AVISO)}\ntamanho: {tamanho} bytes\ncliente: {cliente}")
+        return f"Nota guardada: Inbox/{armazenado}. Ela entra no vault quando o PC buscar."
+
     mcp.streamable_http_app()  # cria o session manager
     app_mcp = _Autenticacao(StreamableHTTPASGIApp(mcp.session_manager), tokens=tokens,
                             rajada=rajada, registrar=registrar, despachante=despachante)
+
+    async def limpar_inbox() -> None:
+        try:
+            await anyio.to_thread.run_sync(inbox.limpar)
+        except Exception as e:
+            _erro_stderr(f"falha ao limpar a Inbox: {type(e).__name__}")
 
     async def laco_reenvio():
         while True:
@@ -337,10 +391,12 @@ def criar_app(raiz: Path, dados: Path, *, tokens: Tokens | None = None, avisos=N
             while (falta := (alvo - datetime.now().astimezone()).total_seconds()) > 0:
                 await asyncio.sleep(min(falta, 300))
             await anyio.to_thread.run_sync(resumo_diario, rajada, despachante.enviar)
+            await limpar_inbox()
 
     @asynccontextmanager
     async def ciclo(_app):
         async with mcp.session_manager.run():
+            await limpar_inbox()
             tarefas = [asyncio.create_task(laco_reenvio()), asyncio.create_task(laco_resumo())]
             try:
                 yield
