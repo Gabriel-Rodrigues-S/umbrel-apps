@@ -7,7 +7,7 @@ services:
       APP_PORT: 8440
 
   server:
-    image: ghcr.io/gabriel-rodrigues-s/vault-gateway:1.0.0
+    image: ghcr.io/gabriel-rodrigues-s/vault-gateway:1.1.0
     restart: on-failure
     # O --no-proxy-headers impede que cabeçalhos X-Forwarded-* de outros contêineres alterem o IP do cliente.
     command: ["uvicorn", "vault_gateway.servidor:app", "--host", "0.0.0.0", "--port", "8440", "--workers", "1", "--no-proxy-headers"]
@@ -30,6 +30,8 @@ services:
       - ${APP_DATA_DIR}/data/logs:/data/logs
       - ${APP_DATA_DIR}/data/config:/data/config
       - ${APP_DATA_DIR}/data/fila-avisos:/data/fila-avisos
+      # pasta de espera da Inbox, fora do vault; o vault segue :ro
+      - ${APP_DATA_DIR}/data/inbox:/data/inbox
     environment:
       VAULT_DIR: /data/vault
       DADOS_DIR: /data
@@ -38,7 +40,7 @@ services:
       TZ: America/Manaus
 
   historico:
-    image: ghcr.io/gabriel-rodrigues-s/vault-gateway:1.0.0
+    image: ghcr.io/gabriel-rodrigues-s/vault-gateway:1.1.0
     restart: on-failure
     command: ["python", "-m", "vault_gateway.historico"]
     cap_drop:

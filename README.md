@@ -85,6 +85,7 @@ tag nova → push → clicar **Atualizar** uma vez no Umbrel. Os mundos ficam em
 Acesso somente leitura, por conector MCP, a uma cópia de notas mantida no servidor.
 
 - Quatro ferramentas de consulta: listar, ler, buscar e recentes
+- Quinta ferramenta, `criar_nota` (Inbox): só cria notas novas numa pasta de espera; o vault continua somente leitura
 - Token por cliente, revogável sem reiniciar; log de auditoria de cada acesso
 - Três serviços: gateway, histórico de alterações e sincronização (modo só download, configurada uma vez por terminal)
 - Publicado só no loopback do host em **127.0.0.1:8441** (exceção documentada; a 8440 do loopback é do umbreld). O Tailscale Funnel/Serve aponta para `http://127.0.0.1:8441`; o vault é montado `:ro` no gateway e no histórico
@@ -108,6 +109,13 @@ Acesso somente leitura, por conector MCP, a uma cópia de notas mantida no servi
 - Exposição: o conector personalizado do Claude só alcançou o gateway pelo Funnel na porta **443**
   (`tailscale funnel --bg --https=443 http://127.0.0.1:8441`); na 10000 ele não conectava. No formulário do
   conector, desligue o login (OAuth) e use o cabeçalho `Authorization: Bearer <token>`.
+- Inbox (`criar_nota`): crie `config/inbox.json` (permissão 600) com `{"clientes": ["claude"]}`. Sem o arquivo, ou se
+  estiver ilegível ou malformado, ninguém escreve; cliente fora da lista recebe `sem_permissao`.
+  Regras: só nota nova (nunca sobrescreve, nem com outra caixa ou acentuação decomposta), texto UTF-8 de até
+  100 KB, no máximo 5 notas a cada 24 h, e arquivos com mais de 30 dias são limpos da espera. Toda negada gera
+  alerta grave e todo sucesso, alerta normal; o conteúdo da nota nunca vai para log nem alerta.
+  As notas ficam na pasta de espera `data/inbox/` do app (fora do vault); quem leva para o vault é o coletor no PC,
+  descrito em [`inbox-pc/README.md`](inbox-pc/README.md).
 
 **Imagens Docker:** `ghcr.io/gabriel-rodrigues-s/vault-gateway` e `ghcr.io/gabriel-rodrigues-s/vault-sync`
 **Porta:** 8440

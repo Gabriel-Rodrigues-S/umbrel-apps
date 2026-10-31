@@ -1,15 +1,16 @@
 manifestVersion: 1
 id: garod004-apps-vault-gateway
 name: Gateway do Vault
-tagline: Acesso somente leitura a uma cópia de notas, com auditoria de cada consulta
+tagline: Acesso somente leitura a uma cópia de notas, com Inbox para notas novas e auditoria de cada acesso
 icon: https://raw.githubusercontent.com/Gabriel-Rodrigues-S/umbrel-apps/main/garod004-apps-vault-gateway/icon.svg
 category: developer
-version: '1.0.0'
+version: '1.1.0'
 port: 8440
 description: >-
   Mantém no servidor uma cópia somente leitura de um cofre de notas (sincronizada em modo só
   download) e a expõe a clientes autorizados por um conector MCP com quatro ferramentas de
-  consulta: listar, ler, buscar e recentes. Cada cliente usa o próprio token, que pode ser
+  consulta (listar, ler, buscar e recentes) e uma quinta, criar_nota, que só cria notas novas
+  numa pasta de espera fora do cofre, que continua somente leitura. Cada cliente usa o próprio token, que pode ser
   revogado a qualquer momento sem reiniciar o app. Todo acesso é registrado em um log de
   auditoria e tentativas negadas ou fora do padrão geram avisos para o app Alertas.
   Três serviços: gateway, histórico de alterações e sincronização. A configuração inicial
@@ -25,6 +26,9 @@ path: ''
 defaultUsername: ''
 defaultPassword: ''
 releaseNotes: >-
+  1.1.0: ferramenta criar_nota (Inbox), que cria apenas notas novas numa pasta de espera, com
+  limites de tamanho e de quantidade, sem sobrescrever nada; o cofre continua somente leitura.
+  Nova pasta data/inbox e permissão em config/inbox.json (sem ele ninguém escreve).
   1.0.0: primeira versão, com gateway somente leitura, tokens por cliente, log de auditoria,
   histórico de alterações e sincronização em modo só download.
 submitter: garod004
