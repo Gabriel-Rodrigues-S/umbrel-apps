@@ -47,6 +47,7 @@ def validar_nome(nome: str) -> str:
         or nome[0] in ". "
         or nome[:-3].endswith(" ")
         or ".." in nome
+        or len(nome.encode("utf-8", "surrogatepass")) > 255  # limite do sistema de arquivos
         or not all(c.isalnum() or c in _PERMITIDOS for c in nome)
     ):
         raise InboxNegada("nome_invalido")

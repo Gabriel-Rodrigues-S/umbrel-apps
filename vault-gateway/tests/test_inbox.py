@@ -46,6 +46,15 @@ def test_nome_invalido(inbox, nome):
     assert motivo(inbox.criar, "claude", nome, "x") == "nome_invalido"
 
 
+def test_nome_acima_de_255_bytes_e_invalido(inbox):
+    assert motivo(inbox.criar, "claude", "界" * 97 + ".md", "x") == "nome_invalido"
+
+
+def test_nome_ascii_de_97_letras_continua_valido(inbox):
+    nome = "a" * 97 + ".md"
+    assert inbox.criar("claude", nome, "x")[0] == nome
+
+
 def test_nome_no_limite_de_100_passa(inbox):
     nome = "a" * 97 + ".md"
     assert inbox.criar("claude", nome, "x")[0] == nome

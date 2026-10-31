@@ -269,9 +269,11 @@ def criar_app(raiz: Path, dados: Path, *, tokens: Tokens | None = None, avisos=N
             _erro_stderr("falha ao gravar o log de acesso")
 
     def avisar_negada(cliente: str, ferramenta: str, alvo: str, motivo: str) -> None:
+        # controles viram "?" para o nome não forjar linhas no alerta
+        alvo = "".join("?" if ord(c) < 32 or ord(c) == 127 else c for c in _limpo(alvo, MAX_ALVO_AVISO))
         despachante.enviar(
             "grave", f"Tentativa negada: cliente {cliente}",
-            f"ferramenta: {ferramenta}\nalvo: {_limpo(alvo, MAX_ALVO_AVISO)}\nmotivo: {motivo}")
+            f"ferramenta: {ferramenta}\nalvo: {alvo}\nmotivo: {motivo}")
 
     def negar_desconhecida(cliente: str, nome: Any) -> None:
         nome = _limpo(nome, MAX_FERRAMENTA)

@@ -240,6 +240,11 @@ def test_nome_valido(nome, ok):
     assert (nome_valido(nome) is not None) is ok
 
 
+def test_nome_acima_de_255_bytes_e_invalido():
+    assert nome_valido("界" * 97 + ".md") is None
+    assert nome_valido("a" * 97 + ".md") is not None
+
+
 def test_nome_valido_devolve_nfc():
     import unicodedata
     assert nome_valido(unicodedata.normalize("NFD", "ç.md")) == unicodedata.normalize("NFC", "ç.md")

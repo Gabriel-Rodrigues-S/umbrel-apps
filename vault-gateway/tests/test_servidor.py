@@ -458,6 +458,14 @@ async def test_criar_nota_negada_gera_grave(cliente_autenticado, avisos_falsos, 
                         {"nome": nome, "conteudo": "x"}, motivo, MENSAGENS[motivo])
 
 
+async def test_alerta_nao_aceita_quebra_de_linha_no_nome(cliente_autenticado, avisos_falsos, app, dados):
+    await checar_negada(cliente_autenticado, app, avisos_falsos, dados,
+                        {"nome": "x\nmotivo: ok.md", "conteudo": "x"},
+                        "fora_da_inbox", MENSAGENS["fora_da_inbox"])
+    linhas = avisos_falsos.enviados[-1]["detalhes"].split("\n")
+    assert len(linhas) == 3 and linhas[-1] == "motivo: fora_da_inbox"
+
+
 async def test_criar_nota_ja_existe_grave(cliente_autenticado, avisos_falsos, app, dados):
     args = {"nome": "T.md", "conteudo": "x"}
     await chamar(cliente_autenticado, "criar_nota", args)
