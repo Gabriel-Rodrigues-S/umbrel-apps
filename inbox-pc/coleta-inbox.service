@@ -1,0 +1,6 @@
+[Unit]
+Description=Coleta da Inbox do Chat para o vault do PC (ssh somente leitura)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/share/coleta-inbox/coleta.py
