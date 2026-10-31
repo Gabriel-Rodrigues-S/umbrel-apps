@@ -90,6 +90,25 @@ Acesso somente leitura, por conector MCP, a uma cópia de notas mantida no servi
 - Publicado só no loopback do host em **127.0.0.1:8441** (exceção documentada; a 8440 do loopback é do umbreld). O Tailscale Funnel/Serve aponta para `http://127.0.0.1:8441`; o vault é montado `:ro` no gateway e no histórico
 - Avisa o app Alertas sobre tentativas negadas e divergências
 
+**Configuração depois de instalar** (valores reais só no volume do app, nunca neste repositório):
+- Sincronização: além do `--mode pull-only --conflict-strategy merge` que o contêiner mostra, use
+  `ob sync-config --file-types image,audio,video,pdf,unsupported` se o cofre tiver arquivos que não são notas
+  (`.py`, `.json`, `.docx`...). Sem `unsupported` eles não chegam ao servidor.
+- `config/avisos.json` (permissão 600):
+  ```json
+  {
+    "url": "http://garod004-apps-alertas_server_1:8445/api/alertas",
+    "tokens": {"gateway": "<token do remetente gateway>", "historico": "<token do remetente historico>"},
+    "deteccao": {"modo": "B", "download": "^(?:Downloaded|Deleting) (?P<caminho>.+)$"}
+  }
+  ```
+  O `ob` não registra envios no log, então a detecção usa o **modo B**: toda mudança no cofre precisa ter um
+  `Downloaded` ou `Deleting` correspondente no `sync.log`. Sem o `Deleting`, apagar uma nota em outro aparelho
+  gera um alerta grave falso. Depois de editar, reinicie o serviço `historico`.
+- Exposição: o conector personalizado do Claude só alcançou o gateway pelo Funnel na porta **443**
+  (`tailscale funnel --bg --https=443 http://127.0.0.1:8441`); na 10000 ele não conectava. No formulário do
+  conector, desligue o login (OAuth) e use o cabeçalho `Authorization: Bearer <token>`.
+
 **Imagens Docker:** `ghcr.io/gabriel-rodrigues-s/vault-gateway` e `ghcr.io/gabriel-rodrigues-s/vault-sync`
 **Porta:** 8440
 

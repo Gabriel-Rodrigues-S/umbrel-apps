@@ -15,7 +15,8 @@ services:
     # loopback do host, para o Tailscale (rede do host) alcançar o gateway sem passar pelo login do
     # painel e sem expô-lo na rede local.
     # Porta do host 8441 (não 8440): o umbreld já escuta em 127.0.0.1:8440 (porta do manifesto).
-    # O Tailscale Funnel/Serve deve apontar para http://127.0.0.1:8441.
+    # O Tailscale Funnel/Serve deve apontar para http://127.0.0.1:8441 (Funnel na 443: o conector do
+    # Claude não alcançou outras portas).
     ports:
       - "127.0.0.1:8441:8440"
     # Endurecimento: sem NET_RAW (evita falsificação de ARP na rede Docker compartilhada).
