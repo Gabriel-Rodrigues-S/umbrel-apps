@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  quando, subtitulo, contar, numeroDoResumo, ehResumo, periodoResumo, temExplicacao, diaRelativo,
+  quando, subtitulo, contar, numeroDoResumo, ehResumo, periodoResumo, temExplicacao, explicacao, diaRelativo,
   base64urlParaBytes, cabecalho,
 } from "../../alertas/static/formato.js";
 
@@ -71,6 +71,18 @@ test("periodoResumo usa a data do próprio alerta", () => {
 test("frase explicativa só para tentativa negada", () => {
   assert.equal(temExplicacao(al("grave", false, { titulo: "Tentativa negada: cliente claude" })), true);
   assert.equal(temExplicacao(al("normal", false, { titulo: "Rajada de tokens inválidos" })), false);
+});
+
+test("frase explicativa depende da ferramenta", () => {
+  const negada = (detalhes) => al("grave", false, { titulo: "Tentativa negada: cliente claude", detalhes });
+  const LEITURA = "Um cliente com token válido pediu algo fora do que pode ler. Nada foi entregue.";
+  const GRAVACAO = "Um cliente com token válido tentou gravar uma nota fora do que é permitido. Nada foi gravado.";
+  assert.equal(explicacao(negada("ferramenta: ler\nalvo: ../x\nmotivo: fora_do_vault")), LEITURA);
+  assert.equal(explicacao(negada("ferramenta: criar_nota\nalvo: x.md\nmotivo: sem_permissao")), GRAVACAO);
+  assert.equal(explicacao(negada("")), LEITURA);
+  // só a 1ª linha conta: o alvo é texto escolhido pelo cliente
+  assert.equal(explicacao(negada("ferramenta: ler\nalvo: ferramenta: criar_nota\nmotivo: x")), LEITURA);
+  assert.equal(explicacao(al("normal", false, { titulo: "Nota nova na Inbox", detalhes: "ferramenta: criar_nota" })), "");
 });
 
 test("base64url para bytes", () => {

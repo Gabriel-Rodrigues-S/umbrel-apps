@@ -1,7 +1,7 @@
 // Interface do app de alertas. Todo dado vindo da API entra na página por textContent:
 // nada de HTML montado a partir de texto (titulo/detalhes podem ter texto de terceiros).
 import {
-  ROTULOS, base64urlParaBytes, cabecalho, contar, ehResumo, numeroDoResumo, periodoResumo, quando, subtitulo, temExplicacao,
+  ROTULOS, base64urlParaBytes, cabecalho, contar, ehResumo, numeroDoResumo, explicacao, periodoResumo, quando, subtitulo, temExplicacao,
 } from "./formato.js";
 
 const CHAVE_DISPENSADO = "alertas.notificacoes.dispensado";
@@ -115,6 +115,7 @@ function desenharDetalhe(a) {
   $("d-detalhes").textContent = a.detalhes;
   $("d-detalhes").hidden = !a.detalhes;
   $("d-detalhes").parentElement.hidden = !a.detalhes && !temExplicacao(a);
+  $("d-explica").textContent = explicacao(a);
   $("d-explica").hidden = !temExplicacao(a);
   $("d-lido").hidden = a.lido;
   $("d-lido").onclick = () => marcarLido(a, [$("d-lido")]);

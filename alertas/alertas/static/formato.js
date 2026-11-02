@@ -60,6 +60,17 @@ export function temExplicacao(a) {
   return a.titulo.startsWith("Tentativa negada");
 }
 
+// Texto da frase explicativa ("" quando não se aplica). Só a 1ª linha dos detalhes
+// ("ferramenta: <nome>") decide: as outras linhas trazem texto escolhido pelo cliente.
+export function explicacao(a) {
+  if (!temExplicacao(a)) return "";
+  const ferramenta = (a.detalhes ?? "").split("\n")[0];
+  if (ferramenta === "ferramenta: criar_nota") {
+    return "Um cliente com token válido tentou gravar uma nota fora do que é permitido. Nada foi gravado.";
+  }
+  return "Um cliente com token válido pediu algo fora do que pode ler. Nada foi entregue.";
+}
+
 // base64url -> Uint8Array (applicationServerKey do push)
 export function base64urlParaBytes(texto) {
   const b64 = texto.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (texto.length % 4)) % 4);

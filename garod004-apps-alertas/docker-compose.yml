@@ -7,7 +7,7 @@ services:
       APP_PORT: 8445
 
   server:
-    image: ghcr.io/gabriel-rodrigues-s/alertas:1.0.1
+    image: ghcr.io/gabriel-rodrigues-s/alertas:1.0.2
     restart: on-failure
     # O --no-proxy-headers impede que cabeçalhos X-Forwarded-* de outros contêineres alterem o IP do cliente.
     command: ["uvicorn", "alertas.main:app", "--host", "0.0.0.0", "--port", "8445", "--workers", "1", "--no-proxy-headers"]
